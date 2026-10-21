@@ -3,15 +3,17 @@ import sys
 import json
 import shutil
 import stat
+import time
 import winreg
 import urllib.request
 import webbrowser
 import threading
+import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -44,6 +46,13 @@ class GDManager:
         default = r"C:\Program Files (x86)\Steam"
         if os.path.exists(default):
             return default
+        return None
+
+    def get_steam_exe(self):
+        if self.steam_path:
+            exe = os.path.join(self.steam_path, "steam.exe")
+            if os.path.exists(exe):
+                return exe
         return None
 
     def detect_gd_path(self):
@@ -91,6 +100,13 @@ class GDManager:
             return d_path
         return None
 
+    def get_steam_console_log(self):
+        if self.steam_path:
+            log_p = os.path.join(self.steam_path, "logs", "console_log.txt")
+            if os.path.exists(log_p):
+                return log_p
+        return None
+
     def get_gd_version_info(self):
         if not self.gd_path:
             return "Not Installed", "#ef4444"
@@ -135,7 +151,7 @@ class GDManager:
         d_path = self.get_depot_path()
         if d_path and os.path.exists(d_path):
             exe = os.path.join(d_path, "GeometryDash.exe")
-            return os.path.exists(exe)
+            return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081
         return False
 
     def is_geode_installed(self):
@@ -147,7 +163,7 @@ class GDManager:
 
 
 class ModernButton(tk.Canvas):
-    def __init__(self, parent, text, command, bg="#8b5cf6", hover_bg="#7c3aed", fg="#ffffff", height=42, width=None, font=("Segoe UI", 10, "bold")):
+    def __init__(self, parent, text, command, bg="#8b5cf6", hover_bg="#7c3aed", fg="#ffffff", height=44, width=None, font=("Segoe UI", 11, "bold")):
         super().__init__(parent, height=height, bg=parent["bg"], highlightthickness=0)
         self.command = command
         self.normal_bg = bg
@@ -169,7 +185,7 @@ class ModernButton(tk.Canvas):
         self.delete("all")
         w = self.winfo_width() if not self.btn_width else self.btn_width
         h = self.height
-        r = 10  # smooth corner radius
+        r = 10
 
         if not self.enabled:
             fill = "#374151"
@@ -239,17 +255,15 @@ class GeodeSyncApp(tk.Tk):
 
         self.mgr = GDManager()
         self.latest_release_url = None
-        self.last_depot_state = False
+        self.is_downloading_depot = False
 
         self.create_ui()
         self.refresh_status()
 
-        # Start background update check & depot watcher
         threading.Thread(target=self.check_remote_updates, daemon=True).start()
-        self.after(3000, self.background_depot_watcher)
 
     def create_ui(self):
-        # Update Banner (hidden by default)
+        # Update Banner
         self.update_banner = tk.Frame(self, bg="#064e3b", padx=16, pady=8)
         self.update_label = tk.Label(self.update_banner, text="✨ New update available!", font=("Segoe UI", 9, "bold"), fg="#34d399", bg="#064e3b")
         self.update_label.pack(side="left")
@@ -267,7 +281,7 @@ class GeodeSyncApp(tk.Tk):
         title = tk.Label(title_box, text=f"⚡ GeodeSync  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg="#ffffff", bg="#161e2e")
         title.pack(anchor="w")
 
-        subtitle = tk.Label(title_box, text="Smart Geometry Dash Version Switcher & Geode Mod Protector", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
+        subtitle = tk.Label(title_box, text="Fully Automated 1-Click GD Version Switcher & Geode Protector", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
         subtitle.pack(anchor="w")
 
         badge_box = tk.Frame(header, bg="#161e2e")
@@ -281,7 +295,7 @@ class GeodeSyncApp(tk.Tk):
         body.pack(fill="both", expand=True)
 
         # ==========================================
-        # 1. SMART GUIDED NEXT STEP (FOOLPROOF HERO)
+        # 1. SMART GUIDED NEXT STEP (HERO CARD)
         # ==========================================
         self.guide_card = tk.Frame(body, bg="#1e293b", padx=18, pady=14, highlightbackground="#3b82f6", highlightthickness=2)
         self.guide_card.pack(fill="x", pady=(0, 14))
@@ -305,7 +319,7 @@ class GeodeSyncApp(tk.Tk):
             command=None,
             bg="#3b82f6",
             hover_bg="#2563eb",
-            height=44,
+            height=46,
             font=("Segoe UI", 11, "bold")
         )
         self.primary_btn.pack(fill="x")
@@ -322,21 +336,18 @@ class GeodeSyncApp(tk.Tk):
         grid_chips = tk.Frame(status_card, bg="#1a2333")
         grid_chips.pack(fill="x")
 
-        # GD Version
         f_v = tk.Frame(grid_chips, bg="#1a2333")
         f_v.pack(side="left", expand=True, fill="x", padx=4)
         tk.Label(f_v, text="Geometry Dash", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
         self.ver_badge = tk.Label(f_v, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#10b981", bg="#132a24", padx=6, pady=2)
         self.ver_badge.pack(anchor="w", pady=(2, 0))
 
-        # Geode Status
         f_g = tk.Frame(grid_chips, bg="#1a2333")
         f_g.pack(side="left", expand=True, fill="x", padx=4)
         tk.Label(f_g, text="Geode Mod Loader", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
         self.geode_badge = tk.Label(f_g, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#a855f7", bg="#2a163d", padx=6, pady=2)
         self.geode_badge.pack(anchor="w", pady=(2, 0))
 
-        # Steam Lock
         f_l = tk.Frame(grid_chips, bg="#1a2333")
         f_l.pack(side="left", expand=True, fill="x", padx=4)
         tk.Label(f_l, text="Auto-Update Lock", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
@@ -430,12 +441,11 @@ class GeodeSyncApp(tk.Tk):
 
         self.path_lbl.config(text=f"GD Path: {self.mgr.gd_path or 'Not Found'}")
 
-        # Update Smart Guided Box
-        self.update_smart_guide(has_geode, is_locked)
+        if not self.is_downloading_depot:
+            self.update_smart_guide(has_geode, is_locked)
 
     def update_smart_guide(self, has_geode: bool, is_locked: bool):
         is_22081 = self.mgr.is_current_gd_22081()
-        has_depot = self.mgr.has_downloaded_depot()
 
         # STATE 1: Geode is NOT installed at all!
         if not has_geode:
@@ -456,36 +466,19 @@ class GeodeSyncApp(tk.Tk):
 
         # STATE 2: Geode IS installed, but GD is 2.209 (Needs Downgrade)
         if not is_22081:
-            if not has_depot:
-                # Substate 2A: Depot not downloaded yet
-                self.guide_card.config(highlightbackground="#3b82f6")
-                self.guide_badge.config(text="STEP 1 OF 2 • DOWNLOAD REQUIRED", fg="#38bdf8", bg="#082f49")
-                self.guide_title.config(text="📥 Step 1: Download the 2.2081 Game Files via Steam")
-                self.guide_desc.config(
-                    text="Your GD is updated to 2.209, which breaks Geode. Click below to open the Steam Console and automatically copy the download command. "
-                         "Just paste (Ctrl + V) into Steam and hit Enter!"
-                )
-                self.primary_btn.set_config(
-                    text="📥 Step 1: Open Steam Console & Download 2.2081",
-                    bg="#2563eb",
-                    hover_bg="#1d4ed8",
-                    command=self.open_console_and_copy
-                )
-            else:
-                # Substate 2B: Depot files are downloaded and ready to apply!
-                self.guide_card.config(highlightbackground="#8b5cf6")
-                self.guide_badge.config(text="STEP 2 OF 2 • READY TO APPLY", fg="#c084fc", bg="#3b0764")
-                self.guide_title.config(text="✨ Step 2: 2.2081 Files Ready! Click to Fix Game")
-                self.guide_desc.config(
-                    text="Steam has finished downloading the clean 2.2081 files! Click below to back up your current files, apply 2.2081, "
-                         "and lock Steam so your game never auto-updates again."
-                )
-                self.primary_btn.set_config(
-                    text="⚡ Step 2: Apply 2.2081 Downgrade (1-Click Fix)",
-                    bg="#8b5cf6",
-                    hover_bg="#7c3aed",
-                    command=self.downgrade_clicked
-                )
+            self.guide_card.config(highlightbackground="#8b5cf6")
+            self.guide_badge.config(text="AUTOMATED 1-CLICK FIX READY", fg="#c084fc", bg="#3b0764")
+            self.guide_title.config(text="⚡ Automatic Downgrade & Protect")
+            self.guide_desc.config(
+                text="Geometry Dash is updated to 2.209, which breaks Geode mods. "
+                     "Click below to automatically download the official 2.2081 files from Steam, install them, and protect your game against auto-updates!"
+            )
+            self.primary_btn.set_config(
+                text="⚡ 1-Click Fix: Auto-Download & Downgrade to 2.2081",
+                bg="#8b5cf6",
+                hover_bg="#7c3aed",
+                command=self.start_automated_downgrade
+            )
             return
 
         # STATE 3: Everything is already fixed and ready!
@@ -502,106 +495,92 @@ class GeodeSyncApp(tk.Tk):
             command=self.launch_gd
         )
 
-    def background_depot_watcher(self):
-        """Watches in the background for when Steam finishes downloading the depot."""
-        current_depot_state = self.mgr.has_downloaded_depot()
-        if current_depot_state != self.last_depot_state:
-            self.last_depot_state = current_depot_state
-            if current_depot_state and not self.mgr.is_current_gd_22081():
-                self.log("Detected downloaded 2.2081 depot files in Steam!", "SUCCESS")
-            self.refresh_status()
+    def start_automated_downgrade(self):
+        """1-Click fully automated download & installation of 2.2081 depot"""
+        if self.is_downloading_depot:
+            return
 
-        # Check again every 3 seconds
-        self.after(3000, self.background_depot_watcher)
+        threading.Thread(target=self._run_auto_downgrade, daemon=True).start()
 
-    def check_remote_updates(self):
-        try:
-            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                if "target_manifest" in data and data["target_manifest"]:
-                    self.mgr.target_manifest = data["target_manifest"]
-                if "geode_target_gd" in data and data["geode_target_gd"]:
-                    self.mgr.target_gd_version = data["geode_target_gd"]
-                if "announcement" in data and data["announcement"]:
-                    self.log(f"Announcement: {data['announcement']}", "INFO")
-        except Exception:
-            pass
-
-        try:
-            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                rel = json.loads(resp.read().decode())
-                tag = rel.get("tag_name", "").lstrip("v")
-                if tag and tag != APP_VERSION:
-                    self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                    self.show_update_banner(tag)
-        except Exception:
-            pass
-
-    def show_update_banner(self, new_ver: str):
-        self.update_label.config(text=f"🎉 Update available: v{new_ver}! (Current: v{APP_VERSION})")
-        self.update_banner.pack(fill="x", before=self.children[list(self.children.keys())[0]])
-
-    def open_update_link(self):
-        url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases"
-        webbrowser.open(url)
-
-    def show_help_dialog(self):
-        msg = (
-            "HOW GEODESYNC WORKS (FAQ):\n\n"
-            "1. Why do I need to downgrade?\n"
-            "Whenever Geometry Dash updates (like to 2.209), Geode mods crash until developers update them. Downgrading to 2.2081 lets you keep playing with all your mods immediately.\n\n"
-            "2. How does the 2-step fix work?\n"
-            "• Step 1: Steam downloads the official clean 2.2081 files from Valve servers.\n"
-            "• Step 2: GeodeSync moves the files into your game and locks Steam so it won't auto-update.\n\n"
-            "3. What happens when Geode officially updates?\n"
-            "Just click '🔄 Restore to Latest GD' at the bottom! GeodeSync will unlock your files and let Steam update your game to the newest version in seconds.\n\n"
-            "4. Will I lose my icons or save data?\n"
-            "No! Your save files are stored separately in AppData and are never touched."
-        )
-        messagebox.showinfo("GeodeSync Guide & FAQ", msg)
-
-    def open_console_and_copy(self):
-        cmd = f"download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}"
-        self.clipboard_clear()
-        self.clipboard_append(cmd)
-        self.update()
-
-        try:
-            os.startfile("steam://open/console")
-            self.log("Opened Steam Console and copied download command!", "SUCCESS")
-            messagebox.showinfo(
-                "Step 1: Download in Steam Console",
-                "The Steam Console tab has been opened and the command has been copied to your clipboard!\n\n"
-                f"Command: {cmd}\n\n"
-                "INSTRUCTIONS:\n"
-                "1. Click in the text box at the very bottom of the Steam Console.\n"
-                "2. Press Ctrl + V and hit Enter.\n"
-                "3. Wait ~1 to 2 minutes. Once it says 'Depot download complete', GeodeSync will automatically detect it and show Step 2!"
-            )
-        except Exception as e:
-            self.log(f"Failed to open Steam Console: {e}", "ERROR")
-            messagebox.showerror("Error", f"Failed to open Steam Console:\n{e}")
-
-    def downgrade_clicked(self):
-        threading.Thread(target=self._run_downgrade, daemon=True).start()
-
-    def _run_downgrade(self):
+    def _run_auto_downgrade(self):
         if not self.mgr.gd_path:
-            self.log("Cannot downgrade: Geometry Dash folder not detected.", "ERROR")
+            self.log("Geometry Dash folder not detected.", "ERROR")
             messagebox.showerror("Error", "Geometry Dash installation directory not found.")
             return
 
-        depot = self.mgr.get_depot_path()
-        if not self.mgr.has_downloaded_depot():
-            self.log("Depot files not found yet.", "WARN")
-            self.open_console_and_copy()
+        steam_exe = self.mgr.get_steam_exe()
+        if not steam_exe:
+            self.log("Steam executable not found.", "ERROR")
+            messagebox.showerror("Error", "Steam.exe not found.")
             return
 
-        self.log(f"Applying downgrade to {self.mgr.target_gd_version}...", "INFO")
+        # Check if already downloaded
+        if self.mgr.has_downloaded_depot():
+            self.log("2.2081 files already present on disk. Applying directly...", "INFO")
+            self._apply_downgrade_files()
+            return
 
-        # 1. Backup current files
+        # Otherwise, trigger Steam automatic download!
+        self.is_downloading_depot = True
+        self.guide_title.config(text="⏳ Steam is downloading 2.2081 in background...")
+        self.guide_desc.config(text="Steam has received the download command. Please wait ~1 to 2 minutes while Steam fetches the clean 2.2081 files...")
+        self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg="#334155", hover_bg="#334155")
+        self.primary_btn.set_enabled(False)
+
+        cmd = [steam_exe, "-console", f"+download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}"]
+        self.log(f"Sending automated download command to Steam...", "INFO")
+
+        try:
+            subprocess.Popen(f'"{steam_exe}" -console +download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}', shell=True)
+            self.log("Triggered Steam depot download! Monitoring progress...", "SUCCESS")
+        except Exception as e:
+            self.log(f"Failed to execute Steam command: {e}", "ERROR")
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
+            self.refresh_status()
+            return
+
+        # Poll console_log or depot file
+        start_time = time.time()
+        download_finished = False
+
+        while time.time() - start_time < 300: # 5 min timeout
+            time.sleep(2)
+            # Check console log for "Depot download complete"
+            log_path = self.mgr.get_steam_console_log()
+            if log_path and os.path.exists(log_path):
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()[-15:]
+                        for line in lines:
+                            if "Depot download complete" in line and "depot_322171" in line:
+                                download_finished = True
+                                break
+                except Exception:
+                    pass
+
+            if download_finished or self.mgr.has_downloaded_depot():
+                download_finished = True
+                break
+
+        self.is_downloading_depot = False
+        self.primary_btn.set_enabled(True)
+
+        if download_finished or self.mgr.has_downloaded_depot():
+            self.log("Steam depot download completed!", "SUCCESS")
+            self._apply_downgrade_files()
+        else:
+            self.log("Steam download timed out or took longer than 5 mins.", "WARN")
+            messagebox.showwarning("Download in Progress", "Steam is still downloading the files. Check your Steam client, and click this button again when finished!")
+            self.refresh_status()
+
+    def _apply_downgrade_files(self):
+        depot = self.mgr.get_depot_path()
+        if not depot or not os.path.exists(depot):
+            self.log("Depot path not found.", "ERROR")
+            return
+
+        self.log(f"Backing up current files...", "INFO")
         backup_dir = os.path.join(self.mgr.gd_path, "backup_latest")
         try:
             if not os.path.exists(backup_dir):
@@ -610,11 +589,11 @@ class GeodeSyncApp(tk.Tk):
                     src_f = os.path.join(self.mgr.gd_path, f)
                     if os.path.exists(src_f):
                         shutil.copy2(src_f, os.path.join(backup_dir, f))
-                self.log("Backed up 2.209 files to 'backup_latest'.", "INFO")
+                self.log("Created backup of current files.", "INFO")
         except Exception as e:
-            self.log(f"Warning during backup: {e}", "WARN")
+            self.log(f"Backup warning: {e}", "WARN")
 
-        # 2. Copy depot files
+        self.log(f"Installing 2.2081 game files...", "INFO")
         try:
             for item in os.listdir(depot):
                 s = os.path.join(depot, item)
@@ -623,22 +602,22 @@ class GeodeSyncApp(tk.Tk):
                     shutil.copytree(s, d, dirs_exist_ok=True)
                 else:
                     shutil.copy2(s, d)
-            self.log(f"Successfully replaced game files with {self.mgr.target_gd_version}.", "SUCCESS")
+            self.log("Game files successfully replaced with 2.2081!", "SUCCESS")
         except Exception as e:
             self.log(f"Failed to copy files: {e}", "ERROR")
             messagebox.showerror("Error", f"Failed to overwrite game files:\n{e}")
+            self.refresh_status()
             return
 
-        # 3. Lock manifest
         try:
             self.mgr.set_manifest_locked(True)
-            self.log("Locked appmanifest_322170.acf to Read-Only.", "SUCCESS")
+            self.log("Locked Steam appmanifest_322170.acf to Read-Only.", "SUCCESS")
         except Exception as e:
             self.log(f"Warning locking manifest: {e}", "WARN")
 
         self.refresh_status()
-        self.log(f"Downgrade complete! GD is now {self.mgr.target_gd_version}.", "SUCCESS")
-        messagebox.showinfo("Downgrade Complete!", f"Geometry Dash has been successfully downgraded to {self.mgr.target_gd_version}!\n\nSteam auto-updates are now locked. You can click 'Launch GD' to play with your mods.")
+        self.log("1-Click Fix Complete! Geometry Dash is now 2.2081.", "SUCCESS")
+        messagebox.showinfo("1-Click Fix Complete!", "Geometry Dash has been successfully downgraded to 2.2081!\n\nSteam auto-updates are now locked. Geode and your mods are ready to play.")
 
     def upgrade_clicked(self):
         res = messagebox.askyesno(
@@ -716,6 +695,51 @@ class GeodeSyncApp(tk.Tk):
                 exe = os.path.join(self.mgr.gd_path, "GeometryDash.exe")
                 if os.path.exists(exe):
                     os.startfile(exe)
+
+    def check_remote_updates(self):
+        try:
+            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode())
+                if "target_manifest" in data and data["target_manifest"]:
+                    self.mgr.target_manifest = data["target_manifest"]
+                if "geode_target_gd" in data and data["geode_target_gd"]:
+                    self.mgr.target_gd_version = data["geode_target_gd"]
+        except Exception:
+            pass
+
+        try:
+            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                rel = json.loads(resp.read().decode())
+                tag = rel.get("tag_name", "").lstrip("v")
+                if tag and tag != APP_VERSION:
+                    self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                    self.show_update_banner(tag)
+        except Exception:
+            pass
+
+    def show_update_banner(self, new_ver: str):
+        self.update_label.config(text=f"🎉 Update available: v{new_ver}! (Current: v{APP_VERSION})")
+        self.update_banner.pack(fill="x", before=self.children[list(self.children.keys())[0]])
+
+    def open_update_link(self):
+        url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases"
+        webbrowser.open(url)
+
+    def show_help_dialog(self):
+        msg = (
+            "HOW GEODESYNC WORKS (FAQ):\n\n"
+            "1. Why do I need to downgrade?\n"
+            "Whenever Geometry Dash updates (like to 2.209), Geode mods crash until developers update them. Downgrading to 2.2081 lets you keep playing with all your mods immediately.\n\n"
+            "2. How does the 1-Click Fix work?\n"
+            "You literally just click the button! GeodeSync signals Steam to download the clean 2.2081 files in the background, swaps the files into your game, and locks Steam so it won't auto-update.\n\n"
+            "3. What happens when Geode officially updates?\n"
+            "Just click '🔄 Restore to Latest GD'! GeodeSync will unlock your files and let Steam update your game to the newest version in seconds.\n\n"
+            "4. Will I lose my icons or save data?\n"
+            "No! Your save files are stored separately in AppData and are never touched."
+        )
+        messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
 
 if __name__ == "__main__":
