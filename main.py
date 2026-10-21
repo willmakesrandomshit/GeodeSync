@@ -9,11 +9,12 @@ import urllib.request
 import webbrowser
 import threading
 import subprocess
+import winsound
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -107,6 +108,14 @@ class GDManager:
                 return log_p
         return None
 
+    def get_save_data_dir(self):
+        appdata = os.environ.get("LOCALAPPDATA")
+        if appdata:
+            gd_save = os.path.join(appdata, "GeometryDash")
+            if os.path.exists(gd_save):
+                return gd_save
+        return None
+
     def get_gd_version_info(self):
         if not self.gd_path:
             return "Not Installed", "#ef4444"
@@ -131,6 +140,21 @@ class GDManager:
         if os.path.exists(exe):
             return os.path.getsize(exe) == SIZE_22081
         return False
+
+    def is_gd_process_running(self):
+        try:
+            output = subprocess.check_output('tasklist /FI "IMAGENAME eq GeometryDash.exe" /NH', shell=True).decode()
+            return "GeometryDash.exe" in output
+        except Exception:
+            return False
+
+    def close_gd_process(self):
+        try:
+            subprocess.run('taskkill /F /IM GeometryDash.exe', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)
+            return True
+        except Exception:
+            return False
 
     def is_manifest_locked(self):
         if not self.manifest_path or not os.path.exists(self.manifest_path):
@@ -163,7 +187,7 @@ class GDManager:
 
 
 class ModernButton(tk.Canvas):
-    def __init__(self, parent, text, command, bg="#8b5cf6", hover_bg="#7c3aed", fg="#ffffff", height=44, width=None, font=("Segoe UI", 11, "bold")):
+    def __init__(self, parent, text, command, bg="#8b5cf6", hover_bg="#7c3aed", fg="#ffffff", height=46, width=None, font=("Segoe UI", 11, "bold")):
         super().__init__(parent, height=height, bg=parent["bg"], highlightthickness=0)
         self.command = command
         self.normal_bg = bg
@@ -234,9 +258,9 @@ class ModernButton(tk.Canvas):
 class GeodeSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"GeodeSync v{APP_VERSION} • 1-Click Geometry Dash Mod & Version Helper")
-        self.geometry("750x710")
-        self.minsize(700, 660)
+        self.title(f"GeodeSync v{APP_VERSION} • 1-Click Geometry Dash Mod & Version Suite")
+        self.geometry("760x730")
+        self.minsize(700, 680)
         self.configure(bg="#0f141c")
 
         try:
@@ -263,12 +287,12 @@ class GeodeSyncApp(tk.Tk):
         threading.Thread(target=self.check_remote_updates, daemon=True).start()
 
     def create_ui(self):
-        # Update Banner
+        # Update Banner (Animated when update is found)
         self.update_banner = tk.Frame(self, bg="#064e3b", padx=16, pady=8)
         self.update_label = tk.Label(self.update_banner, text="✨ New update available!", font=("Segoe UI", 9, "bold"), fg="#34d399", bg="#064e3b")
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Download Update", command=self.open_update_link, font=("Segoe UI", 8, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=8, pady=2, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update Now (1-Click)", command=self.open_update_link, font=("Segoe UI", 8, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=10, pady=2, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -281,7 +305,7 @@ class GeodeSyncApp(tk.Tk):
         title = tk.Label(title_box, text=f"⚡ GeodeSync  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg="#ffffff", bg="#161e2e")
         title.pack(anchor="w")
 
-        subtitle = tk.Label(title_box, text="Fully Automated 1-Click GD Version Switcher & Geode Protector", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
+        subtitle = tk.Label(title_box, text="1-Click Geometry Dash Mod Protector, Save Manager & Auto-Downgrader", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
         subtitle.pack(anchor="w")
 
         badge_box = tk.Frame(header, bg="#161e2e")
@@ -291,14 +315,14 @@ class GeodeSyncApp(tk.Tk):
         help_btn.pack(side="right", padx=6)
 
         # Main Body
-        body = tk.Frame(self, bg="#0f141c", padx=24, pady=14)
+        body = tk.Frame(self, bg="#0f141c", padx=24, pady=12)
         body.pack(fill="both", expand=True)
 
         # ==========================================
         # 1. SMART GUIDED NEXT STEP (HERO CARD)
         # ==========================================
         self.guide_card = tk.Frame(body, bg="#1e293b", padx=18, pady=14, highlightbackground="#3b82f6", highlightthickness=2)
-        self.guide_card.pack(fill="x", pady=(0, 14))
+        self.guide_card.pack(fill="x", pady=(0, 12))
 
         guide_top = tk.Frame(self.guide_card, bg="#1e293b")
         guide_top.pack(fill="x")
@@ -309,7 +333,7 @@ class GeodeSyncApp(tk.Tk):
         self.guide_title = tk.Label(self.guide_card, text="Checking your installation...", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#1e293b")
         self.guide_title.pack(anchor="w", pady=(8, 2))
 
-        self.guide_desc = tk.Label(self.guide_card, text="Please wait while GeodeSync detects your game setup.", font=("Segoe UI", 9), fg="#94a3b8", bg="#1e293b", wraplength=660, justify="left")
+        self.guide_desc = tk.Label(self.guide_card, text="Please wait while GeodeSync detects your game setup.", font=("Segoe UI", 9), fg="#94a3b8", bg="#1e293b", wraplength=670, justify="left")
         self.guide_desc.pack(anchor="w", pady=(0, 10))
 
         # The One Primary Action Button
@@ -327,11 +351,11 @@ class GeodeSyncApp(tk.Tk):
         # ==========================================
         # 2. STATUS SUMMARY CHIPS
         # ==========================================
-        status_card = tk.Frame(body, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
-        status_card.pack(fill="x", pady=(0, 12))
+        status_card = tk.Frame(body, bg="#1a2333", padx=16, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        status_card.pack(fill="x", pady=(0, 10))
 
         st_title = tk.Label(status_card, text="SYSTEM DETECTION STATUS", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333")
-        st_title.pack(anchor="w", pady=(0, 8))
+        st_title.pack(anchor="w", pady=(0, 6))
 
         grid_chips = tk.Frame(status_card, bg="#1a2333")
         grid_chips.pack(fill="x")
@@ -355,27 +379,31 @@ class GeodeSyncApp(tk.Tk):
         self.lock_badge.pack(anchor="w", pady=(2, 0))
 
         # ==========================================
-        # 3. QUICK ACTIONS & TOOLS
+        # 3. UTILITY TOOLBAR (Saves & Folders)
         # ==========================================
-        quick_bar = tk.Frame(body, bg="#0f141c")
-        quick_bar.pack(fill="x", pady=(0, 10))
+        tools_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
+        tools_card.pack(fill="x", pady=(0, 10))
 
-        self.launch_btn = tk.Button(quick_bar, text="▶ Launch GD", command=self.launch_gd, font=("Segoe UI", 9, "bold"), bg="#1d4ed8", fg="#ffffff", activebackground="#2563eb", activeforeground="#ffffff", relief="flat", padx=12, pady=5, cursor="hand2")
-        self.launch_btn.pack(side="left", padx=(0, 6))
+        # Left tools: Saves
+        tk.Label(tools_card, text="Quick Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
-        self.restore_btn = tk.Button(quick_bar, text="🔄 Restore to Latest GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2")
-        self.restore_btn.pack(side="left", padx=4)
+        backup_save_btn = tk.Button(tools_card, text="💾 Backup GD Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        backup_save_btn.pack(side="left", padx=3)
 
-        self.toggle_lock_btn = tk.Button(quick_bar, text="🔒 Toggle Lock", command=self.toggle_lock, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2")
-        self.toggle_lock_btn.pack(side="left", padx=4)
+        restore_save_btn = tk.Button(tools_card, text="♻️ Restore Saves", command=self.restore_saves, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        restore_save_btn.pack(side="left", padx=3)
 
-        self.open_gd_btn = tk.Button(quick_bar, text="📂 Open Game Folder", command=self.open_gd_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2")
-        self.open_gd_btn.pack(side="right")
+        open_mods_btn = tk.Button(tools_card, text="📂 Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        open_mods_btn.pack(side="left", padx=3)
+
+        # Right tools: Restore GD & Launch
+        self.restore_gd_btn = tk.Button(tools_card, text="🔄 Restore Latest GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        self.restore_gd_btn.pack(side="right")
 
         # ==========================================
         # 4. ACTIVITY LOG
         # ==========================================
-        log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
         log_card.pack(fill="both", expand=True)
 
         log_head = tk.Frame(log_card, bg="#161e2e")
@@ -423,6 +451,12 @@ class GeodeSyncApp(tk.Tk):
         self.log_text.delete("1.0", "end")
         self.log_text.config(state="disabled")
 
+    def play_ding(self):
+        try:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+
     def refresh_status(self):
         ver_text, ver_color = self.mgr.get_gd_version_info()
         self.ver_badge.config(text=ver_text, fg=ver_color)
@@ -447,14 +481,14 @@ class GeodeSyncApp(tk.Tk):
     def update_smart_guide(self, has_geode: bool, is_locked: bool):
         is_22081 = self.mgr.is_current_gd_22081()
 
-        # STATE 1: Geode is NOT installed at all!
+        # STATE 1: Geode is NOT installed!
         if not has_geode:
             self.guide_card.config(highlightbackground="#ef4444")
             self.guide_badge.config(text="ACTION REQUIRED • GEODE NOT DETECTED", fg="#f87171", bg="#450a0a")
             self.guide_title.config(text="⚠️ You need to install Geode first!")
             self.guide_desc.config(
-                text="GeodeSync is designed to fix broken mods for Geode players. You do NOT have Geode installed on your Geometry Dash yet. "
-                     "Click the button below to download the official Geode installer from geode-sdk.org."
+                text="GeodeSync fixes broken mods for Geode players. You do NOT have Geode installed on your Geometry Dash yet. "
+                     "Click below to download the official Geode installer from geode-sdk.org."
             )
             self.primary_btn.set_config(
                 text="📥 1. Download & Install Geode (geode-sdk.org)",
@@ -470,8 +504,8 @@ class GeodeSyncApp(tk.Tk):
             self.guide_badge.config(text="AUTOMATED 1-CLICK FIX READY", fg="#c084fc", bg="#3b0764")
             self.guide_title.config(text="⚡ Automatic Downgrade & Protect")
             self.guide_desc.config(
-                text="Geometry Dash is updated to 2.209, which breaks Geode mods. "
-                     "Click below to automatically download the official 2.2081 files from Steam, install them, and protect your game against auto-updates!"
+                text="Geometry Dash is on 2.209 which breaks your mods. "
+                     "Click below to automatically download 2.2081 from Steam in the background, install it, and protect your game from auto-updates!"
             )
             self.primary_btn.set_config(
                 text="⚡ 1-Click Fix: Auto-Download & Downgrade to 2.2081",
@@ -481,7 +515,7 @@ class GeodeSyncApp(tk.Tk):
             )
             return
 
-        # STATE 3: Everything is already fixed and ready!
+        # STATE 3: Everything is fixed and ready!
         self.guide_card.config(highlightbackground="#10b981")
         self.guide_badge.config(text="ALL GOOD • READY TO PLAY", fg="#34d399", bg="#064e3b")
         self.guide_title.config(text="🎉 Everything is set! Your mods are ready.")
@@ -496,9 +530,19 @@ class GeodeSyncApp(tk.Tk):
         )
 
     def start_automated_downgrade(self):
-        """1-Click fully automated download & installation of 2.2081 depot"""
         if self.is_downloading_depot:
             return
+
+        if self.mgr.is_gd_process_running():
+            res = messagebox.askyesno(
+                "Geometry Dash Running",
+                "Geometry Dash is currently open. It must be closed before game files can be replaced.\n\n"
+                "Would you like GeodeSync to close GD automatically now?"
+            )
+            if res:
+                self.mgr.close_gd_process()
+            else:
+                return
 
         threading.Thread(target=self._run_auto_downgrade, daemon=True).start()
 
@@ -514,24 +558,24 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror("Error", "Steam.exe not found.")
             return
 
-        # Check if already downloaded
+        # Check if depot files are already ready on disk
         if self.mgr.has_downloaded_depot():
             self.log("2.2081 files already present on disk. Applying directly...", "INFO")
             self._apply_downgrade_files()
             return
 
-        # Otherwise, trigger Steam automatic download!
+        # Otherwise trigger automated Steam background download
         self.is_downloading_depot = True
         self.guide_title.config(text="⏳ Steam is downloading 2.2081 in background...")
         self.guide_desc.config(text="Steam has received the download command. Please wait ~1 to 2 minutes while Steam fetches the clean 2.2081 files...")
         self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg="#334155", hover_bg="#334155")
         self.primary_btn.set_enabled(False)
 
-        cmd = [steam_exe, "-console", f"+download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}"]
+        cmd = f'"{steam_exe}" -console +download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}'
         self.log(f"Sending automated download command to Steam...", "INFO")
 
         try:
-            subprocess.Popen(f'"{steam_exe}" -console +download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}', shell=True)
+            subprocess.Popen(cmd, shell=True)
             self.log("Triggered Steam depot download! Monitoring progress...", "SUCCESS")
         except Exception as e:
             self.log(f"Failed to execute Steam command: {e}", "ERROR")
@@ -540,13 +584,11 @@ class GeodeSyncApp(tk.Tk):
             self.refresh_status()
             return
 
-        # Poll console_log or depot file
         start_time = time.time()
         download_finished = False
 
         while time.time() - start_time < 300: # 5 min timeout
             time.sleep(2)
-            # Check console log for "Depot download complete"
             log_path = self.mgr.get_steam_console_log()
             if log_path and os.path.exists(log_path):
                 try:
@@ -580,7 +622,7 @@ class GeodeSyncApp(tk.Tk):
             self.log("Depot path not found.", "ERROR")
             return
 
-        self.log(f"Backing up current files...", "INFO")
+        self.log("Backing up current files...", "INFO")
         backup_dir = os.path.join(self.mgr.gd_path, "backup_latest")
         try:
             if not os.path.exists(backup_dir):
@@ -593,7 +635,7 @@ class GeodeSyncApp(tk.Tk):
         except Exception as e:
             self.log(f"Backup warning: {e}", "WARN")
 
-        self.log(f"Installing 2.2081 game files...", "INFO")
+        self.log("Installing 2.2081 game files...", "INFO")
         try:
             for item in os.listdir(depot):
                 s = os.path.join(depot, item)
@@ -616,6 +658,7 @@ class GeodeSyncApp(tk.Tk):
             self.log(f"Warning locking manifest: {e}", "WARN")
 
         self.refresh_status()
+        self.play_ding()
         self.log("1-Click Fix Complete! Geometry Dash is now 2.2081.", "SUCCESS")
         messagebox.showinfo("1-Click Fix Complete!", "Geometry Dash has been successfully downgraded to 2.2081!\n\nSteam auto-updates are now locked. Geode and your mods are ready to play.")
 
@@ -643,6 +686,7 @@ class GeodeSyncApp(tk.Tk):
         try:
             os.startfile(f"steam://validate/{APP_ID}")
             self.log("Triggered steam://validate/322170. Steam is now updating GD.", "SUCCESS")
+            self.play_ding()
             messagebox.showinfo(
                 "Restoring Latest Version",
                 "Steam is now verifying and updating your Geometry Dash files to the latest version!\n\n"
@@ -653,6 +697,69 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror("Error", f"Failed to trigger Steam verification:\n{e}")
 
         self.refresh_status()
+
+    def backup_saves(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir:
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            return
+
+        backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
+        os.makedirs(backup_root, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        target_folder = os.path.join(backup_root, f"Backup_{timestamp}")
+        os.makedirs(target_folder, exist_ok=True)
+
+        copied = 0
+        for f in os.listdir(save_dir):
+            if f.endswith(".dat") or f.endswith(".dat.bak"):
+                shutil.copy2(os.path.join(save_dir, f), os.path.join(target_folder, f))
+                copied += 1
+
+        self.play_ding()
+        self.log(f"Backed up {copied} save files to: {target_folder}", "SUCCESS")
+        messagebox.showinfo("Save Backup Complete", f"Successfully backed up {copied} save files!\n\nLocation: {target_folder}")
+
+    def restore_saves(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir:
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
+            return
+
+        backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
+        if not os.path.exists(backup_root) or not os.listdir(backup_root):
+            messagebox.showinfo("No Backups Found", "No GeodeSync save backups were found yet. Click 'Backup GD Saves' first!")
+            return
+
+        # Pick most recent backup folder
+        folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, d))]
+        folders.sort(key=os.path.getmtime, reverse=True)
+        latest_backup = folders[0]
+
+        res = messagebox.askyesno(
+            "Restore Save Files",
+            f"Restore save files from latest backup?\n\nFolder: {os.path.basename(latest_backup)}\n\nThis will overwrite current save files with this backup."
+        )
+        if not res:
+            return
+
+        restored = 0
+        for f in os.listdir(latest_backup):
+            if f.endswith(".dat") or f.endswith(".dat.bak"):
+                shutil.copy2(os.path.join(latest_backup, f), os.path.join(save_dir, f))
+                restored += 1
+
+        self.play_ding()
+        self.log(f"Restored {restored} save files from: {os.path.basename(latest_backup)}", "SUCCESS")
+        messagebox.showinfo("Saves Restored", f"Restored {restored} save files successfully!")
+
+    def open_mods_folder(self):
+        if self.mgr.gd_path:
+            mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+            os.makedirs(mods_dir, exist_ok=True)
+            os.startfile(mods_dir)
+        else:
+            messagebox.showerror("Error", "Geometry Dash folder not found.")
 
     def toggle_lock(self):
         if not self.mgr.manifest_path:
@@ -668,12 +775,6 @@ class GeodeSyncApp(tk.Tk):
         except Exception as e:
             self.log(f"Failed to toggle lock: {e}", "ERROR")
             messagebox.showerror("Error", f"Could not toggle manifest lock: {e}")
-
-    def open_gd_folder(self):
-        if self.mgr.gd_path and os.path.exists(self.mgr.gd_path):
-            os.startfile(self.mgr.gd_path)
-        else:
-            messagebox.showerror("Error", "Geometry Dash folder not found.")
 
     def browse_gd_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Folder")
@@ -737,7 +838,7 @@ class GeodeSyncApp(tk.Tk):
             "3. What happens when Geode officially updates?\n"
             "Just click '🔄 Restore to Latest GD'! GeodeSync will unlock your files and let Steam update your game to the newest version in seconds.\n\n"
             "4. Will I lose my icons or save data?\n"
-            "No! Your save files are stored separately in AppData and are never touched."
+            "No! Your save files are stored separately in AppData and are never touched. You can also click '💾 Backup GD Saves' right in the app for extra safety!"
         )
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
