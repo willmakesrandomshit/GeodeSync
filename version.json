@@ -1,7 +1,7 @@
 {
-  "app_version": "1.0.0",
+  "app_version": "1.1.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync is ready! Downgrade to 2.2081 for Geode or restore to 2.209 when ready."
+  "announcement": "GeodeSync v1.1 is live with Smart Guided Action!"
 }
