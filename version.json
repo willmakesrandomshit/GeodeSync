@@ -1,7 +1,7 @@
 {
-  "app_version": "1.2.1",
+  "app_version": "1.1",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v1.2.1 is live! Added 1-Click Save File Backup & fully automated Steam installation."
+  "announcement": "GeodeSync v1.1 is live! 1-Click automated Steam installation & Save File Protection."
 }

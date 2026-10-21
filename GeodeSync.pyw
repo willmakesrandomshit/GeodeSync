@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
