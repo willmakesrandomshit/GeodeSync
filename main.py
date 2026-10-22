@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -143,14 +143,28 @@ class GDManager:
 
     def is_gd_process_running(self):
         try:
-            output = subprocess.check_output('tasklist /FI "IMAGENAME eq GeometryDash.exe" /NH', shell=True).decode()
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            output = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"],
+                startupinfo=si,
+                creationflags=0x08000000
+            ).decode(errors="ignore")
             return "GeometryDash.exe" in output
         except Exception:
             return False
 
     def close_gd_process(self):
         try:
-            subprocess.run('taskkill /F /IM GeometryDash.exe', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "GeometryDash.exe"],
+                startupinfo=si,
+                creationflags=0x08000000,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             time.sleep(1)
             return True
         except Exception:
@@ -571,11 +585,11 @@ class GeodeSyncApp(tk.Tk):
         self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg="#334155", hover_bg="#334155")
         self.primary_btn.set_enabled(False)
 
-        cmd = f'"{steam_exe}" -console +download_depot {APP_ID} {DEPOT_ID} {self.mgr.target_manifest}'
+        args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
         self.log(f"Sending automated download command to Steam...", "INFO")
 
         try:
-            subprocess.Popen(cmd, shell=True)
+            subprocess.Popen(args)
             self.log("Triggered Steam depot download! Monitoring progress...", "SUCCESS")
         except Exception as e:
             self.log(f"Failed to execute Steam command: {e}", "ERROR")

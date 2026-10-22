@@ -1,7 +1,7 @@
 {
-  "app_version": "1.1",
+  "app_version": "1.2",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v1.1 is live! 1-Click automated Steam installation & Save File Protection."
+  "announcement": "GeodeSync v1.2 is live! Clean PE metadata, manifest integration & Windows Defender false-positive fix."
 }
