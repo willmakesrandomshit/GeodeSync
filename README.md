@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="GeodeSync Banner" width="100%">
+</p>
+
 # ⚡ GeodeSync
 
 > Modern, zero-friction Geometry Dash version switcher, Geode protector, and downgrade/restore manager.
