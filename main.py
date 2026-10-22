@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import json
 import shutil
 import stat
@@ -14,7 +15,18 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.2"
+# Enable DPI Awareness for high-res monitors (1080p, 1440p, 4K)
+try:
+    import ctypes
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+APP_VERSION = "1.1.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -26,6 +38,24 @@ DEFAULT_TARGET_GD = "2.2081"
 
 SIZE_22081 = 10700288
 SIZE_2209 = 13178880
+
+
+def safe_copy_item(src, dst, max_retries=5):
+    for i in range(max_retries):
+        try:
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+            return True
+        except PermissionError:
+            time.sleep(0.4)
+        except Exception as e:
+            if i == max_retries - 1:
+                raise e
+            time.sleep(0.4)
+    return False
+
 
 class GDManager:
     def __init__(self):
@@ -56,27 +86,40 @@ class GDManager:
                 return exe
         return None
 
+    def is_steam_running(self):
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            output = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
+                startupinfo=si,
+                creationflags=0x08000000
+            ).decode(errors="ignore")
+            return "steam.exe" in output.lower()
+        except Exception:
+            return True
+
     def detect_gd_path(self):
         if not self.steam_path:
             return None
 
+        # Check default Steam install folder
         default_gd = os.path.join(self.steam_path, "steamapps", "common", "Geometry Dash")
         if os.path.exists(default_gd):
             return default_gd
 
+        # Check secondary Steam libraries (D:\, E:\, etc.)
         vdf_path = os.path.join(self.steam_path, "steamapps", "libraryfolders.vdf")
         if os.path.exists(vdf_path):
             try:
                 with open(vdf_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                for line in content.splitlines():
-                    if '"path"' in line:
-                        parts = line.split('"')
-                        if len(parts) >= 4:
-                            lib_dir = parts[3].replace(r"\\", "\\")
-                            candidate = os.path.join(lib_dir, "steamapps", "common", "Geometry Dash")
-                            if os.path.exists(candidate):
-                                return candidate
+                matches = re.findall(r'"path"\s+"([^"]+)"', content, re.IGNORECASE)
+                for lib_dir in matches:
+                    clean_dir = lib_dir.replace(r"\\", "\\")
+                    candidate = os.path.join(clean_dir, "steamapps", "common", "Geometry Dash")
+                    if os.path.exists(candidate):
+                        return candidate
             except Exception:
                 pass
 
@@ -84,7 +127,7 @@ class GDManager:
 
     def get_manifest_path(self):
         if self.gd_path:
-            parent = os.path.dirname(os.path.dirname(self.gd_path)) # steamapps
+            parent = os.path.dirname(os.path.dirname(self.gd_path))  # steamapps
             m_path = os.path.join(parent, f"appmanifest_{APP_ID}.acf")
             if os.path.exists(m_path):
                 return m_path
@@ -124,7 +167,11 @@ class GDManager:
         if not os.path.exists(exe_path):
             return "Missing Executable", "#ef4444"
 
-        size = os.path.getsize(exe_path)
+        try:
+            size = os.path.getsize(exe_path)
+        except Exception:
+            return "Inaccessible", "#ef4444"
+
         if size == SIZE_22081:
             return f"{self.target_gd_version} (Geode Compatible)", "#10b981"
         elif size == SIZE_2209:
@@ -138,7 +185,10 @@ class GDManager:
             return False
         exe = os.path.join(self.gd_path, "GeometryDash.exe")
         if os.path.exists(exe):
-            return os.path.getsize(exe) == SIZE_22081
+            try:
+                return os.path.getsize(exe) == SIZE_22081
+            except Exception:
+                return False
         return False
 
     def is_gd_process_running(self):
@@ -150,7 +200,7 @@ class GDManager:
                 startupinfo=si,
                 creationflags=0x08000000
             ).decode(errors="ignore")
-            return "GeometryDash.exe" in output
+            return "geometrydash.exe" in output.lower()
         except Exception:
             return False
 
@@ -173,23 +223,38 @@ class GDManager:
     def is_manifest_locked(self):
         if not self.manifest_path or not os.path.exists(self.manifest_path):
             return False
-        mode = os.stat(self.manifest_path).st_mode
-        return not bool(mode & stat.S_IWRITE)
+        try:
+            mode = os.stat(self.manifest_path).st_mode
+            return not bool(mode & stat.S_IWRITE)
+        except Exception:
+            return False
 
     def set_manifest_locked(self, lock: bool):
         if not self.manifest_path or not os.path.exists(self.manifest_path):
             raise FileNotFoundError("appmanifest_322170.acf not found!")
 
-        if lock:
-            os.chmod(self.manifest_path, stat.S_IREAD)
-        else:
-            os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
+        for attempt in range(5):
+            try:
+                if lock:
+                    os.chmod(self.manifest_path, stat.S_IREAD)
+                else:
+                    os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
+                return
+            except PermissionError:
+                time.sleep(0.3)
+            except Exception as e:
+                if attempt == 4:
+                    raise e
+                time.sleep(0.3)
 
     def has_downloaded_depot(self):
         d_path = self.get_depot_path()
         if d_path and os.path.exists(d_path):
             exe = os.path.join(d_path, "GeometryDash.exe")
-            return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081
+            try:
+                return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081
+            except Exception:
+                return False
         return False
 
     def is_geode_installed(self):
@@ -197,7 +262,8 @@ class GDManager:
             return False
         dll = os.path.join(self.gd_path, "Geode.dll")
         proxy = os.path.join(self.gd_path, "XInput1_4.dll")
-        return os.path.exists(dll) and os.path.exists(proxy)
+        geode_dir = os.path.join(self.gd_path, "geode")
+        return (os.path.exists(dll) and os.path.exists(proxy)) or os.path.exists(geode_dir)
 
 
 class ModernButton(tk.Canvas):
@@ -301,7 +367,7 @@ class GeodeSyncApp(tk.Tk):
         threading.Thread(target=self.check_remote_updates, daemon=True).start()
 
     def create_ui(self):
-        # Update Banner (Animated when update is found)
+        # Update Banner
         self.update_banner = tk.Frame(self, bg="#064e3b", padx=16, pady=8)
         self.update_label = tk.Label(self.update_banner, text="✨ New update available!", font=("Segoe UI", 9, "bold"), fg="#34d399", bg="#064e3b")
         self.update_label.pack(side="left")
@@ -332,9 +398,7 @@ class GeodeSyncApp(tk.Tk):
         body = tk.Frame(self, bg="#0f141c", padx=24, pady=12)
         body.pack(fill="both", expand=True)
 
-        # ==========================================
-        # 1. SMART GUIDED NEXT STEP (HERO CARD)
-        # ==========================================
+        # 1. SMART GUIDED NEXT STEP
         self.guide_card = tk.Frame(body, bg="#1e293b", padx=18, pady=14, highlightbackground="#3b82f6", highlightthickness=2)
         self.guide_card.pack(fill="x", pady=(0, 12))
 
@@ -350,7 +414,6 @@ class GeodeSyncApp(tk.Tk):
         self.guide_desc = tk.Label(self.guide_card, text="Please wait while GeodeSync detects your game setup.", font=("Segoe UI", 9), fg="#94a3b8", bg="#1e293b", wraplength=670, justify="left")
         self.guide_desc.pack(anchor="w", pady=(0, 10))
 
-        # The One Primary Action Button
         self.primary_btn = ModernButton(
             self.guide_card,
             text="Checking...",
@@ -362,9 +425,7 @@ class GeodeSyncApp(tk.Tk):
         )
         self.primary_btn.pack(fill="x")
 
-        # ==========================================
         # 2. STATUS SUMMARY CHIPS
-        # ==========================================
         status_card = tk.Frame(body, bg="#1a2333", padx=16, pady=10, highlightbackground="#2d3748", highlightthickness=1)
         status_card.pack(fill="x", pady=(0, 10))
 
@@ -392,13 +453,10 @@ class GeodeSyncApp(tk.Tk):
         self.lock_badge = tk.Label(f_l, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#f59e0b", bg="#332412", padx=6, pady=2)
         self.lock_badge.pack(anchor="w", pady=(2, 0))
 
-        # ==========================================
-        # 3. UTILITY TOOLBAR (Saves & Folders)
-        # ==========================================
+        # 3. UTILITY TOOLBAR
         tools_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
         tools_card.pack(fill="x", pady=(0, 10))
 
-        # Left tools: Saves
         tk.Label(tools_card, text="Quick Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
         backup_save_btn = tk.Button(tools_card, text="💾 Backup GD Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
@@ -410,13 +468,10 @@ class GeodeSyncApp(tk.Tk):
         open_mods_btn = tk.Button(tools_card, text="📂 Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
         open_mods_btn.pack(side="left", padx=3)
 
-        # Right tools: Restore GD & Launch
         self.restore_gd_btn = tk.Button(tools_card, text="🔄 Restore Latest GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
 
-        # ==========================================
         # 4. ACTIVITY LOG
-        # ==========================================
         log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
         log_card.pack(fill="both", expand=True)
 
@@ -495,7 +550,6 @@ class GeodeSyncApp(tk.Tk):
     def update_smart_guide(self, has_geode: bool, is_locked: bool):
         is_22081 = self.mgr.is_current_gd_22081()
 
-        # STATE 1: Geode is NOT installed!
         if not has_geode:
             self.guide_card.config(highlightbackground="#ef4444")
             self.guide_badge.config(text="ACTION REQUIRED • GEODE NOT DETECTED", fg="#f87171", bg="#450a0a")
@@ -512,7 +566,6 @@ class GeodeSyncApp(tk.Tk):
             )
             return
 
-        # STATE 2: Geode IS installed, but GD is 2.209 (Needs Downgrade)
         if not is_22081:
             self.guide_card.config(highlightbackground="#8b5cf6")
             self.guide_badge.config(text="AUTOMATED 1-CLICK FIX READY", fg="#c084fc", bg="#3b0764")
@@ -529,7 +582,6 @@ class GeodeSyncApp(tk.Tk):
             )
             return
 
-        # STATE 3: Everything is fixed and ready!
         self.guide_card.config(highlightbackground="#10b981")
         self.guide_badge.config(text="ALL GOOD • READY TO PLAY", fg="#34d399", bg="#064e3b")
         self.guide_title.config(text="🎉 Everything is set! Your mods are ready.")
@@ -572,13 +624,30 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror("Error", "Steam.exe not found.")
             return
 
+        # Ensure Steam is running
+        if not self.mgr.is_steam_running():
+            self.log("Steam is not currently running. Launching Steam...", "INFO")
+            try:
+                subprocess.Popen([steam_exe])
+                time.sleep(5)
+            except Exception as e:
+                self.log(f"Warning launching Steam: {e}", "WARN")
+
         # Check if depot files are already ready on disk
         if self.mgr.has_downloaded_depot():
             self.log("2.2081 files already present on disk. Applying directly...", "INFO")
             self._apply_downgrade_files()
             return
 
-        # Otherwise trigger automated Steam background download
+        # Record console log size to avoid false triggers from prior logs
+        log_path = self.mgr.get_steam_console_log()
+        initial_log_offset = 0
+        if log_path and os.path.exists(log_path):
+            try:
+                initial_log_offset = os.path.getsize(log_path)
+            except Exception:
+                initial_log_offset = 0
+
         self.is_downloading_depot = True
         self.guide_title.config(text="⏳ Steam is downloading 2.2081 in background...")
         self.guide_desc.config(text="Steam has received the download command. Please wait ~1 to 2 minutes while Steam fetches the clean 2.2081 files...")
@@ -586,7 +655,7 @@ class GeodeSyncApp(tk.Tk):
         self.primary_btn.set_enabled(False)
 
         args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
-        self.log(f"Sending automated download command to Steam...", "INFO")
+        self.log("Sending automated download command to Steam...", "INFO")
 
         try:
             subprocess.Popen(args)
@@ -601,15 +670,16 @@ class GeodeSyncApp(tk.Tk):
         start_time = time.time()
         download_finished = False
 
-        while time.time() - start_time < 300: # 5 min timeout
+        while time.time() - start_time < 300:  # 5 min timeout
             time.sleep(2)
-            log_path = self.mgr.get_steam_console_log()
             if log_path and os.path.exists(log_path):
                 try:
-                    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()[-15:]
-                        for line in lines:
-                            if "Depot download complete" in line and "depot_322171" in line:
+                    current_size = os.path.getsize(log_path)
+                    if current_size > initial_log_offset:
+                        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                            f.seek(initial_log_offset)
+                            new_content = f.read()
+                            if "Depot download complete" in new_content and "depot_322171" in new_content:
                                 download_finished = True
                                 break
                 except Exception:
@@ -644,7 +714,7 @@ class GeodeSyncApp(tk.Tk):
                 for f in ["GeometryDash.exe", "libcocos2d.dll", "libExtensions.dll"]:
                     src_f = os.path.join(self.mgr.gd_path, f)
                     if os.path.exists(src_f):
-                        shutil.copy2(src_f, os.path.join(backup_dir, f))
+                        safe_copy_item(src_f, os.path.join(backup_dir, f))
                 self.log("Created backup of current files.", "INFO")
         except Exception as e:
             self.log(f"Backup warning: {e}", "WARN")
@@ -654,10 +724,7 @@ class GeodeSyncApp(tk.Tk):
             for item in os.listdir(depot):
                 s = os.path.join(depot, item)
                 d = os.path.join(self.mgr.gd_path, item)
-                if os.path.isdir(s):
-                    shutil.copytree(s, d, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(s, d)
+                safe_copy_item(s, d)
             self.log("Game files successfully replaced with 2.2081!", "SUCCESS")
         except Exception as e:
             self.log(f"Failed to copy files: {e}", "ERROR")
@@ -727,7 +794,7 @@ class GeodeSyncApp(tk.Tk):
         copied = 0
         for f in os.listdir(save_dir):
             if f.endswith(".dat") or f.endswith(".dat.bak"):
-                shutil.copy2(os.path.join(save_dir, f), os.path.join(target_folder, f))
+                safe_copy_item(os.path.join(save_dir, f), os.path.join(target_folder, f))
                 copied += 1
 
         self.play_ding()
@@ -745,7 +812,6 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showinfo("No Backups Found", "No GeodeSync save backups were found yet. Click 'Backup GD Saves' first!")
             return
 
-        # Pick most recent backup folder
         folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, d))]
         folders.sort(key=os.path.getmtime, reverse=True)
         latest_backup = folders[0]
@@ -760,7 +826,7 @@ class GeodeSyncApp(tk.Tk):
         restored = 0
         for f in os.listdir(latest_backup):
             if f.endswith(".dat") or f.endswith(".dat.bak"):
-                shutil.copy2(os.path.join(latest_backup, f), os.path.join(save_dir, f))
+                safe_copy_item(os.path.join(latest_backup, f), os.path.join(save_dir, f))
                 restored += 1
 
         self.play_ding()
@@ -774,21 +840,6 @@ class GeodeSyncApp(tk.Tk):
             os.startfile(mods_dir)
         else:
             messagebox.showerror("Error", "Geometry Dash folder not found.")
-
-    def toggle_lock(self):
-        if not self.mgr.manifest_path:
-            messagebox.showwarning("Warning", "appmanifest_322170.acf could not be found.")
-            return
-
-        currently_locked = self.mgr.is_manifest_locked()
-        try:
-            self.mgr.set_manifest_locked(not currently_locked)
-            new_state = "LOCKED (Read-Only)" if not currently_locked else "UNLOCKED"
-            self.log(f"Steam update manifest changed to: {new_state}", "SUCCESS")
-            self.refresh_status()
-        except Exception as e:
-            self.log(f"Failed to toggle lock: {e}", "ERROR")
-            messagebox.showerror("Error", f"Could not toggle manifest lock: {e}")
 
     def browse_gd_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Folder")
