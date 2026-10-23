@@ -1,29 +1,30 @@
 =====================================================
-         ⚡ GeodeSync v1.1.2 for macOS ⚡
+          GeodeSync for macOS — launch guide
 =====================================================
 
-HOW TO RUN ON MACOS:
-1. Extract this ZIP folder.
-2. Double-click "Run-GeodeSync-Mac.command"
-   (OR double-click "GeodeSync.app")
-3. If macOS displays a Gatekeeper security prompt:
-   - Right-click "Run-GeodeSync-Mac.command" -> Open
-   - Or open Terminal in this folder and run:
-     chmod +x Run-GeodeSync-Mac.command
-     ./Run-GeodeSync-Mac.command
+INSTALL AND OPEN
+1. Download the build for your Mac chip (Apple silicon or Intel) and unzip it.
+2. Drag GeodeSync.app to your personal Applications folder (`~/Applications`), then double-click it.
+3. If macOS blocks the first launch because this community build is not
+   notarized, Control-click GeodeSync.app, choose Open, then choose Open once
+   more. You do not need Terminal or Python.
 
-REQUIREMENTS:
-- macOS 10.15 (Catalina) or newer (Apple Silicon & Intel supported)
-- Geometry Dash on Steam
-- Python 3 (pre-installed on macOS, or download from https://www.python.org/downloads/macos/)
+COMPATIBILITY
+- Apple silicon build: macOS 11 Big Sur or newer.
+- Intel build: macOS 10.15 Catalina or newer.
+- Geometry Dash installed through Steam.
 
-FEATURES INCLUDED:
-✓ 1-Click Downgrade to Geometry Dash 2.2081
-✓ Steam Auto-Update Lock (Finder Immutable chflags)
-✓ Audio & Click Latency Optimizer (CoreAudio 128 buffer)
-✓ Save Doctor & Automatic Save Backup
-✓ Essential Mod Pack (Jukebox, CBF, Globed, Click Sound)
-✓ FPS Target Unlocker & Custom NONG Song Manager
+The app contains its Python and Tcl/Tk runtime. It does not install Python or
+other system packages. Keeping it in your personal Applications folder lets
+the in-app updater replace it without an administrator password. Updates are
+downloaded for the matching Mac processor, checked, installed, and relaunched.
+The first launch approval is a macOS Gatekeeper check; removing it requires a
+Developer ID-signed and notarized build.
+
+FEATURES
+The app's feature availability depends on the current GeodeSync version and
+the user's Steam/Geometry Dash installation. Review each action in the app
+before applying changes.
 
 Official Repository:
 https://github.com/willmakesrandomshit/GeodeSync
