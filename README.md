@@ -4,11 +4,11 @@
 
 # ⚡ GeodeSync
 
-> Modern, zero-friction Geometry Dash version switcher, Geode protector, and downgrade/restore manager.
+> Modern, zero-friction Geometry Dash version switcher, Geode protector, crash doctor, and input latency optimizer.
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.1-green.svg)
+![Version](https://img.shields.io/badge/version-1.1.2-green.svg)
 
 ---
 
@@ -18,17 +18,20 @@ When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode**
 
 **GeodeSync** gives players an automated, 1-click desktop app to:
 1. **Downgrade to Geode-compatible builds** (e.g. 2.2081) using Valve's official Steam depot mechanism.
-2. **Prevent unwanted auto-updates** by locking Steam's game manifest to Read-Only.
-3. **Restore / update back to the latest official version** automatically whenever Geode updates.
-4. **Backup & Restore Save Data** with 1 click to keep your progress completely safe.
-5. **Push / sync new target manifest IDs dynamically** from `version.json` without having to rebuild the app.
+2. **Real-time Live Progress Bar:** Track Steam depot download progress dynamically (`MB / ~195 MB` & percentage).
+3. **⚡ 1-Click Fix Click Delay:** Lowers FMOD WASAPI audio buffer to 128 samples, tunes click queues, and optimizes Click Between Frames (CBF) mouse polling for zero-delay input.
+4. **🩺 1-Click Crash Doctor:** Scans Geode crash logs, pinpoints faulty mod IDs and exception codes, and allows 1-click disabling of broken mods.
+5. **🚀 Official Geode Auto-Installer:** Detects if Geode is missing, pulls the latest installer from GitHub, and sets it up seamlessly.
+6. **🔄 Version Archive Selector:** Effortlessly switch between GD 2.2081, 2.2074, 2.113, or custom manifests.
+7. **Prevent unwanted auto-updates:** Locks Steam's game manifest to Read-Only so Steam never overwrites your game.
+8. **1-Click Save Data Backup & Restore:** Protects your stars, demons, coins, and levels with automated backups.
 
 ---
 
 ## 📥 Download
 
 Grab the latest version from the **[Releases](https://github.com/willmakesrandomshit/GeodeSync/releases)** tab:
-* **`GeodeSync-v1.1.1-Windows.zip` (Recommended):** Extract and double-click `Run-GeodeSync.bat` to launch instantly with zero popups!
+* **`GeodeSync-v1.1.2-Windows.zip` (Recommended):** Extract and double-click `Run-GeodeSync.bat` to launch instantly with zero popups!
 * **`GeodeSync.exe`:** Standalone portable executable.
 
 > [!NOTE]

@@ -3,5 +3,7 @@ dist/
 *.spec
 __pycache__/
 *.pyc
+*.exe
+*.zip
 .vscode/
 .idea/
