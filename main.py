@@ -18,6 +18,7 @@ import shlex
 import zipfile
 import zlib
 import plistlib
+from xml.parsers.expat import ExpatError
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
@@ -42,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -207,7 +208,7 @@ def validate_macos_game_app(app_path):
     try:
         with open(plist_path, "rb") as stream:
             metadata = plistlib.load(stream)
-    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+    except (OSError, plistlib.InvalidFileException, ValueError, ExpatError, TypeError) as exc:
         return f"Geometry Dash.app has a missing or unreadable Info.plist ({exc})."
 
     executable_name = metadata.get("CFBundleExecutable")
@@ -775,10 +776,14 @@ class GDManager:
         d_path = self.get_depot_path()
         if d_path and os.path.exists(d_path):
             if IS_MAC:
-                app_path = os.path.join(d_path, "Geometry Dash.app")
-                if not os.path.exists(app_path):
-                    app_path = os.path.join(d_path, "GeometryDash.app")
-                return os.path.exists(app_path)
+                app_path = find_macos_game_app(d_path)
+                # Steam can leave an app-bundle-shaped directory behind after
+                # an interrupted depot download. Existence alone is not proof
+                # that the cached depot is safe to install. In particular,
+                # plistlib raises ExpatError for truncated or concatenated
+                # Info.plist data; validate it here so a bad cache is retried
+                # through Steam instead of reaching the replacement step.
+                return app_path is not None and validate_macos_game_app(app_path) is None
             exe = os.path.join(d_path, "GeometryDash.exe")
             try:
                 return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081

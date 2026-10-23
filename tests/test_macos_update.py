@@ -113,6 +113,28 @@ class MacGameLaunchTests(unittest.TestCase):
             os.unlink(os.path.join(app, "Contents", "MacOS", "Geometry Dash"))
             self.assertIn("executable is missing", validate_macos_game_app(app))
 
+    def test_rejects_malformed_or_trailing_info_plist_as_incomplete_bundle(self):
+        with tempfile.TemporaryDirectory() as root:
+            app = self.make_app(root)
+            plist_path = os.path.join(app, "Contents", "Info.plist")
+            with open(plist_path, "ab") as stream:
+                stream.write(b"<plist><dict/></plist>")
+            problem = validate_macos_game_app(app)
+            self.assertIn("unreadable Info.plist", problem)
+            self.assertIn("junk after document element", problem)
+
+    def test_macos_cached_depot_requires_a_valid_app_bundle(self):
+        with tempfile.TemporaryDirectory() as root:
+            depot = os.path.join(root, "depot")
+            app = self.make_app(depot)
+            manager = GDManager()
+            manager.steam_path = root
+            with mock.patch("main.IS_MAC", True), mock.patch.object(manager, "get_depot_path", return_value=depot):
+                self.assertTrue(manager.has_downloaded_depot())
+                with open(os.path.join(app, "Contents", "Info.plist"), "ab") as stream:
+                    stream.write(b"<plist><dict/></plist>")
+                self.assertFalse(manager.has_downloaded_depot())
+
     def test_launch_checks_bundle_and_reports_steam_dispatch_separately(self):
         runner = mock.Mock(return_value=mock.Mock(returncode=0, stdout="", stderr=""))
         with tempfile.TemporaryDirectory() as root:
