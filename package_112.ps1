@@ -44,14 +44,16 @@ Option B: Double-click "GeodeSync.exe" directly
    - (Every new indie app has this until Microsoft reputation builds up - it is 100% safe & open source).
 
 WHAT'S NEW IN v1.1.2:
+   - 🌟 Streamlined Core UI with expandable "More Tools ▾" drawer
+   - 📦 1-Click Essential Mods (Jukebox & CBF directly installed)
+   - 🎯 Direct FPS Unlocker (configure 144, 240, 360, 480 FPS target in save file)
+   - ☁️ Auto-Backup on Game Exit (silent save snapshots when GD closes)
    - 💽 Corrupted Save Doctor (XOR 11 / gzip decrypt integrity test + auto fallback repair)
    - 🧹 GD Storage & Cache Cleaner (purges gigabytes of audio cache / logs safely)
    - 🔄 Mod Profile & Vanilla Switcher (1-click pure vanilla vs modded, save & load mod profiles)
    - ⚡ Fix Click Delay (128 FMOD WASAPI buffer + CBF optimization)
    - 🩺 Crash Doctor (instant crashlog analysis + faulty mod disabler)
    - 📊 Live Steam Depot Download Progress Bar (MB / ~195 MB + %)
-   - 🚀 Official Geode Auto-Installer
-   - 🔄 Multi-Version Archive Selector (2.2081, 2.2074, 2.113)
    - 🚀 1-Click In-App Self-Updater
 
 SOURCE CODE & SUPPORT:

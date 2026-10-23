@@ -109,8 +109,8 @@ def render_banner_and_thumb(output_path, width=1280, height=720, is_banner=False
     main_y = 80 if not is_banner else 62
     draw_bold(main_txt, f_main, width // 2 - mb_w // 2, main_y, (52, 211, 153), stroke_color=(6, 78, 59), stroke_w=6)
 
-    # 3. Sub-bar: "GEODESYNC v1.1.3  •  2.209 >> 2.2081 AUTO-DOWNGRADE"
-    sub_txt = "GEODESYNC v1.1.3   |   2.209 >> 2.2081 AUTO-DOWNGRADE"
+    # 3. Sub-bar: "GEODESYNC v1.1.2  •  2.209 >> 2.2081 AUTO-DOWNGRADE"
+    sub_txt = "GEODESYNC v1.1.2   |   2.209 >> 2.2081 AUTO-DOWNGRADE"
     sb = draw.textbbox((0, 0), sub_txt, font=f_sub)
     sb_w = sb[2] - sb[0]
     sub_y = 180 if not is_banner else 146
@@ -178,7 +178,7 @@ def render_banner_and_thumb(output_path, width=1280, height=720, is_banner=False
     draw.ellipse([cx + 16, cy + 13, cx + 28, cy + 25], fill=(239, 68, 68))
     draw.ellipse([cx + 36, cy + 13, cx + 48, cy + 25], fill=(245, 158, 11))
     draw.ellipse([cx + 56, cy + 13, cx + 68, cy + 25], fill=(16, 185, 129))
-    draw.text((cx + 86, cy + 10), "GeodeSync v1.1.3 • Power & Performance Suite", font=f_item, fill=(148, 163, 184))
+    draw.text((cx + 86, cy + 10), "GeodeSync v1.1.2 • Power & Performance Suite", font=f_item, fill=(148, 163, 184))
 
     # Card Content
     draw.text((cx + 24, cy + header_h + 12), "AUTOMATED 1-CLICK FIX READY", font=f_badge_sub, fill=(192, 132, 252))
@@ -287,8 +287,8 @@ def render_square_thumbnail(output_path, size=1080):
         gy = 200
         base.paste(g_img, (gx, gy), g_img)
 
-    # 4. Brand Name: GEODESYNC v1.1.3
-    brand_txt = "GEODESYNC v1.1.3"
+    # 4. Brand Name: GEODESYNC v1.1.2
+    brand_txt = "GEODESYNC v1.1.2"
     brb = draw.textbbox((0, 0), brand_txt, font=f_title)
     br_w = brb[2] - brb[0]
     draw_lightning(draw, width // 2 - br_w // 2 - 24, 518, size=24, color=(250, 204, 21))

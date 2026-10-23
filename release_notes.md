@@ -2,21 +2,21 @@
   <img src="https://raw.githubusercontent.com/willmakesrandomshit/GeodeSync/main/assets/banner.png" alt="GeodeSync Banner" width="100%">
 </p>
 
-## ⚡ GeodeSync v1.1.3 • The Definitive Power Suite
+## ⚡ GeodeSync v1.1.2 • The Definitive Power Suite
 
-GeodeSync v1.1.3 brings the most comprehensive collection of high-performance tools ever assembled for Geometry Dash players, modders, and creators!
+GeodeSync v1.1.2 brings the most comprehensive collection of high-performance tools ever assembled for Geometry Dash players, modders, and creators!
 
 ---
 
 ### 🚀 How to Launch (Zero Popups):
-* **Option A (Recommended):** Download **`GeodeSync-v1.1.3-Windows.zip`**, extract it, and double-click **`Run-GeodeSync.bat`**.
+* **Option A (Recommended):** Download **`GeodeSync-v1.1.2-Windows.zip`**, extract it, and double-click **`Run-GeodeSync.bat`**.
   * Automatically unblocks the app and launches instantly with **ZERO SmartScreen popups**!
 * **Option B:** Download **`GeodeSync.exe`** directly.
   * If Windows shows the blue *'Windows protected your PC'* screen, simply click **'More info'** -> **'Run anyway'**. (100% safe, open-source under MIT, and verified).
 
 ---
 
-### 🔥 What's New in v1.1.3:
+### 🔥 What's New in v1.1.2:
 
 #### 1. 🎵 1-Click NONG (Not On Newgrounds) Song Manager
 - Replace any level's official song with a custom NONG track in seconds.

@@ -28,7 +28,7 @@ except Exception:
     except Exception:
         pass
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

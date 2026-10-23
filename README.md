@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.3-green.svg)
+![Version](https://img.shields.io/badge/version-1.1.2-green.svg)
 
 ---
 
@@ -21,7 +21,7 @@ When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode**
 2. **Real-time Live Progress Bar:** Track Steam depot download progress dynamically (`MB / ~195 MB` & percentage).
 3. **🎯 Direct FPS Unlocker:** Configure target framerates (144, 240, 360, 480 FPS) directly in your save file.
 4. **🎵 1-Click NONG Song Manager:** Swap custom level audio with Not-On-Newgrounds songs with automatic backups.
-5. **📦 1-Click Essential Mod Pack:** Installs CBF, Globed multiplayer, Click Sound, NONGD, and BetterEdit via official Geode API.
+5. **📦 1-Click Essential Mod Pack:** Installs Jukebox, CBF, Globed multiplayer, Click Sound, and BetterEdit via official Geode API.
 6. **☁️ Auto-Backup on Game Exit:** Silently snapshots your save files whenever Geometry Dash closes.
 7. **💽 1-Click Save Doctor:** Tests XOR 11 / gzip save integrity, detects corruption, and automatically recovers lost progress.
 8. **🧹 GD Storage & Cache Cleaner:** Safely purges gigabytes of orphaned songs and crash dumps from LocalAppData.
@@ -35,7 +35,7 @@ When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode**
 ## 📥 Download
 
 Grab the latest version from the **[Releases](https://github.com/willmakesrandomshit/GeodeSync/releases)** tab:
-* **`GeodeSync-v1.1.3-Windows.zip` (Recommended):** Extract and double-click `Run-GeodeSync.bat` to launch instantly with zero popups!
+* **`GeodeSync-v1.1.2-Windows.zip` (Recommended):** Extract and double-click `Run-GeodeSync.bat` to launch instantly with zero popups!
 * **`GeodeSync.exe`:** Standalone portable executable.
 
 > [!NOTE]
