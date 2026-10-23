@@ -28,7 +28,7 @@ except Exception:
     except Exception:
         pass
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -269,6 +269,30 @@ class GDManager:
         except Exception:
             return False
 
+    def perform_silent_backup(self):
+        save_dir = self.get_save_data_dir()
+        if not save_dir or not os.path.exists(save_dir):
+            return 0
+        backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
+        os.makedirs(backup_root, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        target_folder = os.path.join(backup_root, f"Auto_{timestamp}")
+        os.makedirs(target_folder, exist_ok=True)
+        copied = 0
+        for f in os.listdir(save_dir):
+            if f.endswith(".dat") or f.endswith(".dat.bak"):
+                safe_copy_item(os.path.join(save_dir, f), os.path.join(target_folder, f))
+                copied += 1
+        # Keep latest 10 auto-backups to prevent disk bloat
+        auto_folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if d.startswith("Auto_")]
+        auto_folders.sort(key=os.path.getmtime, reverse=True)
+        for old in auto_folders[10:]:
+            try:
+                shutil.rmtree(old)
+            except Exception:
+                pass
+        return copied
+
     def is_manifest_locked(self):
         if not self.manifest_path or not os.path.exists(self.manifest_path):
             return False
@@ -388,8 +412,8 @@ class GeodeSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"GeodeSync v{APP_VERSION} • 1-Click Geometry Dash Suite")
-        self.geometry("780x810")
-        self.minsize(720, 720)
+        self.geometry("780x860")
+        self.minsize(740, 750)
         self.configure(bg="#0f141c")
 
         try:
@@ -409,11 +433,14 @@ class GeodeSyncApp(tk.Tk):
         self.mgr = GDManager()
         self.latest_release_url = None
         self.is_downloading_depot = False
+        self.auto_backup_enabled = True
+        self._monitor_running = True
 
         self.create_ui()
         self.refresh_status()
 
         threading.Thread(target=self.check_remote_updates, daemon=True).start()
+        threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
 
     def create_ui(self):
         # Update Banner
@@ -526,40 +553,58 @@ class GeodeSyncApp(tk.Tk):
 
         tk.Label(row1, text="Saves & Data:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
-        backup_save_btn = tk.Button(row1, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        backup_save_btn = tk.Button(row1, text="💾 Backup", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         backup_save_btn.pack(side="left", padx=2)
 
-        save_doc_btn = tk.Button(row1, text="💽 Save Doctor", command=self.run_save_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#a78bfa", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        save_doc_btn = tk.Button(row1, text="💽 Save Doctor", command=self.run_save_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#a78bfa", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         save_doc_btn.pack(side="left", padx=2)
 
-        clean_cache_btn = tk.Button(row1, text="🧹 Cache Cleaner", command=self.open_cache_cleaner, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#34d399", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        clean_cache_btn = tk.Button(row1, text="🧹 Cleaner", command=self.open_cache_cleaner, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#34d399", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         clean_cache_btn.pack(side="left", padx=2)
 
-        restore_save_btn = tk.Button(row1, text="♻️ Restore", command=self.restore_saves, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        self.auto_backup_btn = tk.Button(row1, text="☁️ Auto-Backup: ON", command=self.toggle_auto_backup, font=("Segoe UI", 8, "bold"), bg="#064e3b", fg="#34d399", activebackground="#065f46", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
+        self.auto_backup_btn.pack(side="left", padx=2)
+
+        restore_save_btn = tk.Button(row1, text="♻️ Restore", command=self.restore_saves, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         restore_save_btn.pack(side="left", padx=2)
 
-        self.restore_gd_btn = tk.Button(row1, text="🔄 Restore Latest GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        self.restore_gd_btn = tk.Button(row1, text="🔄 Restore GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=2, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
 
         # Row 2: Pro Performance & Mod Utilities
         row2 = tk.Frame(tools_card, bg="#161e2e")
-        row2.pack(fill="x", pady=(2, 0))
+        row2.pack(fill="x", pady=(2, 4))
 
-        tk.Label(row2, text="Mods & Opts:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+        tk.Label(row2, text="Performance:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
-        fix_audio_btn = tk.Button(row2, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        fix_audio_btn = tk.Button(row2, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         fix_audio_btn.pack(side="left", padx=2)
 
-        crash_doc_btn = tk.Button(row2, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        fps_unlock_btn = tk.Button(row2, text="🎯 FPS Unlocker", command=self.open_fps_unlocker, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
+        fps_unlock_btn.pack(side="left", padx=2)
+
+        crash_doc_btn = tk.Button(row2, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         crash_doc_btn.pack(side="left", padx=2)
 
-        mod_profiles_btn = tk.Button(row2, text="🔄 Mod Profiles", command=self.open_mod_profiles, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        mod_profiles_btn = tk.Button(row2, text="🔄 Mod Profiles", command=self.open_mod_profiles, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         mod_profiles_btn.pack(side="left", padx=2)
 
-        open_mods_btn = tk.Button(row2, text="📂 Mods", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        open_mods_btn.pack(side="left", padx=2)
+        open_mods_btn = tk.Button(row2, text="📂 Mods", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
+        open_mods_btn.pack(side="right")
 
-        version_sel_btn = tk.Button(row2, text="⚙️ Versions", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        # Row 3: Power Tools (NONG, Essential Mods & Versions)
+        row3 = tk.Frame(tools_card, bg="#161e2e")
+        row3.pack(fill="x", pady=(2, 0))
+
+        tk.Label(row3, text="Power Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+
+        nong_btn = tk.Button(row3, text="🎵 NONG Songs", command=self.open_nong_manager, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#f43f5e", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
+        nong_btn.pack(side="left", padx=2)
+
+        essential_pack_btn = tk.Button(row3, text="📦 Essential Mod Pack", command=self.install_essential_mods, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#eab308", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
+        essential_pack_btn.pack(side="left", padx=2)
+
+        version_sel_btn = tk.Button(row3, text="⚙️ Version Selector", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
         version_sel_btn.pack(side="right")
 
         # 4. ACTIVITY LOG
@@ -1686,6 +1731,367 @@ class GeodeSyncApp(tk.Tk):
             self.progress_frame.pack_forget()
             webbrowser.open(self.latest_release_url)
 
+    # ==========================================
+    # v1.1.3 PRO FEATURE: AUTO-BACKUP ON GD EXIT
+    # ==========================================
+    def _auto_backup_monitor_thread(self):
+        was_running = False
+        while getattr(self, "_monitor_running", True):
+            try:
+                is_running = self.mgr.is_gd_process_running()
+                if was_running and not is_running:
+                    if getattr(self, "auto_backup_enabled", True):
+                        copied = self.mgr.perform_silent_backup()
+                        if copied:
+                            self.log(f"Auto-Backup: Saved {copied} files after GD closed.", "SUCCESS")
+                was_running = is_running
+            except Exception:
+                pass
+            time.sleep(3)
+
+    def toggle_auto_backup(self):
+        self.auto_backup_enabled = not getattr(self, "auto_backup_enabled", True)
+        if self.auto_backup_enabled:
+            self.auto_backup_btn.config(text="☁️ Auto-Backup: ON", fg="#34d399", bg="#064e3b")
+            self.log("Auto-Backup on GD Exit ENABLED.", "INFO")
+        else:
+            self.auto_backup_btn.config(text="☁️ Auto-Backup: OFF", fg="#94a3b8", bg="#1e293b")
+            self.log("Auto-Backup on GD Exit DISABLED.", "INFO")
+
+    # ==========================================
+    # v1.1.3 PRO FEATURE: FPS UNLOCKER & REFRESH RATE
+    # ==========================================
+    def open_fps_unlocker(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir:
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            return
+
+        gm_path = os.path.join(save_dir, "CCGameManager.dat")
+        if not os.path.exists(gm_path):
+            messagebox.showerror("Error", "CCGameManager.dat not found. Launch Geometry Dash at least once.")
+            return
+
+        current_fps = "240"
+        try:
+            with open(gm_path, "rb") as f:
+                raw = f.read()
+            xored = bytes(b ^ 11 for b in raw)
+            decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
+            decomp = zlib.decompress(decoded, 15 + 32).decode("utf-8", errors="ignore")
+            m = re.search(r"<k>customFPSTarget</k><[ri]>([0-9.]+)</[ri]>", decomp)
+            if m:
+                current_fps = str(int(float(m.group(1))))
+        except Exception as e:
+            self.log(f"FPS read error: {e}", "WARN")
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Geometry Dash FPS Unlocker & Target Rate")
+        dialog.geometry("500x380")
+        dialog.configure(bg="#161e2e")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="🎯 Geometry Dash FPS Unlocker", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text=f"Current Game Setting: {current_fps} FPS", font=("Segoe UI", 10, "bold"), fg="#38bdf8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 12))
+
+        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card.pack(fill="x", padx=20, pady=(0, 12))
+
+        tk.Label(card, text="Select Target Framerate Preset:", font=("Segoe UI", 9, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w", pady=(0, 8))
+
+        selected_fps = tk.StringVar(value=current_fps if current_fps in ["60", "144", "240", "360", "480"] else "360")
+
+        presets = [
+            ("60 FPS (Vanilla standard)", "60"),
+            ("144 FPS (Standard gaming monitor)", "144"),
+            ("240 FPS (Esports / high refresh)", "240"),
+            ("360 FPS (Competitive Demon Slayer • Recommended)", "360"),
+            ("480 FPS (Ultra-smooth bypass)", "480")
+        ]
+
+        for label, val in presets:
+            rb = tk.Radiobutton(
+                card,
+                text=label,
+                variable=selected_fps,
+                value=val,
+                font=("Segoe UI", 9),
+                fg="#e2e8f0",
+                bg="#1a2333",
+                selectcolor="#0f172a",
+                activebackground="#1a2333",
+                activeforeground="#38bdf8"
+            )
+            rb.pack(anchor="w", pady=2)
+
+        custom_box = tk.Frame(card, bg="#1a2333")
+        custom_box.pack(fill="x", pady=(8, 0))
+        tk.Label(custom_box, text="Or Custom Target FPS:", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(side="left")
+        custom_entry = tk.Entry(custom_box, font=("Segoe UI", 9), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff", width=8)
+        custom_entry.pack(side="left", padx=8)
+
+        def apply_fps():
+            val = custom_entry.get().strip() or selected_fps.get()
+            if not val.isdigit() or int(val) < 30 or int(val) > 2000:
+                messagebox.showerror("Invalid FPS", "Please enter a valid FPS number between 30 and 2000.")
+                return
+
+            target = int(val)
+            try:
+                with open(gm_path, "rb") as f:
+                    raw = f.read()
+                shutil.copy2(gm_path, gm_path + ".fps_bak")
+                xored = bytes(b ^ 11 for b in raw)
+                decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
+                decomp = zlib.decompress(decoded, 15 + 32).decode("utf-8", errors="ignore")
+
+                if "<k>customFPSTarget</k>" in decomp:
+                    decomp = re.sub(r"<k>customFPSTarget</k><[ri]>[0-9.]+</[ri]>", f"<k>customFPSTarget</k><r>{target}</r>", decomp)
+                else:
+                    decomp = decomp.replace("<dict>", f"<dict><k>customFPSTarget</k><r>{target}</r>", 1)
+
+                re_comp = zlib.compress(decomp.encode("utf-8"))
+                re_b64 = base64.b64encode(re_comp).replace(b'+', b'-').replace(b'/', b'_')
+                re_raw = bytes(b ^ 11 for b in re_b64)
+
+                with open(gm_path, "wb") as f:
+                    f.write(re_raw)
+
+                self.play_ding()
+                self.log(f"Successfully set Geometry Dash target FPS to {target} FPS!", "SUCCESS")
+                dialog.destroy()
+                messagebox.showinfo("FPS Target Updated!", f"🎉 Target Framerate set to {target} FPS!\n\nLaunch Geometry Dash to enjoy buttery smooth gameplay.")
+            except Exception as err:
+                self.log(f"Failed to set FPS: {err}", "ERROR")
+                messagebox.showerror("Error", f"Failed to modify save file:\n{err}")
+
+        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
+
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn.pack(side="left")
+
+        apply_btn = tk.Button(btn_box, text="⚡ Apply Target FPS", command=apply_fps, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=16, pady=4, cursor="hand2")
+        apply_btn.pack(side="right")
+
+    # ==========================================
+    # v1.1.3 PRO FEATURE: NONG SONG MANAGER
+    # ==========================================
+    def open_nong_manager(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir:
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Geometry Dash NONG Song Manager")
+        dialog.geometry("540x480")
+        dialog.configure(bg="#161e2e")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="🎵 NONG Song Manager (Custom Level Audio)", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Easily replace any level's official audio with a custom Not-On-Newgrounds song:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 12))
+
+        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card.pack(fill="x", padx=20, pady=(0, 12))
+
+        tk.Label(card, text="Target Song ID (from in-game custom level):", font=("Segoe UI", 8, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w")
+        song_id_entry = tk.Entry(card, font=("Segoe UI", 10), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff")
+        song_id_entry.pack(fill="x", pady=(2, 8))
+
+        tk.Label(card, text="Custom Audio Source (Local MP3 or Direct URL):", font=("Segoe UI", 8, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w")
+        source_frame = tk.Frame(card, bg="#1a2333")
+        source_frame.pack(fill="x", pady=(2, 8))
+
+        source_entry = tk.Entry(source_frame, font=("Segoe UI", 9), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff")
+        source_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        def browse_audio():
+            file_path = filedialog.askopenfilename(
+                title="Select Custom MP3 / OGG Song",
+                filetypes=[("Audio Files", "*.mp3 *.ogg"), ("All Files", "*.*")]
+            )
+            if file_path:
+                source_entry.delete(0, "end")
+                source_entry.insert(0, file_path)
+
+        tk.Button(source_frame, text="Browse...", command=browse_audio, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right")
+
+        def install_nong():
+            sid = song_id_entry.get().strip()
+            src = source_entry.get().strip()
+
+            if not sid.isdigit():
+                messagebox.showerror("Error", "Please enter a valid numeric Song ID (e.g. 10001563).")
+                return
+
+            if not src:
+                messagebox.showerror("Error", "Please select a local audio file or enter a direct MP3 URL.")
+                return
+
+            target_path = os.path.join(save_dir, f"{sid}.mp3")
+            bak_path = target_path + ".original_bak"
+
+            try:
+                if os.path.exists(target_path) and not os.path.exists(bak_path):
+                    shutil.copy2(target_path, bak_path)
+
+                if src.startswith("http://") or src.startswith("https://"):
+                    urllib.request.urlretrieve(src, target_path)
+                else:
+                    if not os.path.exists(src):
+                        messagebox.showerror("File Not Found", f"Audio file not found:\n{src}")
+                        return
+                    safe_copy_item(src, target_path)
+
+                self.play_ding()
+                self.log(f"Installed NONG song for Song ID: {sid}", "SUCCESS")
+                messagebox.showinfo("NONG Installed!", f"🎉 Successfully installed custom song for Song ID: {sid}!\n\nOpen Geometry Dash and enjoy your level.")
+                refresh_list()
+            except Exception as err:
+                self.log(f"NONG install error: {err}", "ERROR")
+                messagebox.showerror("Error", f"Failed to install song:\n{err}")
+
+        tk.Button(card, text="⚡ Install NONG Song", command=install_nong, font=("Segoe UI", 9, "bold"), bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", relief="flat", padx=14, pady=5, cursor="hand2").pack(anchor="w", pady=(4, 0))
+
+        list_frame = tk.Frame(dialog, bg="#1a2333", padx=14, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+
+        tk.Label(list_frame, text="Replaced NONG Songs in LocalAppData:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w")
+
+        nong_box = tk.Listbox(list_frame, bg="#0f172a", fg="#e2e8f0", font=("Segoe UI", 8), height=4, selectbackground="#8b5cf6")
+        nong_box.pack(fill="both", expand=True, pady=4)
+
+        def refresh_list():
+            nong_box.delete(0, "end")
+            found = 0
+            for item in os.listdir(save_dir):
+                if item.endswith(".mp3.original_bak"):
+                    base_id = item.replace(".mp3.original_bak", "")
+                    nong_box.insert("end", f"Song ID {base_id} (Replaced)")
+                    found += 1
+            if found == 0:
+                nong_box.insert("end", "No replaced NONG songs detected.")
+
+        refresh_list()
+
+        def restore_selected():
+            sel = nong_box.curselection()
+            if not sel:
+                return
+            line = nong_box.get(sel[0])
+            m = re.search(r"Song ID (\d+)", line)
+            if not m:
+                return
+            sid = m.group(1)
+            target = os.path.join(save_dir, f"{sid}.mp3")
+            bak = target + ".original_bak"
+            if os.path.exists(bak):
+                shutil.move(bak, target)
+                self.log(f"Restored original song for Song ID: {sid}", "SUCCESS")
+                messagebox.showinfo("Restored", f"Restored original song for ID {sid}!")
+                refresh_list()
+
+        btn_bar = tk.Frame(list_frame, bg="#1a2333")
+        btn_bar.pack(fill="x")
+        tk.Button(btn_bar, text="♻️ Revert Selected to Original", command=restore_selected, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", relief="flat", padx=8, pady=3, cursor="hand2").pack(side="left")
+
+    # ==========================================
+    # v1.1.3 PRO FEATURE: ESSENTIAL MOD PACK INSTALLER
+    # ==========================================
+    def install_essential_mods(self):
+        if not self.mgr.gd_path:
+            messagebox.showerror("Error", "Geometry Dash directory not found.")
+            return
+
+        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+        os.makedirs(mods_dir, exist_ok=True)
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Essential Geode Mod Pack")
+        dialog.geometry("520x400")
+        dialog.configure(bg="#161e2e")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="📦 1-Click Essential Geode Mod Pack", font=("Segoe UI", 12, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Select community-recommended mods to download and install:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 10))
+
+        pack_mods = [
+            ("syzzi.click_between_frames", "Click Between Frames (CBF • Input & Physics Precision)"),
+            ("dankmeme.globed2", "Globed (Real-time Online Multiplayer)"),
+            ("beat.click-sound", "Click Sound (Custom clicks & mechanical audio)"),
+            ("fleym.nongd", "NONGD (In-game NONG song downloader & browser)"),
+            ("alphalaneous.betteredit", "BetterEdit (Creator Level Editor overhaul)")
+        ]
+
+        var_dict = {}
+        card = tk.Frame(dialog, bg="#1a2333", padx=14, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        card.pack(fill="x", padx=20, pady=(0, 12))
+
+        for mod_id, title in pack_mods:
+            is_installed = os.path.exists(os.path.join(mods_dir, f"{mod_id}.geode"))
+            v = tk.BooleanVar(value=not is_installed)
+            var_dict[mod_id] = v
+            label_text = f"{title}" + (" [Already Installed]" if is_installed else "")
+            col = "#94a3b8" if is_installed else "#e2e8f0"
+            cb = tk.Checkbutton(card, text=label_text, variable=v, font=("Segoe UI", 9), fg=col, bg="#1a2333", selectcolor="#0f172a", activebackground="#1a2333", activeforeground="#38bdf8")
+            cb.pack(anchor="w", pady=3)
+
+        def do_install():
+            to_download = [mid for mid, v in var_dict.items() if v.get()]
+            if not to_download:
+                messagebox.showinfo("Nothing Selected", "No new mods selected for installation.")
+                return
+
+            dialog.destroy()
+            threading.Thread(target=self._run_modpack_install, args=(to_download,), daemon=True).start()
+
+        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
+
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn.pack(side="left")
+
+        apply_btn = tk.Button(btn_box, text="⚡ Download & Install Selected", command=do_install, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", relief="flat", padx=14, pady=4, cursor="hand2")
+        apply_btn.pack(side="right")
+
+    def _run_modpack_install(self, mod_ids):
+        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+        self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
+        self.primary_btn.set_enabled(False)
+        installed_count = 0
+
+        for i, mid in enumerate(mod_ids):
+            self.progress_lbl.config(text=f"Fetching mod metadata: {mid}...")
+            self.progress_bar["value"] = int((i / len(mod_ids)) * 100)
+            try:
+                api_url = f"https://api.geode-sdk.org/v1/mods/{mid}"
+                req = urllib.request.Request(api_url, headers={"User-Agent": "GeodeSync"})
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    data = json.loads(r.read().decode())
+                versions = data.get("payload", {}).get("versions", [])
+                if versions:
+                    dl_url = versions[0].get("download_link")
+                    if dl_url:
+                        self.progress_lbl.config(text=f"Downloading {mid}...")
+                        dest = os.path.join(mods_dir, f"{mid}.geode")
+                        urllib.request.urlretrieve(dl_url, dest)
+                        installed_count += 1
+                        self.log(f"Installed mod: {mid}", "SUCCESS")
+            except Exception as e:
+                self.log(f"Failed to install {mid}: {e}", "WARN")
+
+        self.progress_bar["value"] = 100
+        time.sleep(0.5)
+        self.progress_frame.pack_forget()
+        self.primary_btn.set_enabled(True)
+        self.play_ding()
+        self.refresh_status()
+        messagebox.showinfo("Mod Pack Installed!", f"🎉 Successfully installed {installed_count} essential Geode mods!\n\nLaunch Geometry Dash to activate them.")
+
     def show_help_dialog(self):
         msg = (
             "HOW GEODESYNC WORKS (FAQ):\n\n"
@@ -1693,14 +2099,14 @@ class GeodeSyncApp(tk.Tk):
             "Whenever Geometry Dash updates (like to 2.209), Geode mods crash until developers update them. Downgrading to 2.2081 lets you keep playing with all your mods immediately.\n\n"
             "2. How does the 1-Click Fix work?\n"
             "You literally just click the button! GeodeSync signals Steam to download clean 2.2081 files in the background, swaps the files into your game, and locks Steam so it won't auto-update.\n\n"
-            "3. What is Save Doctor?\n"
-            "Scans and tests the integrity of your GD save files. If your game crashes and wipes your icons/progress, Save Doctor automatically restores from healthy fallbacks!\n\n"
-            "4. What is Cache Cleaner?\n"
-            "Safely purges gigabytes of orphaned song files, audio caches, and crash logs stored in LocalAppData to free up drive space.\n\n"
-            "5. What is Mod Profiles?\n"
-            "Lets you switch between 'Pure Vanilla' (to play or verify unmodded levels) and your modded setup in 1 click, or save custom mod presets.\n\n"
-            "6. What is Fix Click Delay?\n"
-            "Configures low-latency FMOD audio buffering (~2.7ms) and CBF mouse polling fix to eliminate sound lag when clicking in levels."
+            "3. What is Save Doctor & Auto-Backup?\n"
+            "Tests and repairs corrupted saves using native decryptors. Auto-Backup silently creates save snapshots whenever GD closes so you never lose progress.\n\n"
+            "4. What is FPS Unlocker?\n"
+            "Modifies the internal customFPSTarget in CCGameManager.dat so you can play on 144Hz, 240Hz, 360Hz, or 480Hz without paid trainers.\n\n"
+            "5. What is NONG Song Manager?\n"
+            "Replaces any level's official audio with custom Not-On-Newgrounds songs in 1 click, with automated original backup and 1-click restore.\n\n"
+            "6. What is Essential Mod Pack?\n"
+            "Downloads community must-haves (CBF, Globed multiplayer, Click Sound, NONGD, BetterEdit) straight from the official Geode Index API."
         )
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
