@@ -21,12 +21,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'WilPlays / GeodeSync'),
             StringStruct('FileDescription', 'GeodeSync Geometry Dash Mod Protector'),
-            StringStruct('FileVersion', '1.1.5.0'),
+            StringStruct('FileVersion', '1.1.5.1'),
             StringStruct('InternalName', 'GeodeSync'),
             StringStruct('LegalCopyright', 'Copyright (C) 2026 WilPlays. Open Source under MIT.'),
             StringStruct('OriginalFilename', 'GeodeSync.exe'),
             StringStruct('ProductName', 'GeodeSync'),
-            StringStruct('ProductVersion', '1.1.5.0')
+            StringStruct('ProductVersion', '1.1.5.1')
           ]
         )
       ]
