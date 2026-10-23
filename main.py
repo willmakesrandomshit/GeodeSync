@@ -17,6 +17,7 @@ import posixpath
 import shlex
 import zipfile
 import zlib
+import plistlib
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
@@ -41,7 +42,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -184,21 +185,151 @@ def open_url_or_path(path):
     return False
 
 
+def find_macos_game_app(game_path):
+    """Resolve either a Steam game folder or a selected .app bundle."""
+    if not game_path:
+        return None
+    game_path = os.path.abspath(os.path.expanduser(str(game_path)))
+    if game_path.lower().endswith(".app"):
+        return game_path if os.path.isdir(game_path) else None
+    for name in ("Geometry Dash.app", "GeometryDash.app"):
+        candidate = os.path.join(game_path, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def validate_macos_game_app(app_path):
+    """Return a useful bundle validation error, or None when launchable structure exists."""
+    if not app_path or not os.path.isdir(app_path):
+        return "Geometry Dash.app was not found in the selected Steam library."
+    plist_path = os.path.join(app_path, "Contents", "Info.plist")
+    try:
+        with open(plist_path, "rb") as stream:
+            metadata = plistlib.load(stream)
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        return f"Geometry Dash.app has a missing or unreadable Info.plist ({exc})."
+
+    executable_name = metadata.get("CFBundleExecutable")
+    if not isinstance(executable_name, str) or not executable_name or os.path.basename(executable_name) != executable_name:
+        return "Geometry Dash.app has an invalid CFBundleExecutable entry."
+    executable = os.path.join(app_path, "Contents", "MacOS", executable_name)
+    if not os.path.isfile(executable):
+        return f"Geometry Dash.app is incomplete: its executable is missing ({executable_name})."
+    if not os.access(executable, os.X_OK):
+        return "Geometry Dash.app's main executable is not marked executable. Use Steam's Verify integrity action to restore it."
+    return None
+
+
+def request_macos_steam_launch(game_path, runner=None):
+    """Ask LaunchServices to route the game request through Steam; this is not proof the game started."""
+    app_path = find_macos_game_app(game_path)
+    validation_error = validate_macos_game_app(app_path)
+    if validation_error:
+        return False, validation_error
+
+    runner = runner or subprocess.run
+    try:
+        result = runner(
+            ["/usr/bin/open", f"steam://run/{APP_ID}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"macOS could not pass the launch request to Steam: {exc}"
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        if details:
+            details = f"\n\nmacOS reported: {details[:1200]}"
+        return False, f"macOS rejected the Steam launch request (exit {result.returncode}).{details}"
+    return True, "Steam accepted the Geometry Dash launch request. This confirms dispatch only; Steam must still start the game."
+
+
+def wait_for_process(check_running, timeout=60, interval=1, clock=time.monotonic, sleep=time.sleep):
+    """Wait without blocking the UI-facing caller; Steam can take tens of seconds to start a game."""
+    deadline = clock() + max(0, timeout)
+    while True:
+        try:
+            if check_running():
+                return True
+        except Exception:
+            pass
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        sleep(min(interval, remaining))
+
+
+def _copy_directory_transactionally(source, destination, validator=None):
+    """Stage a complete directory beside its destination, then swap with rollback."""
+    source = os.path.abspath(source)
+    destination = os.path.abspath(destination)
+    parent = os.path.dirname(destination)
+    if not os.path.isdir(source):
+        raise FileNotFoundError(f"Source app bundle does not exist: {source}")
+    os.makedirs(parent, exist_ok=True)
+    stage_root = tempfile.mkdtemp(prefix=".geodesync-stage-", dir=parent)
+    staged = os.path.join(stage_root, os.path.basename(destination))
+    previous = os.path.join(stage_root, "previous")
+    moved_previous = False
+    try:
+        shutil.copytree(source, staged, symlinks=True, copy_function=shutil.copy2)
+        if validator:
+            problem = validator(staged)
+            if problem:
+                raise OSError(f"The downloaded Geometry Dash app bundle is incomplete: {problem}")
+        if os.path.lexists(destination):
+            os.replace(destination, previous)
+            moved_previous = True
+        try:
+            os.replace(staged, destination)
+        except Exception:
+            if moved_previous and os.path.lexists(previous):
+                os.replace(previous, destination)
+                moved_previous = False
+            raise
+    finally:
+        # Keep the old app in place if stage creation or validation failed.
+        if os.path.lexists(previous) and not os.path.lexists(destination):
+            os.replace(previous, destination)
+        shutil.rmtree(stage_root, ignore_errors=True)
+
+
 def safe_copy_item(src, dst, max_retries=5):
+    """Copy with bounded retries; file replacement is atomic and failures are never hidden."""
+    last_error = None
     for i in range(max_retries):
         try:
             if os.path.isdir(src):
                 shutil.copytree(src, dst, dirs_exist_ok=True)
             else:
-                shutil.copy2(src, dst)
+                parent = os.path.dirname(os.path.abspath(dst))
+                os.makedirs(parent, exist_ok=True)
+                fd, temporary = tempfile.mkstemp(prefix=".geodesync-copy-", dir=parent)
+                os.close(fd)
+                try:
+                    shutil.copy2(src, temporary)
+                    with open(temporary, "rb") as copied:
+                        os.fsync(copied.fileno())
+                    os.replace(temporary, dst)
+                finally:
+                    try:
+                        os.unlink(temporary)
+                    except FileNotFoundError:
+                        pass
             return True
-        except PermissionError:
+        except OSError as e:
+            last_error = e
+            if i == max_retries - 1:
+                raise
             time.sleep(0.4)
         except Exception as e:
             if i == max_retries - 1:
                 raise e
             time.sleep(0.4)
-    return False
+    raise last_error or OSError(f"Could not copy {src} to {dst}.")
 
 
 class GDManager:
@@ -601,17 +732,31 @@ class GDManager:
             try:
                 if IS_MAC:
                     if lock:
-                        try:
-                            subprocess.run(["chflags", "uchg", self.manifest_path], check=False)
-                        except Exception:
-                            pass
                         os.chmod(self.manifest_path, stat.S_IREAD)
-                    else:
                         try:
-                            subprocess.run(["chflags", "nouchg", self.manifest_path], check=False)
+                            subprocess.run(
+                                ["chflags", "uchg", self.manifest_path],
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                            )
                         except Exception:
-                            pass
+                            # Do not leave the manifest read-only if the immutable
+                            # flag could not be applied successfully.
+                            os.chmod(self.manifest_path, stat.S_IREAD | stat.S_IWRITE)
+                            raise
+                    else:
+                        subprocess.run(
+                            ["chflags", "nouchg", self.manifest_path],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                        )
                         os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
+                    if self.is_manifest_locked() is not lock:
+                        raise OSError("Steam appmanifest lock state did not change as requested.")
                     return
                 else:
                     if lock:
@@ -1130,16 +1275,50 @@ class GeodeSyncApp(tk.Tk):
             else:
                 return
 
-        threading.Thread(target=self._run_auto_downgrade, daemon=True).start()
+        # Claim the operation synchronously before starting a worker. If the
+        # depot is already cached, the worker can reach the file swap almost
+        # immediately; setting this only after Steam starts downloading allowed
+        # rapid clicks to launch two concurrent replacements of Geometry Dash.app.
+        self.is_downloading_depot = True
+        self.primary_btn.set_enabled(False)
+        self.primary_btn.set_config(text="Preparing downgrade…", bg="#334155", hover_bg="#334155")
+        try:
+            threading.Thread(target=self._run_auto_downgrade, daemon=True).start()
+        except Exception:
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
+            self.refresh_status()
+            raise
 
     def _run_auto_downgrade(self):
+        try:
+            self._run_auto_downgrade_impl()
+        except Exception as e:
+            self.is_downloading_depot = False
+            self.log(f"Downgrade stopped unexpectedly: {e}", "ERROR")
+            try:
+                self.primary_btn.set_enabled(True)
+                self.refresh_status()
+            except Exception:
+                pass
+            messagebox.showerror(
+                "Downgrade stopped",
+                f"GeodeSync stopped the downgrade before reporting success:\n\n{e}\n\n"
+                "Check the activity log before trying again.",
+            )
+
+    def _run_auto_downgrade_impl(self):
         if not self.mgr.gd_path:
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
             self.log("Geometry Dash folder not detected.", "ERROR")
             messagebox.showerror("Error", "Geometry Dash installation directory not found.")
             return
 
         steam_exe = self.mgr.get_steam_exe()
         if not steam_exe and not IS_MAC:
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
             self.log("Steam executable not found.", "ERROR")
             messagebox.showerror("Error", "Steam installation not found.")
             return
@@ -1168,7 +1347,6 @@ class GeodeSyncApp(tk.Tk):
             except Exception:
                 initial_log_offset = 0
 
-        self.is_downloading_depot = True
         self.guide_title.config(text="⏳ Steam is downloading files in background...")
         self.guide_desc.config(text="Monitoring Steam depot progress in real time...")
         self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg="#334155", hover_bg="#334155")
@@ -1233,7 +1411,6 @@ class GeodeSyncApp(tk.Tk):
                 download_finished = True
                 break
 
-        self.is_downloading_depot = False
         self.progress_bar["value"] = 100
         self.progress_lbl.config(text="Download complete! Applying files...")
         time.sleep(0.5)
@@ -1244,6 +1421,7 @@ class GeodeSyncApp(tk.Tk):
             self.log("Steam depot download completed!", "SUCCESS")
             self._apply_downgrade_files()
         else:
+            self.is_downloading_depot = False
             self.log("Steam download timed out or took longer than 6 mins.", "WARN")
             messagebox.showwarning("Download in Progress", "Steam is still downloading in the background. Check your Steam client and click again when ready!")
             self.refresh_status()
@@ -1251,7 +1429,10 @@ class GeodeSyncApp(tk.Tk):
     def _apply_downgrade_files(self):
         depot = self.mgr.get_depot_path()
         if not depot or not os.path.exists(depot):
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
             self.log("Depot path not found.", "ERROR")
+            self.refresh_status()
             return
 
         self.log("Backing up current files...", "INFO")
@@ -1277,14 +1458,20 @@ class GeodeSyncApp(tk.Tk):
             for item in os.listdir(depot):
                 s = os.path.join(depot, item)
                 d = os.path.join(self.mgr.gd_path, item)
-                if os.path.isdir(s) and os.path.exists(d):
-                    try:
-                        shutil.rmtree(d)
-                    except Exception:
-                        pass
+                if IS_MAC and item in ("Geometry Dash.app", "GeometryDash.app"):
+                    problem = validate_macos_game_app(s)
+                    if problem:
+                        raise OSError(f"The downloaded game app is not complete: {problem}")
+                    _copy_directory_transactionally(s, d, validate_macos_game_app)
+                    continue
+                if os.path.isdir(s) and os.path.lexists(d):
+                    # Never silently merge a new tree into an old one after a failed delete.
+                    shutil.rmtree(d)
                 safe_copy_item(s, d)
             self.log(f"Game files successfully replaced with {self.mgr.target_gd_version}!", "SUCCESS")
         except Exception as e:
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
             self.log(f"Failed to copy files: {e}", "ERROR")
             messagebox.showerror("Error", f"Failed to overwrite game files:\n{e}")
             self.refresh_status()
@@ -1296,6 +1483,8 @@ class GeodeSyncApp(tk.Tk):
         except Exception as e:
             self.log(f"Warning locking manifest: {e}", "WARN")
 
+        self.is_downloading_depot = False
+        self.primary_btn.set_enabled(True)
         self.refresh_status()
         self.play_ding()
         self.log(f"1-Click Fix Complete! Geometry Dash is now {self.mgr.target_gd_version}.", "SUCCESS")
@@ -1493,7 +1682,14 @@ class GeodeSyncApp(tk.Tk):
             self.mgr.set_manifest_locked(False)
             self.log("Unlocked appmanifest_322170.acf.", "SUCCESS")
         except Exception as e:
-            self.log(f"Warning unlocking manifest: {e}", "WARN")
+            self.log(f"Could not unlock Steam's appmanifest; stopping restore: {e}", "ERROR")
+            messagebox.showerror(
+                "Could not unlock Steam updates",
+                "GeodeSync could not safely unlock Steam's Geometry Dash manifest, so it did not start file verification.\n\n"
+                "Quit Steam, reopen GeodeSync, and try Restore to Latest GD again. If it still fails, send the GeodeSync log; "
+                "do not delete or edit Steam files manually.",
+            )
+            return
 
         self.log("Triggering Steam file verification...", "INFO")
         try:
@@ -1607,19 +1803,45 @@ class GeodeSyncApp(tk.Tk):
                 messagebox.showerror("Invalid Directory", f"The selected folder does not contain {target_name}.")
 
     def launch_gd(self):
+        if IS_MAC:
+            self.log("Checking Geometry Dash and requesting launch through Steam...", "INFO")
+            accepted, details = request_macos_steam_launch(self.mgr.gd_path)
+            if accepted:
+                self.log(details, "INFO")
+                threading.Thread(target=self._monitor_macos_launch, daemon=True).start()
+                return
+            self.log(details, "ERROR")
+            messagebox.showerror(
+                "Geometry Dash could not be launched",
+                f"{details}\n\nGeodeSync did not modify the game or bypass macOS security. "
+                "If the app bundle is complete, use Steam → Geometry Dash → Properties → Installed Files → "
+                "Verify integrity, then try launching from Steam. If Steam still reports OS Error 256, "
+                "the Steam launch log or macOS Console report is needed to identify the cause.",
+            )
+            return
+
         self.log("Launching Geometry Dash...", "INFO")
+        if not open_url_or_path(f"steam://run/{APP_ID}"):
+            self.log("Could not pass the Geometry Dash launch request to Steam.", "ERROR")
+            messagebox.showerror("Launch failed", "Could not pass the Geometry Dash launch request to Steam.")
+
+    def _monitor_macos_launch(self):
+        started = wait_for_process(self.mgr.is_gd_process_running, timeout=60, interval=1)
+        def report():
+            if started:
+                self.log("Geometry Dash process started successfully through Steam.", "SUCCESS")
+                return
+            message = (
+                "Steam accepted the launch request, but Geometry Dash did not start within 60 seconds. "
+                "Check Steam's gameprocess log and macOS Console for the launch failure; GeodeSync did not "
+                "change the game files during this launch attempt."
+            )
+            self.log(message, "ERROR")
+            messagebox.showerror("Geometry Dash did not start", message)
         try:
-            open_url_or_path(f"steam://run/{APP_ID}")
+            self.after(0, report)
         except Exception:
-            if self.mgr.gd_path:
-                if IS_MAC:
-                    app = os.path.join(self.mgr.gd_path, "Geometry Dash.app")
-                    if os.path.exists(app):
-                        open_url_or_path(app)
-                else:
-                    exe = os.path.join(self.mgr.gd_path, "GeometryDash.exe")
-                    if os.path.exists(exe):
-                        open_url_or_path(exe)
+            pass
 
     def check_remote_updates(self):
         try:

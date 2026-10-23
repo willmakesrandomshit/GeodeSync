@@ -1,4 +1,11 @@
-# GeodeSync v1.1.3
+# GeodeSync v1.1.4 — Downgrade and Steam Recovery Hotfix
+
+## Fixes
+
+- Prevent rapid repeated clicks from starting overlapping Geometry Dash downgrades and replacing the game app bundle concurrently.
+- Stop the restore flow if GeodeSync cannot verify that Steam's app manifest was unlocked; Steam validation is no longer started after an unlock failure.
+- Verify macOS Steam manifest lock/unlock state and roll back a failed lock attempt instead of leaving the manifest read-only.
+- Keep the macOS launch monitor waiting for slow Steam launches and report when the process actually starts.
 
 ## macOS app and updates
 
