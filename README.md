@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.5.2-green.svg)
+![Version](https://img.shields.io/badge/version-1.1.3-green.svg)
 
 ---
 
@@ -35,7 +35,7 @@ When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode**
 ## 📥 Download
 
 Grab the latest version from the **[Releases](https://github.com/willmakesrandomshit/GeodeSync/releases)** tab:
-* **`GeodeSync-v1.1.5.2-Windows.zip` (Recommended):** Extract and run `GeodeSync.exe`.
+* **`GeodeSync-v1.1.3-Windows.zip` (Recommended):** Extract and run `GeodeSync.exe`.
 * **`GeodeSync.exe`:** Standalone portable executable.
 * **macOS:** Download the `GeodeSync-macOS-arm64.zip` build for Apple silicon or `GeodeSync-macOS-x86_64.zip` for Intel, unzip, and open `GeodeSync.app`. These builds bundle Python and Tcl/Tk; no Terminal or Python install is required. Apple silicon requires macOS 11+, Intel requires macOS 10.15+.
 

@@ -1,21 +1,26 @@
-# GeodeSync v1.1.5.2 — macOS depot and downgrade hotfix
+# GeodeSync v1.1.3 — consolidated stability and macOS hotfix
 
-## macOS depot repair
+This release combines the earlier GeodeSync 1.1.3 features with the follow-up fixes for macOS installation, Steam recovery, game bundle validation, and app updates.
 
-- Resolve Steam's macOS console-download depot from the Steam.AppBundle location first, so a stale outer-folder cache cannot hide the depot Steam actually writes.
-- Reuse a cached Mac game bundle only when its metadata and executable validate.
-- Treat Steam's “depot download complete” log as a signal only; GeodeSync now installs only after the downloaded app bundle validates. If validation still fails, it leaves the installed game untouched and shows a recovery message.
-- Catch malformed `Info.plist` XML and report it as an invalid bundle.
+## macOS downgrade and recovery
 
-## Earlier fixes included
+- Prevent overlapping downgrade actions and replace the Geometry Dash app bundle transactionally, preserving the old install if validation or replacement fails.
+- Resolve Steam's macOS depot from the canonical Steam.AppBundle location first; ignore stale or invalid cached depots.
+- Validate the downloaded game bundle and its `Info.plist` before installing it. A Steam completion log alone is not accepted as proof that files are ready.
+- If the depot is malformed or incomplete, leave the installed game untouched and report a recoverable error.
+- Verify Steam manifest lock and unlock operations. Do not start Steam file verification when safely unlocking the manifest failed.
+- Distinguish a Steam launch request from the game actually starting, and wait for slow launches before reporting failure.
+- Report malformed bundle metadata clearly, including trailing or invalid plist content.
 
-- Prevent overlapping downgrade clicks and replace the Mac game app transactionally with rollback.
-- Stop Restore to Latest GD if Steam's manifest cannot be safely unlocked; verify manifest lock and unlock operations.
-- Monitor Steam launches and distinguish request accepted from the game process actually starting.
-- Compare numeric GeodeSync versions and refuse to offer or install older releases.
-- Verify Mac updater architecture, bundle structure, and SHA-256 before replacement.
+## App updater and compatibility
+
+- Compare numeric app versions and never offer or install an older release.
+- Verify Mac updater architecture, app bundle structure, and GitHub SHA-256 digest before replacing the app.
+- Keep user saves and existing installations intact when an update or recovery step fails.
 
 ## Builds
 
-- GitHub Actions builds and tests Windows, Apple silicon, and Intel Mac packages. Mac app builds include Python, Tcl, and Tk.
-- Unsigned community builds may require Control-click → Open once in macOS.
+- GitHub Actions builds Windows, Apple silicon, and Intel Mac packages and runs the regression suite.
+- Mac builds include Python, Tcl, and Tk. Unsigned builds may require Control-click → Open once in macOS.
+
+This release does not claim to repair a Geometry Dash installation that was already left corrupted. Use Steam's Verify integrity after restoring the game, then try launching from Steam before applying a downgrade again.

@@ -43,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.5.2"
+APP_VERSION = "1.1.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
