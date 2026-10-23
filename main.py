@@ -43,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.5"
+APP_VERSION = "1.1.5.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -52,6 +52,22 @@ APP_ID = "322170"
 DEPOT_ID = "322172" if IS_MAC else "322171"
 DEFAULT_MANIFEST = "8780295549609362522" if IS_MAC else "3816559102876907245"
 DEFAULT_TARGET_GD = "2.2081"
+
+
+def is_newer_app_version(candidate, current):
+    """Compare numeric release versions without offering accidental downgrades."""
+    def parts(version):
+        version = str(version or "").strip().lstrip("v")
+        if not version or not re.fullmatch(r"\d+(?:\.\d+)*", version):
+            return None
+        return tuple(int(part) for part in version.split("."))
+
+    candidate_parts = parts(candidate)
+    current_parts = parts(current)
+    if candidate_parts is None or current_parts is None:
+        return False
+    width = max(len(candidate_parts), len(current_parts))
+    return candidate_parts + (0,) * (width - len(candidate_parts)) > current_parts + (0,) * (width - len(current_parts))
 
 if IS_MAC:
     KNOWN_VERSIONS = {
@@ -1868,7 +1884,7 @@ class GeodeSyncApp(tk.Tk):
             with urllib.request.urlopen(req, timeout=4) as resp:
                 rel = json.loads(resp.read().decode())
                 tag = rel.get("tag_name", "").lstrip("v")
-                if tag and tag != APP_VERSION:
+                if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
                     self.show_update_banner(tag)
         except Exception:
@@ -2291,6 +2307,9 @@ class GeodeSyncApp(tk.Tk):
             req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode())
+                tag = str(data.get("tag_name", "")).strip()
+                if not is_newer_app_version(tag, APP_VERSION):
+                    raise ValueError("GitHub did not report a newer GeodeSync release.")
                 asset_url = None
                 for asset in data.get("assets", []):
                     if asset.get("name") == "GeodeSync.exe":
@@ -2373,7 +2392,7 @@ class GeodeSyncApp(tk.Tk):
             release_url = release.get("html_url", release_url)
             self.latest_release_url = release_url
             version = tag.lstrip("v")
-            if not version or version == APP_VERSION:
+            if not is_newer_app_version(version, APP_VERSION):
                 raise ValueError("GitHub did not report a newer GeodeSync release.")
 
             asset = select_macos_update_asset(release)

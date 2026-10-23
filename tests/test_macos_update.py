@@ -13,6 +13,7 @@ from main import (
     GeodeSyncApp,
     _copy_directory_transactionally,
     find_macos_game_app,
+    is_newer_app_version,
     request_macos_steam_launch,
     select_macos_update_asset,
     safe_copy_item,
@@ -28,6 +29,13 @@ def release_asset(name, url="https://github.com/releases/download/v1.1.3/app.zip
 
 
 class MacUpdateValidationTests(unittest.TestCase):
+    def test_release_version_comparison_never_offers_a_downgrade(self):
+        self.assertTrue(is_newer_app_version("v1.1.5.1", "1.1.5"))
+        self.assertTrue(is_newer_app_version("1.1.5.1", "1.1.5"))
+        self.assertFalse(is_newer_app_version("1.1.3.1", "1.1.5"))
+        self.assertFalse(is_newer_app_version("1.1.5", "1.1.5.0"))
+        self.assertFalse(is_newer_app_version("preview", "1.1.5"))
+
     def test_requires_matching_sha256_asset_digest(self):
         digest = "a" * 64
         verify_macos_update_digest(f"sha256:{digest}", digest)
