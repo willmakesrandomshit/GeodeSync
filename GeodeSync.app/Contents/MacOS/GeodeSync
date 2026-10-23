@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+cd "$DIR"
+
+if command -v python3 &> /dev/null; then
+    python3 main.py
+else
+    open "https://www.python.org/downloads/macos/"
+fi

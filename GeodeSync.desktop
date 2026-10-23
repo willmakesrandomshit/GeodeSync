@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=GeodeSync
+Comment=1-Click Geometry Dash Downgrader, Save Doctor & Mod Suite
+Exec=python3 main.py
+Icon=applications-games
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=true

@@ -5,28 +5,36 @@ import json
 import shutil
 import stat
 import time
-import winreg
+import tempfile
 import urllib.request
 import webbrowser
 import threading
 import subprocess
-import winsound
 import base64
 import zlib
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 
-# Enable DPI Awareness for high-res monitors
-try:
-    import ctypes
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except Exception:
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+
+if IS_WIN:
+    import winreg
+    import winsound
     try:
         import ctypes
-        ctypes.windll.user32.SetProcessDPIAware()
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
-        pass
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+else:
+    winreg = None
+    winsound = None
 
 APP_VERSION = "1.1.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
@@ -34,32 +42,72 @@ CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 APP_ID = "322170"
-DEPOT_ID = "322171"
-DEFAULT_MANIFEST = "3816559102876907245"
+DEPOT_ID = "322172" if IS_MAC else "322171"
+DEFAULT_MANIFEST = "8780295549609362522" if IS_MAC else "3816559102876907245"
 DEFAULT_TARGET_GD = "2.2081"
 
-# Known version depot manifests
-KNOWN_VERSIONS = {
-    "2.2081 (Geode Compatible • Recommended)": {
-        "manifest": "3816559102876907245",
-        "ver": "2.2081",
-        "size": 10700288
-    },
-    "2.2074 (Previous 2.2 Sub-update)": {
-        "manifest": "4978051680517726588",
-        "ver": "2.2074",
-        "size": 10698752
-    },
-    "2.113 (Classic 2.11 Legacy)": {
-        "manifest": "7938363717144760233",
-        "ver": "2.113",
-        "size": 7578624
+if IS_MAC:
+    KNOWN_VERSIONS = {
+        "2.2081 (Geode Compatible • macOS Recommended)": {
+            "manifest": "8780295549609362522",
+            "ver": "2.2081",
+            "size": 0
+        }
     }
-}
+else:
+    KNOWN_VERSIONS = {
+        "2.2081 (Geode Compatible • Recommended)": {
+            "manifest": "3816559102876907245",
+            "ver": "2.2081",
+            "size": 10700288
+        },
+        "2.2074 (Previous 2.2 Sub-update)": {
+            "manifest": "4978051680517726588",
+            "ver": "2.2074",
+            "size": 10698752
+        },
+        "2.113 (Classic 2.11 Legacy)": {
+            "manifest": "7938363717144760233",
+            "ver": "2.113",
+            "size": 7578624
+        }
+    }
 
 SIZE_22081 = 10700288
 SIZE_2209 = 13178880
-EXPECTED_DEPOT_BYTES = 204000000  # ~195 MB
+EXPECTED_DEPOT_BYTES = 230000000 if IS_MAC else 204000000
+
+
+def open_url_or_path(path):
+    if not path:
+        return False
+    path_str = str(path)
+    if IS_WIN:
+        try:
+            os.startfile(path_str)
+            return True
+        except Exception:
+            pass
+    elif IS_MAC:
+        try:
+            subprocess.Popen(["open", path_str])
+            return True
+        except Exception:
+            pass
+    else:
+        try:
+            subprocess.Popen(["xdg-open", path_str])
+            return True
+        except Exception:
+            pass
+
+    if "://" in path_str:
+        try:
+            webbrowser.open(path_str)
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def safe_copy_item(src, dst, max_retries=5):
@@ -88,13 +136,36 @@ class GDManager:
         self.target_gd_version = DEFAULT_TARGET_GD
 
     def detect_steam_path(self):
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-                val, _ = winreg.QueryValueEx(key, "SteamPath")
-                if os.path.exists(val):
-                    return os.path.abspath(val)
-        except Exception:
-            pass
+        if IS_MAC:
+            candidates = [
+                os.path.expanduser("~/Library/Application Support/Steam"),
+                "/Applications/Steam.app"
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    return c
+            return os.path.expanduser("~/Library/Application Support/Steam")
+
+        if IS_LINUX:
+            candidates = [
+                os.path.expanduser("~/.local/share/Steam"),
+                os.path.expanduser("~/.steam/steam"),
+                os.path.expanduser("~/.var/app/com.valvesoftware.Steam/data/Steam"),
+                os.path.expanduser("~/.steam/root")
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    return c
+            return os.path.expanduser("~/.local/share/Steam")
+
+        if IS_WIN and winreg:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+                    val, _ = winreg.QueryValueEx(key, "SteamPath")
+                    if os.path.exists(val):
+                        return os.path.abspath(val)
+            except Exception:
+                pass
 
         default = r"C:\Program Files (x86)\Steam"
         if os.path.exists(default):
@@ -102,6 +173,20 @@ class GDManager:
         return None
 
     def get_steam_exe(self):
+        if IS_MAC:
+            candidates = [
+                "/Applications/Steam.app/Contents/MacOS/steam_osx",
+                os.path.expanduser("~/Applications/Steam.app/Contents/MacOS/steam_osx"),
+                "/Applications/Steam.app"
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    return c
+            return "/Applications/Steam.app"
+
+        if IS_LINUX:
+            return shutil.which("steam") or "steam"
+
         if self.steam_path:
             exe = os.path.join(self.steam_path, "steam.exe")
             if os.path.exists(exe):
@@ -109,15 +194,31 @@ class GDManager:
         return None
 
     def is_steam_running(self):
+        if IS_MAC:
+            try:
+                output = subprocess.check_output(["pgrep", "-xi", "steam"]).decode()
+                return bool(output.strip())
+            except subprocess.CalledProcessError:
+                return False
+            except Exception:
+                return True
+
+        if IS_WIN:
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                output = subprocess.check_output(
+                    ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
+                    startupinfo=si,
+                    creationflags=0x08000000
+                ).decode(errors="ignore")
+                return "steam.exe" in output.lower()
+            except Exception:
+                return True
+
         try:
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            output = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
-                startupinfo=si,
-                creationflags=0x08000000
-            ).decode(errors="ignore")
-            return "steam.exe" in output.lower()
+            output = subprocess.check_output(["pgrep", "-xi", "steam"]).decode()
+            return bool(output.strip())
         except Exception:
             return True
 
@@ -128,6 +229,11 @@ class GDManager:
         default_gd = os.path.join(self.steam_path, "steamapps", "common", "Geometry Dash")
         if os.path.exists(default_gd):
             return default_gd
+
+        if IS_MAC:
+            mac_default = os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/Geometry Dash")
+            if os.path.exists(mac_default):
+                return mac_default
 
         vdf_path = os.path.join(self.steam_path, "steamapps", "libraryfolders.vdf")
         if os.path.exists(vdf_path):
@@ -160,6 +266,16 @@ class GDManager:
 
     def get_depot_path(self):
         if self.steam_path:
+            if IS_MAC:
+                candidates = [
+                    os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
+                    os.path.expanduser(f"~/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_{APP_ID}/depot_{DEPOT_ID}"),
+                    os.path.expanduser(f"~/Library/Application Support/Steam/steamapps/content/app_{APP_ID}/depot_{DEPOT_ID}")
+                ]
+                for c in candidates:
+                    if os.path.exists(c):
+                        return c
+                return candidates[0]
             d_path = os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}")
             return d_path
         return None
@@ -189,6 +305,26 @@ class GDManager:
         return None
 
     def get_save_data_dir(self):
+        if IS_MAC:
+            mac_save = os.path.expanduser("~/Library/Application Support/GeometryDash")
+            if os.path.exists(mac_save):
+                return mac_save
+            return mac_save
+
+        if IS_LINUX:
+            candidates = []
+            if self.steam_path:
+                candidates.append(os.path.join(self.steam_path, "steamapps", "compatdata", APP_ID, "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "GeometryDash"))
+            candidates.extend([
+                os.path.expanduser(f"~/.local/share/Steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash"),
+                os.path.expanduser(f"~/.steam/steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash"),
+                os.path.expanduser(f"~/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash")
+            ])
+            for c in candidates:
+                if os.path.exists(c):
+                    return c
+            return candidates[0] if candidates else None
+
         appdata = os.environ.get("LOCALAPPDATA")
         if appdata:
             gd_save = os.path.join(appdata, "GeometryDash")
@@ -198,11 +334,13 @@ class GDManager:
 
     def get_crashlogs_dir(self):
         candidates = []
+        if IS_MAC:
+            candidates.append(os.path.expanduser("~/Library/Application Support/GeometryDash/geode/crashlogs"))
         if self.gd_path:
             candidates.append(os.path.join(self.gd_path, "geode", "crashlogs"))
-        appdata = os.environ.get("LOCALAPPDATA")
-        if appdata:
-            candidates.append(os.path.join(appdata, "GeometryDash", "geode", "crashlogs"))
+        save_dir = self.get_save_data_dir()
+        if save_dir:
+            candidates.append(os.path.join(save_dir, "geode", "crashlogs"))
         for c in candidates:
             if os.path.exists(c):
                 return c
@@ -211,6 +349,27 @@ class GDManager:
     def get_gd_version_info(self):
         if not self.gd_path:
             return "Not Installed", "#ef4444"
+
+        if IS_MAC:
+            app_path = os.path.join(self.gd_path, "Geometry Dash.app")
+            if not os.path.exists(app_path):
+                app_path = os.path.join(self.gd_path, "GeometryDash.app")
+            if not os.path.exists(app_path):
+                return "Missing Geometry Dash.app", "#ef4444"
+            plist_path = os.path.join(app_path, "Contents", "Info.plist")
+            if os.path.exists(plist_path):
+                try:
+                    import plistlib
+                    with open(plist_path, "rb") as fp:
+                        pl = plistlib.load(fp)
+                    ver = str(pl.get("CFBundleShortVersionString") or pl.get("CFBundleVersion") or "")
+                    if "2.2081" in ver or ver == "2.2081":
+                        return f"{self.target_gd_version} (Geode Compatible)", "#10b981"
+                    elif ver:
+                        return f"{ver}", "#60a5fa"
+                except Exception:
+                    pass
+            return f"{self.target_gd_version} (macOS)", "#10b981"
 
         exe_path = os.path.join(self.gd_path, "GeometryDash.exe")
         if not os.path.exists(exe_path):
@@ -232,6 +391,27 @@ class GDManager:
     def is_current_gd_22081(self):
         if not self.gd_path:
             return False
+        if IS_MAC:
+            app_path = os.path.join(self.gd_path, "Geometry Dash.app")
+            if not os.path.exists(app_path):
+                app_path = os.path.join(self.gd_path, "GeometryDash.app")
+            if not os.path.exists(app_path):
+                return False
+            plist_path = os.path.join(app_path, "Contents", "Info.plist")
+            if os.path.exists(plist_path):
+                try:
+                    import plistlib
+                    with open(plist_path, "rb") as fp:
+                        pl = plistlib.load(fp)
+                    ver = str(pl.get("CFBundleShortVersionString") or pl.get("CFBundleVersion") or "")
+                    if "2.209" in ver:
+                        return False
+                    if "2.2081" in ver:
+                        return True
+                except Exception:
+                    pass
+            return os.path.exists(app_path)
+
         exe = os.path.join(self.gd_path, "GeometryDash.exe")
         if os.path.exists(exe):
             try:
@@ -241,29 +421,61 @@ class GDManager:
         return False
 
     def is_gd_process_running(self):
+        if IS_MAC:
+            try:
+                output = subprocess.check_output(["pgrep", "-f", "Geometry Dash"]).decode()
+                return bool(output.strip())
+            except subprocess.CalledProcessError:
+                return False
+            except Exception:
+                return False
+
+        if IS_WIN:
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                output = subprocess.check_output(
+                    ["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"],
+                    startupinfo=si,
+                    creationflags=0x08000000
+                ).decode(errors="ignore")
+                return "geometrydash.exe" in output.lower()
+            except Exception:
+                return False
+
         try:
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            output = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"],
-                startupinfo=si,
-                creationflags=0x08000000
-            ).decode(errors="ignore")
-            return "geometrydash.exe" in output.lower()
+            output = subprocess.check_output(["pgrep", "-f", "GeometryDash"]).decode()
+            return bool(output.strip())
         except Exception:
             return False
 
     def close_gd_process(self):
+        if IS_MAC:
+            try:
+                subprocess.run(["killall", "Geometry Dash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+                return True
+            except Exception:
+                return False
+
+        if IS_WIN:
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "GeometryDash.exe"],
+                    startupinfo=si,
+                    creationflags=0x08000000,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                time.sleep(1)
+                return True
+            except Exception:
+                return False
+
         try:
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "GeometryDash.exe"],
-                startupinfo=si,
-                creationflags=0x08000000,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            subprocess.run(["killall", "-9", "GeometryDash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
             return True
         except Exception:
@@ -297,6 +509,11 @@ class GDManager:
         if not self.manifest_path or not os.path.exists(self.manifest_path):
             return False
         try:
+            if IS_MAC:
+                st = os.stat(self.manifest_path)
+                if hasattr(st, "st_flags") and (st.st_flags & stat.UF_IMMUTABLE):
+                    return True
+                return not bool(st.st_mode & stat.S_IWRITE)
             mode = os.stat(self.manifest_path).st_mode
             return not bool(mode & stat.S_IWRITE)
         except Exception:
@@ -308,11 +525,26 @@ class GDManager:
 
         for attempt in range(5):
             try:
-                if lock:
-                    os.chmod(self.manifest_path, stat.S_IREAD)
+                if IS_MAC:
+                    if lock:
+                        try:
+                            subprocess.run(["chflags", "uchg", self.manifest_path], check=False)
+                        except Exception:
+                            pass
+                        os.chmod(self.manifest_path, stat.S_IREAD)
+                    else:
+                        try:
+                            subprocess.run(["chflags", "nouchg", self.manifest_path], check=False)
+                        except Exception:
+                            pass
+                        os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
+                    return
                 else:
-                    os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
-                return
+                    if lock:
+                        os.chmod(self.manifest_path, stat.S_IREAD)
+                    else:
+                        os.chmod(self.manifest_path, stat.S_IWRITE | stat.S_IREAD)
+                    return
             except PermissionError:
                 time.sleep(0.3)
             except Exception as e:
@@ -323,6 +555,11 @@ class GDManager:
     def has_downloaded_depot(self):
         d_path = self.get_depot_path()
         if d_path and os.path.exists(d_path):
+            if IS_MAC:
+                app_path = os.path.join(d_path, "Geometry Dash.app")
+                if not os.path.exists(app_path):
+                    app_path = os.path.join(d_path, "GeometryDash.app")
+                return os.path.exists(app_path)
             exe = os.path.join(d_path, "GeometryDash.exe")
             try:
                 return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081
@@ -333,6 +570,11 @@ class GDManager:
     def is_geode_installed(self):
         if not self.gd_path:
             return False
+        if IS_MAC:
+            app_dir = os.path.join(self.gd_path, "Geometry Dash.app")
+            mac_geode_dir = os.path.expanduser("~/Library/Application Support/GeometryDash/geode")
+            in_app_geode = os.path.join(app_dir, "Contents", "Frameworks", "Geode.dylib")
+            return os.path.exists(mac_geode_dir) or os.path.exists(in_app_geode)
         dll = os.path.join(self.gd_path, "Geode.dll")
         proxy = os.path.join(self.gd_path, "XInput1_4.dll")
         geode_dir = os.path.join(self.gd_path, "geode")
@@ -416,17 +658,19 @@ class GeodeSyncApp(tk.Tk):
         self.minsize(740, 720)
         self.configure(bg="#0f141c")
 
-        try:
-            import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"geodesync.switcher.v{APP_VERSION}")
-        except Exception:
-            pass
+        if IS_WIN:
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"geodesync.switcher.v{APP_VERSION}")
+            except Exception:
+                pass
 
         base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
         icon_path = os.path.join(base_dir, "icon.ico")
         if os.path.exists(icon_path):
             try:
-                self.iconbitmap(icon_path)
+                if IS_WIN:
+                    self.iconbitmap(icon_path)
             except Exception:
                 pass
 
@@ -651,10 +895,16 @@ class GeodeSyncApp(tk.Tk):
         self.log_text.config(state="disabled")
 
     def play_ding(self):
-        try:
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        except Exception:
-            pass
+        if IS_WIN and winsound:
+            try:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
+        elif IS_MAC:
+            try:
+                subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"])
+            except Exception:
+                pass
 
     def refresh_status(self):
         ver_text, ver_color = self.mgr.get_gd_version_info()
@@ -743,17 +993,25 @@ class GeodeSyncApp(tk.Tk):
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode())
                 download_url = None
-                installer_name = "geode-installer.exe"
+                installer_name = "geode-installer.pkg" if IS_MAC else "geode-installer.exe"
                 for asset in data.get("assets", []):
-                    if asset.get("name", "").endswith(".exe") and "win" in asset.get("name", "").lower():
-                        download_url = asset.get("browser_download_url")
-                        installer_name = asset.get("name")
-                        break
+                    name = asset.get("name", "").lower()
+                    if IS_MAC:
+                        if name.endswith(".pkg") or name.endswith(".dmg") or ("mac" in name and name.endswith(".zip")):
+                            download_url = asset.get("browser_download_url")
+                            installer_name = asset.get("name")
+                            break
+                    else:
+                        if name.endswith(".exe") and "win" in name:
+                            download_url = asset.get("browser_download_url")
+                            installer_name = asset.get("name")
+                            break
 
             if not download_url:
-                raise Exception("Could not locate Windows installer asset in release.")
+                raise Exception("Could not locate installer asset for this operating system.")
 
-            dest_path = os.path.join(os.environ.get("TEMP", "C:\\Temp"), installer_name)
+            dest_dir = tempfile.gettempdir()
+            dest_path = os.path.join(dest_dir, installer_name)
             self.log(f"Downloading {installer_name}...", "INFO")
             self.progress_lbl.config(text=f"Downloading {installer_name}...")
             self.progress_bar["value"] = 40
@@ -764,7 +1022,7 @@ class GeodeSyncApp(tk.Tk):
             self.progress_frame.pack_forget()
             self.primary_btn.set_enabled(True)
 
-            os.startfile(dest_path)
+            open_url_or_path(dest_path)
             messagebox.showinfo(
                 "Geode Installer Launched",
                 "The official Geode installer has started!\n\n"
@@ -807,21 +1065,24 @@ class GeodeSyncApp(tk.Tk):
             return
 
         steam_exe = self.mgr.get_steam_exe()
-        if not steam_exe:
+        if not steam_exe and not IS_MAC:
             self.log("Steam executable not found.", "ERROR")
-            messagebox.showerror("Error", "Steam.exe not found.")
+            messagebox.showerror("Error", "Steam installation not found.")
             return
 
         if not self.mgr.is_steam_running():
             self.log("Steam is not currently running. Launching Steam...", "INFO")
             try:
-                subprocess.Popen([steam_exe])
+                if IS_MAC:
+                    subprocess.Popen(["open", "-a", "Steam"])
+                elif steam_exe:
+                    subprocess.Popen([steam_exe])
                 time.sleep(5)
             except Exception as e:
                 self.log(f"Warning launching Steam: {e}", "WARN")
 
         if self.mgr.has_downloaded_depot():
-            self.log("2.2081 files already present on disk. Applying directly...", "INFO")
+            self.log(f"{self.mgr.target_gd_version} files already present on disk. Applying directly...", "INFO")
             self._apply_downgrade_files()
             return
 
@@ -844,7 +1105,14 @@ class GeodeSyncApp(tk.Tk):
         self.progress_bar["value"] = 5
         self.progress_lbl.config(text="Sending download command to Steam...")
 
-        args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+        if IS_MAC:
+            if steam_exe and steam_exe.endswith("steam_osx") and os.path.exists(steam_exe):
+                args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+            else:
+                args = ["open", "-a", "Steam", "--args", "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+        else:
+            args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+
         self.log("Sending automated download command to Steam...", "INFO")
 
         try:
@@ -870,7 +1138,8 @@ class GeodeSyncApp(tk.Tk):
             pct = min(96, int((cur_bytes / EXPECTED_DEPOT_BYTES) * 100))
             if pct > 5:
                 self.progress_bar["value"] = pct
-                self.progress_lbl.config(text=f"Downloading from Steam: {cur_mb} MB / ~195 MB ({pct}%)")
+                total_mb = round(EXPECTED_DEPOT_BYTES / (1024 * 1024))
+                self.progress_lbl.config(text=f"Downloading from Steam: {cur_mb} MB / ~{total_mb} MB ({pct}%)")
 
             # Check Steam console log for completion flag
             if log_path and os.path.exists(log_path):
@@ -880,7 +1149,7 @@ class GeodeSyncApp(tk.Tk):
                         with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
                             f.seek(initial_log_offset)
                             new_content = f.read()
-                            if "Depot download complete" in new_content and "depot_322171" in new_content:
+                            if "Depot download complete" in new_content and f"depot_{DEPOT_ID}" in new_content:
                                 download_finished = True
                                 break
                 except Exception:
@@ -916,10 +1185,15 @@ class GeodeSyncApp(tk.Tk):
         try:
             if not os.path.exists(backup_dir):
                 os.makedirs(backup_dir, exist_ok=True)
-                for f in ["GeometryDash.exe", "libcocos2d.dll", "libExtensions.dll"]:
-                    src_f = os.path.join(self.mgr.gd_path, f)
-                    if os.path.exists(src_f):
-                        safe_copy_item(src_f, os.path.join(backup_dir, f))
+                if IS_MAC:
+                    app_src = os.path.join(self.mgr.gd_path, "Geometry Dash.app")
+                    if os.path.exists(app_src):
+                        safe_copy_item(app_src, os.path.join(backup_dir, "Geometry Dash.app"))
+                else:
+                    for f in ["GeometryDash.exe", "libcocos2d.dll", "libExtensions.dll"]:
+                        src_f = os.path.join(self.mgr.gd_path, f)
+                        if os.path.exists(src_f):
+                            safe_copy_item(src_f, os.path.join(backup_dir, f))
                 self.log("Created backup of current files.", "INFO")
         except Exception as e:
             self.log(f"Backup warning: {e}", "WARN")
@@ -929,6 +1203,11 @@ class GeodeSyncApp(tk.Tk):
             for item in os.listdir(depot):
                 s = os.path.join(depot, item)
                 d = os.path.join(self.mgr.gd_path, item)
+                if os.path.isdir(s) and os.path.exists(d):
+                    try:
+                        shutil.rmtree(d)
+                    except Exception:
+                        pass
                 safe_copy_item(s, d)
             self.log(f"Game files successfully replaced with {self.mgr.target_gd_version}!", "SUCCESS")
         except Exception as e:
@@ -953,17 +1232,17 @@ class GeodeSyncApp(tk.Tk):
     # ==========================================
     def fix_click_delay(self):
         applied = []
-        appdata = os.environ.get("LOCALAPPDATA")
-        if not appdata:
-            messagebox.showerror("Error", "Could not locate LocalAppData folder.")
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir:
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
-        # 1. FMOD Hacker low-latency configuration (~2.7ms)
-        fmod_dir = os.path.join(appdata, "GeometryDash", "geode", "mods", "square3ang.fmod-hacker")
+        # 1. FMOD low-latency configuration (~2.7ms)
+        fmod_dir = os.path.join(save_dir, "geode", "mods", "square3ang.fmod-hacker")
         try:
             os.makedirs(fmod_dir, exist_ok=True)
             fmod_settings = {
-                "output-type": "WASAPI",
+                "output-type": "CoreAudio" if IS_MAC else "WASAPI",
                 "sample-rate": "48000",
                 "buffer-size": "128",
                 "master-volume": 100,
@@ -971,12 +1250,12 @@ class GeodeSyncApp(tk.Tk):
             }
             with open(os.path.join(fmod_dir, "settings.json"), "w", encoding="utf-8") as f:
                 json.dump(fmod_settings, f, indent=2)
-            applied.append("✓ FMOD Audio Buffer set to 128 samples / WASAPI (slashes audio delay to ~2.7ms)")
+            applied.append(f"✓ FMOD Audio Buffer set to 128 samples / {'CoreAudio' if IS_MAC else 'WASAPI'} (slashes audio delay to ~2.7ms)")
         except Exception as e:
             self.log(f"FMOD optimizer note: {e}", "WARN")
 
         # 2. CBF Mouse Lag Fix
-        cbf_dir = os.path.join(appdata, "GeometryDash", "geode", "mods", "syzzi.click_between_frames")
+        cbf_dir = os.path.join(save_dir, "geode", "mods", "syzzi.click_between_frames")
         cbf_file = os.path.join(cbf_dir, "settings.json")
         try:
             if os.path.exists(cbf_file):
@@ -990,7 +1269,7 @@ class GeodeSyncApp(tk.Tk):
             pass
 
         # 3. Click Sounds Queue Optimization
-        cs_dir = os.path.join(appdata, "GeometryDash", "geode", "mods", "beat.click-sound")
+        cs_dir = os.path.join(save_dir, "geode", "mods", "beat.click-sound")
         cs_file = os.path.join(cs_dir, "settings.json")
         try:
             if os.path.exists(cs_file):
@@ -1144,7 +1423,7 @@ class GeodeSyncApp(tk.Tk):
 
         self.log("Triggering Steam file verification...", "INFO")
         try:
-            os.startfile(f"steam://validate/{APP_ID}")
+            open_url_or_path(f"steam://validate/{APP_ID}")
             self.log("Triggered steam://validate/322170. Steam is now updating GD.", "SUCCESS")
             self.play_ding()
             messagebox.showinfo(
@@ -1161,7 +1440,7 @@ class GeodeSyncApp(tk.Tk):
     def backup_saves(self):
         save_dir = self.mgr.get_save_data_dir()
         if not save_dir:
-            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
         backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
@@ -1212,41 +1491,71 @@ class GeodeSyncApp(tk.Tk):
         self.log(f"Restored {restored} save files from: {os.path.basename(latest_backup)}", "SUCCESS")
         messagebox.showinfo("Saves Restored", f"Restored {restored} save files successfully!")
 
-    def open_mods_folder(self):
+    def get_mods_dir(self):
+        if IS_MAC:
+            mac_mods = os.path.expanduser("~/Library/Application Support/GeometryDash/geode/mods")
+            os.makedirs(mac_mods, exist_ok=True)
+            return mac_mods
         if self.mgr.gd_path:
-            mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+            mods_p = os.path.join(self.mgr.gd_path, "geode", "mods")
+            os.makedirs(mods_p, exist_ok=True)
+            return mods_p
+        return None
+
+    def open_mods_folder(self):
+        mods_dir = self.get_mods_dir()
+        if mods_dir:
             os.makedirs(mods_dir, exist_ok=True)
-            os.startfile(mods_dir)
+            open_url_or_path(mods_dir)
         else:
-            messagebox.showerror("Error", "Geometry Dash folder not found.")
+            messagebox.showerror("Error", "Geometry Dash mods folder not found.")
 
     def browse_gd_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Folder")
         if selected:
-            if os.path.exists(os.path.join(selected, "GeometryDash.exe")):
+            is_valid = False
+            if IS_MAC:
+                if os.path.exists(os.path.join(selected, "Geometry Dash.app")) or os.path.exists(os.path.join(selected, "GeometryDash.app")) or selected.endswith(".app"):
+                    is_valid = True
+                    if selected.endswith(".app"):
+                        selected = os.path.dirname(selected)
+            else:
+                if os.path.exists(os.path.join(selected, "GeometryDash.exe")):
+                    is_valid = True
+
+            if is_valid:
                 self.mgr.gd_path = os.path.abspath(selected)
                 self.mgr.manifest_path = self.mgr.get_manifest_path()
                 self.log(f"Updated GD directory to: {self.mgr.gd_path}", "INFO")
                 self.refresh_status()
             else:
-                messagebox.showerror("Invalid Directory", "The selected folder does not contain GeometryDash.exe.")
+                target_name = "Geometry Dash.app" if IS_MAC else "GeometryDash.exe"
+                messagebox.showerror("Invalid Directory", f"The selected folder does not contain {target_name}.")
 
     def launch_gd(self):
         self.log("Launching Geometry Dash...", "INFO")
         try:
-            os.startfile(f"steam://run/{APP_ID}")
+            open_url_or_path(f"steam://run/{APP_ID}")
         except Exception:
             if self.mgr.gd_path:
-                exe = os.path.join(self.mgr.gd_path, "GeometryDash.exe")
-                if os.path.exists(exe):
-                    os.startfile(exe)
+                if IS_MAC:
+                    app = os.path.join(self.mgr.gd_path, "Geometry Dash.app")
+                    if os.path.exists(app):
+                        open_url_or_path(app)
+                else:
+                    exe = os.path.join(self.mgr.gd_path, "GeometryDash.exe")
+                    if os.path.exists(exe):
+                        open_url_or_path(exe)
 
     def check_remote_updates(self):
         try:
             req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
             with urllib.request.urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode())
-                if "target_manifest" in data and data["target_manifest"]:
+                manifest_key = "target_manifest_mac" if IS_MAC else "target_manifest_win"
+                if manifest_key in data and data[manifest_key]:
+                    self.mgr.target_manifest = data[manifest_key]
+                elif "target_manifest" in data and data["target_manifest"] and not IS_MAC:
                     self.mgr.target_manifest = data["target_manifest"]
                 if "geode_target_gd" in data and data["geode_target_gd"]:
                     self.mgr.target_gd_version = data["geode_target_gd"]
@@ -1278,7 +1587,7 @@ class GeodeSyncApp(tk.Tk):
     def run_save_doctor(self):
         save_dir = self.mgr.get_save_data_dir()
         if not save_dir or not os.path.exists(save_dir):
-            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
         def test_save_file(filename):
@@ -1369,7 +1678,7 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror(
                 "💽 Save Doctor",
                 f"⚠️ Save file corruption detected:\n" + "\n".join(f"• {c}" for c in corrupted_files) + "\n\n"
-                f"No automatic backup was found in LocalAppData. If you have an external backup or Steam Cloud sync, restore it manually."
+                f"No automatic backup was found in the save directory. If you have an external backup or Steam Cloud sync, restore it manually."
             )
 
     # ==========================================
@@ -1378,7 +1687,7 @@ class GeodeSyncApp(tk.Tk):
     def open_cache_cleaner(self):
         save_dir = self.mgr.get_save_data_dir()
         if not save_dir or not os.path.exists(save_dir):
-            messagebox.showerror("Error", "Could not locate Geometry Dash LocalAppData folder.")
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
         song_files = []
@@ -1508,16 +1817,12 @@ class GeodeSyncApp(tk.Tk):
     # v1.1.2 PRO FEATURE: MOD PROFILES & VANILLA TOGGLE
     # ==========================================
     def open_mod_profiles(self):
-        if not self.mgr.gd_path:
-            messagebox.showerror("Error", "Geometry Dash path not detected.")
-            return
-
-        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
-        if not os.path.exists(mods_dir):
+        mods_dir = self.get_mods_dir()
+        if not mods_dir or not os.path.exists(mods_dir):
             messagebox.showinfo("Geode Mods", "No geode/mods directory found.")
             return
 
-        profiles_dir = os.path.join(self.mgr.gd_path, "geode", "profiles")
+        profiles_dir = os.path.join(mods_dir, "..", "profiles")
         os.makedirs(profiles_dir, exist_ok=True)
 
         def get_mods_state():
@@ -1758,7 +2063,7 @@ class GeodeSyncApp(tk.Tk):
     def open_fps_unlocker(self):
         save_dir = self.mgr.get_save_data_dir()
         if not save_dir:
-            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
         gm_path = os.path.join(save_dir, "CCGameManager.dat")
@@ -1875,7 +2180,7 @@ class GeodeSyncApp(tk.Tk):
     def open_nong_manager(self):
         save_dir = self.mgr.get_save_data_dir()
         if not save_dir:
-            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder.")
             return
 
         dialog = tk.Toplevel(self)
@@ -1953,7 +2258,7 @@ class GeodeSyncApp(tk.Tk):
         list_frame = tk.Frame(dialog, bg="#1a2333", padx=14, pady=10, highlightbackground="#2d3748", highlightthickness=1)
         list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 12))
 
-        tk.Label(list_frame, text="Replaced NONG Songs in LocalAppData:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w")
+        tk.Label(list_frame, text="Replaced NONG Songs in Save Directory:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w")
 
         nong_box = tk.Listbox(list_frame, bg="#0f172a", fg="#e2e8f0", font=("Segoe UI", 8), height=4, selectbackground="#8b5cf6")
         nong_box.pack(fill="both", expand=True, pady=4)
@@ -1996,12 +2301,10 @@ class GeodeSyncApp(tk.Tk):
     # v1.1.3 PRO FEATURE: ESSENTIAL MOD PACK INSTALLER
     # ==========================================
     def install_essential_mods(self):
-        if not self.mgr.gd_path:
-            messagebox.showerror("Error", "Geometry Dash directory not found.")
+        mods_dir = self.get_mods_dir()
+        if not mods_dir:
+            messagebox.showerror("Error", "Geometry Dash mods directory not found.")
             return
-
-        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
-        os.makedirs(mods_dir, exist_ok=True)
 
         dialog = tk.Toplevel(self)
         dialog.title("Essential Geode Mod Pack")
@@ -2053,7 +2356,9 @@ class GeodeSyncApp(tk.Tk):
         apply_btn.pack(side="right")
 
     def _run_modpack_install(self, mod_ids):
-        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+        mods_dir = self.get_mods_dir()
+        if not mods_dir:
+            return
         self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
         self.primary_btn.set_enabled(False)
         installed_count = 0
@@ -2073,6 +2378,13 @@ class GeodeSyncApp(tk.Tk):
                         self.progress_lbl.config(text=f"Downloading {mid}...")
                         dest = os.path.join(mods_dir, f"{mid}.geode")
                         urllib.request.urlretrieve(dl_url, dest)
+                        if self.mgr.gd_path:
+                            gd_mods = os.path.join(self.mgr.gd_path, "geode", "mods")
+                            if os.path.exists(gd_mods) and os.path.abspath(gd_mods) != os.path.abspath(mods_dir):
+                                try:
+                                    safe_copy_item(dest, os.path.join(gd_mods, f"{mid}.geode"))
+                                except Exception:
+                                    pass
                         installed_count += 1
                         self.log(f"Installed mod: {mid}", "SUCCESS")
             except Exception as e:
