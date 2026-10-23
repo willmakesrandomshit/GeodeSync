@@ -1,6 +1,12 @@
-# GeodeSync v1.1.4 — Downgrade and Steam Recovery Hotfix
+# GeodeSync v1.1.5 — macOS Depot Validation Hotfix
 
 ## Fixes
+
+- Reject incomplete cached macOS game bundles before installing them. Damaged or partial Steam depot folders now go through the download path again instead of being mistaken for a completed download.
+- Report malformed Geometry Dash `Info.plist` data as an invalid bundle instead of leaking an uncaught XML parser exception into the overwrite error.
+- Preserve the installed game bundle when the downloaded app fails validation.
+
+## Previous v1.1.4 fixes
 
 - Prevent rapid repeated clicks from starting overlapping Geometry Dash downgrades and replacing the game app bundle concurrently.
 - Stop the restore flow if GeodeSync cannot verify that Steam's app manifest was unlocked; Steam validation is no longer started after an unlock failure.
