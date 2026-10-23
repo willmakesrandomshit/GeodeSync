@@ -43,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.5.1"
+APP_VERSION = "1.1.5.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -68,6 +68,11 @@ def is_newer_app_version(candidate, current):
         return False
     width = max(len(candidate_parts), len(current_parts))
     return candidate_parts + (0,) * (width - len(candidate_parts)) > current_parts + (0,) * (width - len(current_parts))
+
+
+def should_apply_downloaded_depot(steam_reported_complete, depot_valid):
+    """Only validated depot contents may be installed; logs are advisory."""
+    return bool(depot_valid)
 
 if IS_MAC:
     KNOWN_VERSIONS = {
@@ -489,14 +494,26 @@ class GDManager:
     def get_depot_path(self):
         if self.steam_path:
             if IS_MAC:
+                # Modern macOS Steam keeps console-downloaded depots inside
+                # Steam.AppBundle. A stale directory under the outer Steam
+                # support folder must not shadow the location Steam actually
+                # writes to.
+                steam_root = os.path.expanduser("~/Library/Application Support/Steam")
                 candidates = [
-                    os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
-                    os.path.expanduser(f"~/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_{APP_ID}/depot_{DEPOT_ID}"),
-                    os.path.expanduser(f"~/Library/Application Support/Steam/steamapps/content/app_{APP_ID}/depot_{DEPOT_ID}")
+                    os.path.join(steam_root, "Steam.AppBundle", "Steam", "Contents", "MacOS", "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
+                    os.path.join(steam_root, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
                 ]
-                for c in candidates:
-                    if os.path.exists(c):
-                        return c
+                if self.steam_path != "/Applications/Steam.app":
+                    candidates.append(os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"))
+                candidates = list(dict.fromkeys(os.path.abspath(path) for path in candidates))
+                # Reuse a cache only when its app bundle validates. If every
+                # existing candidate is damaged, return Steam's canonical
+                # destination so the next download is checked at the path
+                # Steam actually uses.
+                for candidate in candidates:
+                    app_path = find_macos_game_app(candidate)
+                    if app_path and validate_macos_game_app(app_path) is None:
+                        return candidate
                 return candidates[0]
             d_path = os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}")
             return d_path
@@ -1400,7 +1417,7 @@ class GeodeSyncApp(tk.Tk):
             return
 
         start_time = time.time()
-        download_finished = False
+        steam_reported_complete = False
 
         while time.time() - start_time < 360:
             time.sleep(1.5)
@@ -1423,13 +1440,12 @@ class GeodeSyncApp(tk.Tk):
                             f.seek(initial_log_offset)
                             new_content = f.read()
                             if "Depot download complete" in new_content and f"depot_{DEPOT_ID}" in new_content:
-                                download_finished = True
+                                steam_reported_complete = True
                                 break
                 except Exception:
                     pass
 
-            if download_finished or self.mgr.has_downloaded_depot():
-                download_finished = True
+            if self.mgr.has_downloaded_depot():
                 break
 
         self.progress_bar["value"] = 100
@@ -1438,9 +1454,22 @@ class GeodeSyncApp(tk.Tk):
         self.progress_frame.pack_forget()
         self.primary_btn.set_enabled(True)
 
-        if download_finished or self.mgr.has_downloaded_depot():
+        # A Steam completion log line is only a download signal, not proof
+        # that the cached app is valid. Never let it bypass bundle validation.
+        depot_valid = self.mgr.has_downloaded_depot()
+        if should_apply_downloaded_depot(steam_reported_complete, depot_valid):
             self.log("Steam depot download completed!", "SUCCESS")
             self._apply_downgrade_files()
+        elif steam_reported_complete:
+            self.is_downloading_depot = False
+            self.log("Steam reported the depot complete, but its Geometry Dash.app failed validation; installed game files were left unchanged.", "ERROR")
+            messagebox.showerror(
+                "Steam download is incomplete",
+                "Steam reported the download as complete, but its cached Geometry Dash.app is still missing valid app metadata. "
+                "GeodeSync did not replace your installed game. Quit Steam fully, reopen it, and retry 1-Click Fix once. "
+                "If it still fails, send the full GeodeSync activity log so the depot path and Steam result can be checked.",
+            )
+            self.refresh_status()
         else:
             self.is_downloading_depot = False
             self.log("Steam download timed out or took longer than 6 mins.", "WARN")
