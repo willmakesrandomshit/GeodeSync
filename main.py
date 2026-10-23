@@ -11,6 +11,11 @@ import webbrowser
 import threading
 import subprocess
 import base64
+import hashlib
+import platform
+import posixpath
+import shlex
+import zipfile
 import zlib
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -36,7 +41,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -76,6 +81,75 @@ else:
 SIZE_22081 = 10700288
 SIZE_2209 = 13178880
 EXPECTED_DEPOT_BYTES = 230000000 if IS_MAC else 204000000
+MACOS_UPDATE_MAX_BYTES = 300 * 1024 * 1024
+
+
+def select_macos_update_asset(release, architecture=None):
+    """Return the exact release ZIP for this Mac architecture, if present."""
+    architecture = (architecture or platform.machine()).lower()
+    if architecture in ("arm64", "aarch64"):
+        asset_name = "GeodeSync-macOS-arm64.zip"
+    elif architecture in ("x86_64", "amd64"):
+        asset_name = "GeodeSync-macOS-x86_64.zip"
+    else:
+        raise ValueError(f"Unsupported Mac architecture: {architecture}")
+
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") == asset_name]
+    if len(matches) != 1:
+        raise FileNotFoundError(f"Release must contain exactly one {asset_name} asset.")
+    asset = matches[0]
+    size = int(asset.get("size") or 0)
+    if size <= 0 or size > MACOS_UPDATE_MAX_BYTES:
+        raise ValueError("The Mac update asset has an invalid or excessive size.")
+    url = asset.get("browser_download_url", "")
+    if not url.startswith("https://github.com/"):
+        raise ValueError("The Mac update asset does not have a secure download URL.")
+    return asset
+
+
+def verify_macos_update_digest(expected_digest, actual_digest):
+    """Require the checksum GitHub publishes for a release asset."""
+    expected_digest = str(expected_digest or "")
+    if not expected_digest.startswith("sha256:"):
+        raise ValueError("GitHub did not provide a SHA-256 digest for this Mac update.")
+    expected_hex = expected_digest[7:].lower()
+    if len(expected_hex) != 64 or any(char not in "0123456789abcdef" for char in expected_hex):
+        raise ValueError("GitHub provided an invalid SHA-256 digest for this Mac update.")
+    if actual_digest.lower() != expected_hex:
+        raise ValueError("The downloaded Mac update failed its SHA-256 integrity check.")
+
+
+def validate_macos_update_zip(archive):
+    """Reject path traversal and unexpected top-level content in a Mac update."""
+    app_entries = 0
+    expanded_size = 0
+    for info in archive.infolist():
+        name = info.filename
+        normalized = name.replace("\\", "/")
+        parts = normalized.split("/")
+        if normalized.startswith("/") or ".." in parts:
+            raise ValueError("The Mac update archive contains an unsafe path.")
+        if normalized.startswith("GeodeSync.app/"):
+            app_entries += 1
+        elif normalized.startswith("__MACOSX/GeodeSync.app/") or normalized == "__MACOSX/":
+            continue
+        elif normalized.rstrip("/") == "GeodeSync.app":
+            app_entries += 1
+        else:
+            raise ValueError("The Mac update archive contains unexpected files.")
+        if info.file_size > MACOS_UPDATE_MAX_BYTES:
+            raise ValueError("A file in the Mac update archive is too large.")
+        expanded_size += info.file_size
+        if expanded_size > MACOS_UPDATE_MAX_BYTES:
+            raise ValueError("The Mac update archive expands beyond the allowed size.")
+        unix_mode = info.external_attr >> 16
+        if stat.S_ISLNK(unix_mode):
+            link_target = archive.read(info).decode("utf-8", errors="strict").replace("\\", "/")
+            resolved_target = posixpath.normpath(posixpath.join(posixpath.dirname(normalized), link_target))
+            if link_target.startswith("/") or resolved_target == ".." or resolved_target.startswith("../"):
+                raise ValueError("The Mac update archive contains an unsafe symbolic link.")
+    if app_entries == 0:
+        raise ValueError("The Mac update archive does not contain GeodeSync.app.")
 
 
 def open_url_or_path(path):
@@ -1977,6 +2051,10 @@ class GeodeSyncApp(tk.Tk):
         threading.Thread(target=self._run_self_update, daemon=True).start()
 
     def _run_self_update(self):
+        if IS_MAC:
+            self._run_macos_self_update()
+            return
+
         self.log("Downloading latest GeodeSync update from GitHub...", "INFO")
         self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
         self.progress_bar["value"] = 25
@@ -2029,6 +2107,196 @@ class GeodeSyncApp(tk.Tk):
             self.log(f"Self-update error: {e}. Opening GitHub release...", "WARN")
             self.progress_frame.pack_forget()
             webbrowser.open(self.latest_release_url)
+
+    def _schedule_update_progress(self, text, value=None, hide=False):
+        def update_ui():
+            try:
+                if not self.winfo_exists():
+                    return
+                if hide:
+                    self.progress_frame.pack_forget()
+                    return
+                self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
+                self.progress_lbl.config(text=text)
+                if value is not None:
+                    self.progress_bar["value"] = value
+            except Exception:
+                pass
+        try:
+            self.after(0, update_ui)
+        except Exception:
+            pass
+
+    def _run_macos_self_update(self):
+        """Download, verify and atomically replace this installed .app."""
+        workspace = None
+        release_url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases/latest"
+        try:
+            if not getattr(sys, "frozen", False):
+                self._schedule_update_progress("Open GitHub to install the packaged Mac app…", hide=True)
+                self.after(0, lambda: webbrowser.open(release_url))
+                return
+
+            self._schedule_update_progress("Checking the Mac update…", 5)
+            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                release = json.loads(response.read().decode("utf-8"))
+
+            tag = str(release.get("tag_name", "")).strip()
+            release_url = release.get("html_url", release_url)
+            self.latest_release_url = release_url
+            version = tag.lstrip("v")
+            if not version or version == APP_VERSION:
+                raise ValueError("GitHub did not report a newer GeodeSync release.")
+
+            asset = select_macos_update_asset(release)
+            asset_size = int(asset["size"])
+            workspace = tempfile.mkdtemp(prefix="geodesync-update-")
+            archive_path = os.path.join(workspace, asset["name"])
+            self._schedule_update_progress("Downloading the matching Mac app…", 15)
+            request = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "GeodeSync-Client"})
+            digest = hashlib.sha256()
+            received = 0
+            with urllib.request.urlopen(request, timeout=45) as response, open(archive_path, "wb") as output:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > MACOS_UPDATE_MAX_BYTES:
+                        raise ValueError("The Mac update download exceeded the allowed size.")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    progress = min(65, 15 + int(50 * received / max(asset_size, 1)))
+                    self._schedule_update_progress("Downloading the matching Mac app…", progress)
+
+            verify_macos_update_digest(asset.get("digest"), digest.hexdigest())
+
+            self._schedule_update_progress("Checking the app bundle…", 72)
+            with zipfile.ZipFile(archive_path) as archive:
+                validate_macos_update_zip(archive)
+            extracted = os.path.join(workspace, "extracted")
+            os.makedirs(extracted, exist_ok=True)
+            subprocess.run(
+                ["/usr/bin/ditto", "-x", "-k", "--sequesterRsrc", archive_path, extracted],
+                check=True,
+                timeout=180,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            staged_app = os.path.join(extracted, "GeodeSync.app")
+            new_executable = os.path.join(staged_app, "Contents", "MacOS", "GeodeSync")
+            new_plist = os.path.join(staged_app, "Contents", "Info.plist")
+            if not os.path.isfile(new_executable) or not os.path.isfile(new_plist):
+                raise ValueError("The downloaded ZIP does not contain a complete GeodeSync app.")
+            with open(new_plist, "rb") as plist_file:
+                new_metadata = plistlib.load(plist_file)
+            if new_metadata.get("CFBundleIdentifier") != "com.willmakesrandomshit.geodesync":
+                raise ValueError("The downloaded app has the wrong bundle identity.")
+            if str(new_metadata.get("CFBundleShortVersionString", "")) != version:
+                raise ValueError("The downloaded app version does not match its GitHub release tag.")
+            subprocess.run(
+                ["/usr/bin/codesign", "--verify", "--deep", "--strict", staged_app],
+                check=True,
+                timeout=60,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+
+            executable = os.path.abspath(sys.executable)
+            app_path = None
+            parent = os.path.dirname(executable)
+            while parent and parent != os.path.dirname(parent):
+                if parent.endswith(".app") and os.path.isdir(parent):
+                    app_path = parent
+                    break
+                parent = os.path.dirname(parent)
+            if not app_path:
+                app_path = os.path.dirname(os.path.dirname(os.path.dirname(executable)))
+            app_path = os.path.abspath(app_path)
+            if not app_path.endswith(".app") or not os.path.isdir(app_path):
+                raise ValueError("Could not locate the installed GeodeSync.app to update it.")
+            parent_dir = os.path.dirname(app_path)
+            if not os.access(parent_dir, os.W_OK):
+                raise PermissionError(
+                    "This app is installed in a protected folder. Move GeodeSync.app to your personal "
+                    "Applications folder, then use Update Now again."
+                )
+
+            app_parent = os.path.expanduser("~/Library/Application Support/GeodeSync")
+            os.makedirs(app_parent, exist_ok=True)
+            helper_path = os.path.join(app_parent, "apply-update.sh")
+            incoming_path = os.path.join(parent_dir, ".GeodeSync.app.update")
+            backup_path = os.path.join(parent_dir, ".GeodeSync.app.previous")
+            log_path = os.path.expanduser("~/Library/Logs/GeodeSync-updater.log")
+            app_path_q = shlex.quote(app_path)
+            incoming_q = shlex.quote(incoming_path)
+            backup_q = shlex.quote(backup_path)
+            staged_q = shlex.quote(staged_app)
+            workspace_q = shlex.quote(workspace)
+            helper_q = shlex.quote(helper_path)
+            log_q = shlex.quote(log_path)
+            helper = f"""#!/bin/sh
+set -u
+TARGET={app_path_q}
+INCOMING={incoming_q}
+BACKUP={backup_q}
+STAGED={staged_q}
+WORKSPACE={workspace_q}
+HELPER={helper_q}
+LOG={log_q}
+PID={os.getpid()}
+while /bin/kill -0 "$PID" 2>/dev/null; do /bin/sleep 0.25; done
+if ! /usr/bin/ditto "$STAGED" "$INCOMING" >>"$LOG" 2>&1; then
+  /bin/rm -rf "$INCOMING" "$WORKSPACE"
+  exit 1
+fi
+/bin/rm -rf "$BACKUP"
+if [ -e "$TARGET" ]; then /bin/mv "$TARGET" "$BACKUP"; fi
+if ! /bin/mv "$INCOMING" "$TARGET"; then
+  if [ -e "$BACKUP" ]; then /bin/mv "$BACKUP" "$TARGET"; fi
+  /bin/rm -rf "$INCOMING" "$WORKSPACE"
+  exit 1
+fi
+if ! /usr/bin/open "$TARGET" >>"$LOG" 2>&1; then
+  /bin/mv "$TARGET" "$INCOMING"
+  if [ -e "$BACKUP" ]; then /bin/mv "$BACKUP" "$TARGET"; fi
+  /bin/rm -rf "$INCOMING" "$WORKSPACE"
+  exit 1
+fi
+/bin/rm -rf "$BACKUP" "$WORKSPACE"
+/bin/rm -f "$HELPER"
+"""
+            with open(helper_path, "w", encoding="utf-8") as helper_file:
+                helper_file.write(helper)
+            os.chmod(helper_path, 0o700)
+            self._schedule_update_progress("Installing update and reopening GeodeSync…", 95)
+            subprocess.Popen(
+                ["/bin/sh", helper_path],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.after(0, self.destroy)
+        except Exception as exc:
+            if workspace:
+                shutil.rmtree(workspace, ignore_errors=True)
+            message = str(exc)
+            def report_failure():
+                try:
+                    self.progress_frame.pack_forget()
+                    messagebox.showerror(
+                        "Mac update not installed",
+                        f"{message}\n\nYour current app was left in place. Open GitHub Releases to download manually?",
+                    )
+                    webbrowser.open(release_url)
+                except Exception:
+                    pass
+            try:
+                self.after(0, report_failure)
+            except Exception:
+                pass
 
     # ==========================================
     # v1.1.3 PRO FEATURE: AUTO-BACKUP ON GD EXIT

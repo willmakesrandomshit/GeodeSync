@@ -7,8 +7,8 @@
 > Modern, zero-friction Geometry Dash version switcher, Geode protector, save doctor, FPS unlocker, NONG manager, and input latency optimizer.
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
-![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.2-green.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.3-green.svg)
 
 ---
 
@@ -35,8 +35,11 @@ When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode**
 ## 📥 Download
 
 Grab the latest version from the **[Releases](https://github.com/willmakesrandomshit/GeodeSync/releases)** tab:
-* **`GeodeSync-v1.1.2-Windows.zip` (Recommended):** Extract and double-click `Run-GeodeSync.bat` to launch instantly with zero popups!
+* **`GeodeSync-v1.1.3-Windows.zip` (Recommended):** Extract and run `GeodeSync.exe`.
 * **`GeodeSync.exe`:** Standalone portable executable.
+* **macOS:** Download the `GeodeSync-macOS-arm64.zip` build for Apple silicon or `GeodeSync-macOS-x86_64.zip` for Intel, unzip, and open `GeodeSync.app`. These builds bundle Python and Tcl/Tk; no Terminal or Python install is required. Apple silicon requires macOS 11+, Intel requires macOS 10.15+.
+
+The release workflow builds Windows, Apple silicon, and Intel packages together, and attaches all three to the tagged GitHub Release. Mac's **Update Now** downloads the matching architecture, verifies the GitHub asset digest and app signature, then replaces and relaunches the app. Windows keeps its existing executable updater. A Mac build without Developer ID notarization may need a one-time Control-click → **Open** Gatekeeper approval. To remove that prompt, configure the six `APPLE_*` secrets named in the workflow with the project's Apple Developer signing certificate and notarization credentials.
 
 > [!NOTE]
 > ### 🛡️ "Windows protected your PC" Note:
