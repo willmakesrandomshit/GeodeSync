@@ -11,8 +11,10 @@ import webbrowser
 import threading
 import subprocess
 import winsound
+import base64
+import zlib
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 
 # Enable DPI Awareness for high-res monitors
@@ -386,7 +388,7 @@ class GeodeSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"GeodeSync v{APP_VERSION} • 1-Click Geometry Dash Suite")
-        self.geometry("780x790")
+        self.geometry("780x810")
         self.minsize(720, 720)
         self.configure(bg="#0f141c")
 
@@ -419,7 +421,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="✨ New update available!", font=("Segoe UI", 9, "bold"), fg="#34d399", bg="#064e3b")
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update Now (1-Click)", command=self.open_update_link, font=("Segoe UI", 8, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=10, pady=2, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update Now (1-Click)", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=10, pady=2, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -432,7 +434,7 @@ class GeodeSyncApp(tk.Tk):
         title = tk.Label(title_box, text=f"⚡ GeodeSync  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg="#ffffff", bg="#161e2e")
         title.pack(anchor="w")
 
-        subtitle = tk.Label(title_box, text="1-Click Geometry Dash Mod Protector, Save Manager & Auto-Downgrader", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
+        subtitle = tk.Label(title_box, text="1-Click Geometry Dash Mod Protector, Save Doctor & Performance Suite", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
         subtitle.pack(anchor="w")
 
         badge_box = tk.Frame(header, bg="#161e2e")
@@ -514,41 +516,51 @@ class GeodeSyncApp(tk.Tk):
         self.lock_badge = tk.Label(f_l, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#f59e0b", bg="#332412", padx=6, pady=2)
         self.lock_badge.pack(anchor="w", pady=(2, 0))
 
-        # 3. UTILITY TOOLBAR (Expanded with New v1.1.2 Power Tools)
+        # 3. UTILITY TOOLBAR (Expanded with Pro Power Tools)
         tools_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
         tools_card.pack(fill="x", pady=(0, 8))
 
+        # Row 1: Saves & Storage Management
         row1 = tk.Frame(tools_card, bg="#161e2e")
         row1.pack(fill="x", pady=(0, 4))
 
-        tk.Label(row1, text="Saves & Mods:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+        tk.Label(row1, text="Saves & Data:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
-        backup_save_btn = tk.Button(row1, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        backup_save_btn = tk.Button(row1, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
         backup_save_btn.pack(side="left", padx=2)
 
-        restore_save_btn = tk.Button(row1, text="♻️ Restore Saves", command=self.restore_saves, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
-        restore_save_btn.pack(side="left", padx=2)
+        save_doc_btn = tk.Button(row1, text="💽 Save Doctor", command=self.run_save_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#a78bfa", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        save_doc_btn.pack(side="left", padx=2)
 
-        open_mods_btn = tk.Button(row1, text="📂 Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
-        open_mods_btn.pack(side="left", padx=2)
+        clean_cache_btn = tk.Button(row1, text="🧹 Cache Cleaner", command=self.open_cache_cleaner, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#34d399", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        clean_cache_btn.pack(side="left", padx=2)
+
+        restore_save_btn = tk.Button(row1, text="♻️ Restore", command=self.restore_saves, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        restore_save_btn.pack(side="left", padx=2)
 
         self.restore_gd_btn = tk.Button(row1, text="🔄 Restore Latest GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
 
-        # Row 2: v1.1.2 Pro Power Tools
+        # Row 2: Pro Performance & Mod Utilities
         row2 = tk.Frame(tools_card, bg="#161e2e")
         row2.pack(fill="x", pady=(2, 0))
 
-        tk.Label(row2, text="Pro Optimizers:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+        tk.Label(row2, text="Mods & Opts:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
 
-        fix_audio_btn = tk.Button(row2, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        fix_audio_btn = tk.Button(row2, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
         fix_audio_btn.pack(side="left", padx=2)
 
-        crash_doc_btn = tk.Button(row2, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        crash_doc_btn = tk.Button(row2, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
         crash_doc_btn.pack(side="left", padx=2)
 
-        version_sel_btn = tk.Button(row2, text="⚙️ Version Selector", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
-        version_sel_btn.pack(side="left", padx=2)
+        mod_profiles_btn = tk.Button(row2, text="🔄 Mod Profiles", command=self.open_mod_profiles, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        mod_profiles_btn.pack(side="left", padx=2)
+
+        open_mods_btn = tk.Button(row2, text="📂 Mods", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        open_mods_btn.pack(side="left", padx=2)
+
+        version_sel_btn = tk.Button(row2, text="⚙️ Versions", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
+        version_sel_btn.pack(side="right")
 
         # 4. ACTIVITY LOG
         log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=6, highlightbackground="#2d3748", highlightthickness=1)
@@ -1221,6 +1233,459 @@ class GeodeSyncApp(tk.Tk):
         url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases"
         webbrowser.open(url)
 
+    # ==========================================
+    # v1.1.2 PRO FEATURE: 1-CLICK CORRUPTED SAVE DOCTOR
+    # ==========================================
+    def run_save_doctor(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir or not os.path.exists(save_dir):
+            messagebox.showerror("Error", "Could not locate Geometry Dash save folder in LocalAppData.")
+            return
+
+        def test_save_file(filename):
+            path = os.path.join(save_dir, filename)
+            if not os.path.exists(path):
+                return False, 0, "Missing"
+            sz = os.path.getsize(path)
+            if sz == 0:
+                return False, 0, "0 Bytes (Corrupted)"
+            try:
+                with open(path, "rb") as f:
+                    raw = f.read()
+                xored = bytes(b ^ 11 for b in raw)
+                decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
+                decomp = zlib.decompress(decoded, 15 + 32)
+                if b"<plist" in decomp:
+                    return True, sz, "Healthy"
+                return False, sz, "Invalid XML structure"
+            except Exception as e:
+                return False, sz, f"Corrupted ({type(e).__name__})"
+
+        gm_ok, gm_sz, gm_msg = test_save_file("CCGameManager.dat")
+        lvl_ok, lvl_sz, lvl_msg = test_save_file("CCLocalLevels.dat")
+
+        if gm_ok and lvl_ok:
+            gm_mb = round(gm_sz / (1024 * 1024), 2)
+            lvl_kb = round(lvl_sz / 1024, 1)
+            res = messagebox.askyesno(
+                "💽 Save Doctor: 100% Healthy!",
+                f"✅ Save File Diagnostic Results:\n\n"
+                f"• CCGameManager.dat: {gm_msg} ({gm_mb} MB)\n"
+                f"• CCLocalLevels.dat: {lvl_msg} ({lvl_kb} KB)\n\n"
+                f"Both primary save files are fully intact, properly encrypted, and readable by Geometry Dash.\n\n"
+                f"Would you like to create a timestamped backup now for extra protection?"
+            )
+            if res:
+                self.backup_saves()
+            return
+
+        corrupted_files = []
+        if not gm_ok:
+            corrupted_files.append(f"CCGameManager.dat ({gm_msg})")
+        if not lvl_ok:
+            corrupted_files.append(f"CCLocalLevels.dat ({lvl_msg})")
+
+        fallbacks = []
+        gm2_ok, _, _ = test_save_file("CCGameManager2.dat")
+        if not gm_ok and gm2_ok:
+            fallbacks.append(("CCGameManager.dat", "CCGameManager2.dat"))
+
+        lvl2_ok, _, _ = test_save_file("CCLocalLevels2.dat")
+        if not lvl_ok and lvl2_ok:
+            fallbacks.append(("CCLocalLevels.dat", "CCLocalLevels2.dat"))
+
+        backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
+        if os.path.exists(backup_root):
+            folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, d))]
+            folders.sort(key=os.path.getmtime, reverse=True)
+            if folders:
+                latest_bak = folders[0]
+                if not gm_ok and not any(t[0] == "CCGameManager.dat" for t in fallbacks):
+                    bak_gm = os.path.join(latest_bak, "CCGameManager.dat")
+                    if os.path.exists(bak_gm):
+                        fallbacks.append(("CCGameManager.dat", bak_gm))
+                if not lvl_ok and not any(t[0] == "CCLocalLevels.dat" for t in fallbacks):
+                    bak_lvl = os.path.join(latest_bak, "CCLocalLevels.dat")
+                    if os.path.exists(bak_lvl):
+                        fallbacks.append(("CCLocalLevels.dat", bak_lvl))
+
+        if fallbacks:
+            msg = f"⚠️ Corrupted Save Detected:\n" + "\n".join(f"• {c}" for c in corrupted_files) + "\n\n"
+            msg += "✅ Good news! Save Doctor located intact backup save files:\n"
+            for target, src in fallbacks:
+                msg += f"👉 Restore {target} from {os.path.basename(src)}\n"
+            msg += "\nWould you like Save Doctor to automatically repair and restore your save files now?"
+            res = messagebox.askyesno("💽 Save Doctor: Repair Available", msg)
+            if res:
+                for target, src in fallbacks:
+                    src_path = os.path.join(save_dir, src) if not os.path.isabs(src) else src
+                    dst_path = os.path.join(save_dir, target)
+                    if os.path.exists(dst_path):
+                        shutil.move(dst_path, dst_path + ".corrupted_bak")
+                    safe_copy_item(src_path, dst_path)
+                self.play_ding()
+                self.log("Save Doctor successfully repaired corrupted save files!", "SUCCESS")
+                messagebox.showinfo("Save Doctor", "🎉 Save files successfully repaired and restored!\n\nYou can now launch Geometry Dash safely.")
+        else:
+            messagebox.showerror(
+                "💽 Save Doctor",
+                f"⚠️ Save file corruption detected:\n" + "\n".join(f"• {c}" for c in corrupted_files) + "\n\n"
+                f"No automatic backup was found in LocalAppData. If you have an external backup or Steam Cloud sync, restore it manually."
+            )
+
+    # ==========================================
+    # v1.1.2 PRO FEATURE: GD STORAGE & CACHE CLEANER
+    # ==========================================
+    def open_cache_cleaner(self):
+        save_dir = self.mgr.get_save_data_dir()
+        if not save_dir or not os.path.exists(save_dir):
+            messagebox.showerror("Error", "Could not locate Geometry Dash LocalAppData folder.")
+            return
+
+        song_files = []
+        song_bytes = 0
+        log_files = []
+        log_bytes = 0
+
+        for item in os.listdir(save_dir):
+            fp = os.path.join(save_dir, item)
+            if os.path.isfile(fp):
+                ext = os.path.splitext(item)[1].lower()
+                sz = os.path.getsize(fp)
+                if ext in [".mp3", ".ogg"]:
+                    song_files.append(fp)
+                    song_bytes += sz
+                elif ext in [".log", ".dmp", ".tmp"]:
+                    log_files.append(fp)
+                    log_bytes += sz
+
+        crash_dir = self.mgr.get_crashlogs_dir()
+        if crash_dir and os.path.exists(crash_dir):
+            for item in os.listdir(crash_dir):
+                fp = os.path.join(crash_dir, item)
+                if os.path.isfile(fp):
+                    sz = os.path.getsize(fp)
+                    log_files.append(fp)
+                    log_bytes += sz
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Geometry Dash Storage & Cache Cleaner")
+        dialog.geometry("540x380")
+        dialog.configure(bg="#161e2e")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="🧹 GD Storage & Cache Cleaner", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Free up gigabytes of disk space on your drive by safely clearing cached data:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 14))
+
+        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card.pack(fill="x", padx=20, pady=(0, 14))
+
+        clean_logs_var = tk.BooleanVar(value=True)
+        clean_songs_var = tk.BooleanVar(value=False)
+
+        log_mb = round(log_bytes / (1024 * 1024), 2)
+        song_mb = round(song_bytes / (1024 * 1024), 1)
+        song_gb = round(song_bytes / (1024 * 1024 * 1024), 2)
+
+        cb1 = tk.Checkbutton(
+            card,
+            text=f"💥 Crash Dumps & Old Log Files ({len(log_files)} files • {log_mb} MB) [100% Safe]",
+            variable=clean_logs_var,
+            font=("Segoe UI", 9, "bold"),
+            fg="#38bdf8",
+            bg="#1a2333",
+            selectcolor="#0f172a",
+            activebackground="#1a2333",
+            activeforeground="#38bdf8"
+        )
+        cb1.pack(anchor="w", pady=(0, 6))
+
+        cb2 = tk.Checkbutton(
+            card,
+            text=f"🎵 Downloaded Songs & SFX Cache ({len(song_files)} files • {song_gb} GB / {song_mb} MB)",
+            variable=clean_songs_var,
+            font=("Segoe UI", 9, "bold"),
+            fg="#e2e8f0",
+            bg="#1a2333",
+            selectcolor="#0f172a",
+            activebackground="#1a2333",
+            activeforeground="#e2e8f0"
+        )
+        cb2.pack(anchor="w", pady=(0, 4))
+        tk.Label(
+            card,
+            text="  * Note: Clearing song cache leaves saves 100% safe. Songs re-download if you replay them.",
+            font=("Segoe UI", 8),
+            fg="#64748b",
+            bg="#1a2333"
+        ).pack(anchor="w")
+
+        def perform_clean():
+            del_count = 0
+            del_bytes = 0
+            to_del = []
+            if clean_logs_var.get():
+                to_del.extend(log_files)
+            if clean_songs_var.get():
+                to_del.extend(song_files)
+
+            if not to_del:
+                messagebox.showinfo("Nothing Selected", "Please select at least one item to clean.")
+                return
+
+            res = messagebox.askyesno(
+                "Confirm Cleanup",
+                f"Are you sure you want to clean {len(to_del)} cached files?\n\nSave files, levels, and icons will NOT be touched."
+            )
+            if not res:
+                return
+
+            for f in to_del:
+                try:
+                    sz = os.path.getsize(f)
+                    os.remove(f)
+                    del_count += 1
+                    del_bytes += sz
+                except Exception:
+                    pass
+
+            freed_mb = round(del_bytes / (1024 * 1024), 1)
+            self.play_ding()
+            self.log(f"Cache Cleaner reclaimed {freed_mb} MB ({del_count} files removed).", "SUCCESS")
+            dialog.destroy()
+            messagebox.showinfo("Cleanup Complete!", f"🎉 Successfully cleaned {del_count} cached files!\n\nReclaimed {freed_mb} MB of drive space.")
+
+        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
+
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn.pack(side="left")
+
+        clean_btn = tk.Button(btn_box, text="⚡ Clean Selected Cache", command=perform_clean, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=16, pady=4, cursor="hand2")
+        clean_btn.pack(side="right")
+
+    # ==========================================
+    # v1.1.2 PRO FEATURE: MOD PROFILES & VANILLA TOGGLE
+    # ==========================================
+    def open_mod_profiles(self):
+        if not self.mgr.gd_path:
+            messagebox.showerror("Error", "Geometry Dash path not detected.")
+            return
+
+        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+        if not os.path.exists(mods_dir):
+            messagebox.showinfo("Geode Mods", "No geode/mods directory found.")
+            return
+
+        profiles_dir = os.path.join(self.mgr.gd_path, "geode", "profiles")
+        os.makedirs(profiles_dir, exist_ok=True)
+
+        def get_mods_state():
+            all_files = os.listdir(mods_dir)
+            active = [f for f in all_files if f.endswith(".geode")]
+            disabled = [f for f in all_files if f.endswith(".geode.disabled")]
+            return active, disabled
+
+        active, disabled = get_mods_state()
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Geode Mod Profile Switcher")
+        dialog.geometry("520x400")
+        dialog.configure(bg="#161e2e")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="🔄 Mod Profile & Vanilla Switcher", font=("Segoe UI", 12, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
+        status_lbl = tk.Label(dialog, text=f"Installed Mods: {len(active) + len(disabled)} ({len(active)} Active, {len(disabled)} Disabled)", font=("Segoe UI", 9), fg="#38bdf8", bg="#161e2e")
+        status_lbl.pack(anchor="w", padx=20, pady=(0, 12))
+
+        card = tk.Frame(dialog, bg="#1a2333", padx=14, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card.pack(fill="x", padx=20, pady=(0, 12))
+
+        def disable_all():
+            act, _ = get_mods_state()
+            if not act:
+                messagebox.showinfo("Info", "All mods are already disabled.")
+                return
+            res = messagebox.askyesno("Vanilla Mode", f"Disable all {len(act)} active mods to play pure vanilla Geometry Dash?\n\n(You can re-enable them anytime in 1 click).")
+            if res:
+                for m in act:
+                    try:
+                        os.rename(os.path.join(mods_dir, m), os.path.join(mods_dir, m + ".disabled"))
+                    except Exception:
+                        pass
+                self.log(f"Switched to Pure Vanilla: Disabled {len(act)} mods.", "SUCCESS")
+                dialog.destroy()
+                self.refresh_status()
+                messagebox.showinfo("Vanilla Mode Active", "All mods have been disabled. GD is in pure vanilla mode!")
+
+        def enable_all():
+            _, dis = get_mods_state()
+            if not dis:
+                messagebox.showinfo("Info", "All mods are already enabled.")
+                return
+            for m in dis:
+                try:
+                    base = m[:-9]
+                    os.rename(os.path.join(mods_dir, m), os.path.join(mods_dir, base))
+                except Exception:
+                    pass
+            self.log(f"Enabled {len(dis)} Geode mods.", "SUCCESS")
+            dialog.destroy()
+            self.refresh_status()
+            messagebox.showinfo("All Mods Enabled", f"Re-enabled {len(dis)} mods successfully!")
+
+        tk.Label(card, text="Quick Presets:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w", pady=(0, 6))
+
+        btn_row = tk.Frame(card, bg="#1a2333")
+        btn_row.pack(fill="x", pady=(0, 8))
+
+        tk.Button(btn_row, text="🛡️ Vanilla Mode (Disable All)", command=disable_all, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#f87171", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 8))
+        tk.Button(btn_row, text="⚡ Enable All Mods", command=enable_all, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+
+        card2 = tk.Frame(dialog, bg="#1a2333", padx=14, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card2.pack(fill="x", padx=20, pady=(0, 10))
+
+        tk.Label(card2, text="Custom Profiles:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w", pady=(0, 6))
+
+        def save_profile():
+            name_win = simpledialog.askstring("Save Profile", "Enter profile name (e.g. Demon Grinding, Recording):", parent=dialog)
+            if name_win:
+                safe_name = "".join(c for c in name_win if c.isalnum() or c in (' ', '_', '-')).strip()
+                if safe_name:
+                    act, _ = get_mods_state()
+                    p_path = os.path.join(profiles_dir, f"{safe_name}.json")
+                    with open(p_path, "w", encoding="utf-8") as f:
+                        json.dump({"name": safe_name, "active_mods": act}, f, indent=2)
+                    self.log(f"Saved mod profile: {safe_name} ({len(act)} mods)", "SUCCESS")
+                    messagebox.showinfo("Profile Saved", f"Saved profile '{safe_name}' with {len(act)} active mods!")
+
+        def load_profile():
+            profiles = [f for f in os.listdir(profiles_dir) if f.endswith(".json")]
+            if not profiles:
+                messagebox.showinfo("No Profiles", "No custom profiles saved yet! Click 'Save Current Profile' first.")
+                return
+
+            p_win = tk.Toplevel(dialog)
+            p_win.title("Load Mod Profile")
+            p_win.geometry("380x260")
+            p_win.configure(bg="#161e2e")
+            p_win.transient(dialog)
+            p_win.grab_set()
+
+            tk.Label(p_win, text="Select Profile to Activate:", font=("Segoe UI", 10, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=16, pady=(12, 6))
+            p_listbox = tk.Listbox(p_win, bg="#0f172a", fg="#e2e8f0", font=("Segoe UI", 9), selectbackground="#8b5cf6")
+            p_listbox.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+            for p in profiles:
+                p_listbox.insert("end", p[:-5])
+
+            def apply_sel():
+                sel = p_listbox.curselection()
+                if not sel:
+                    return
+                chosen = profiles[sel[0]]
+                with open(os.path.join(profiles_dir, chosen), "r", encoding="utf-8") as f:
+                    p_data = json.load(f)
+                wanted = set(p_data.get("active_mods", []))
+
+                all_f = os.listdir(mods_dir)
+                for f in all_f:
+                    if f.endswith(".geode"):
+                        if f not in wanted:
+                            try:
+                                os.rename(os.path.join(mods_dir, f), os.path.join(mods_dir, f + ".disabled"))
+                            except Exception:
+                                pass
+                    elif f.endswith(".geode.disabled"):
+                        base = f[:-9]
+                        if base in wanted:
+                            try:
+                                os.rename(os.path.join(mods_dir, f), os.path.join(mods_dir, base))
+                            except Exception:
+                                pass
+
+                self.log(f"Applied profile: {p_data.get('name')}", "SUCCESS")
+                p_win.destroy()
+                dialog.destroy()
+                self.refresh_status()
+                messagebox.showinfo("Profile Applied", f"Loaded profile '{p_data.get('name')}' successfully!")
+
+            tk.Button(p_win, text="Apply Profile", command=apply_sel, font=("Segoe UI", 9, "bold"), bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", relief="flat", padx=12, pady=3, cursor="hand2").pack(pady=(0, 10))
+
+        btn_row2 = tk.Frame(card2, bg="#1a2333")
+        btn_row2.pack(fill="x")
+        tk.Button(btn_row2, text="💾 Save Current Profile", command=save_profile, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left", padx=(0, 8))
+        tk.Button(btn_row2, text="📂 Load Profile", command=load_profile, font=("Segoe UI", 8), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left")
+
+        close_btn = tk.Button(dialog, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=12, pady=4, cursor="hand2")
+        close_btn.pack(side="bottom", pady=14)
+
+    # ==========================================
+    # v1.1.2 PRO FEATURE: 1-CLICK IN-APP SELF-UPDATER
+    # ==========================================
+    def start_self_update(self):
+        if not self.latest_release_url:
+            messagebox.showinfo("Update Check", "GeodeSync is currently up to date!")
+            return
+
+        threading.Thread(target=self._run_self_update, daemon=True).start()
+
+    def _run_self_update(self):
+        self.log("Downloading latest GeodeSync update from GitHub...", "INFO")
+        self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
+        self.progress_bar["value"] = 25
+        self.progress_lbl.config(text="Contacting GitHub for new release binary...")
+
+        try:
+            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+                asset_url = None
+                for asset in data.get("assets", []):
+                    if asset.get("name") == "GeodeSync.exe":
+                        asset_url = asset.get("browser_download_url")
+                        break
+
+            if not asset_url:
+                raise Exception("GeodeSync.exe asset not found in release.")
+
+            my_exe = sys.executable if getattr(sys, 'frozen', False) else None
+            if not my_exe or not os.path.exists(my_exe):
+                webbrowser.open(self.latest_release_url)
+                self.progress_frame.pack_forget()
+                return
+
+            exe_dir = os.path.dirname(my_exe)
+            temp_exe = os.path.join(exe_dir, "GeodeSync_update.exe")
+
+            self.progress_bar["value"] = 60
+            self.progress_lbl.config(text="Downloading new GeodeSync executable...")
+            urllib.request.urlretrieve(asset_url, temp_exe)
+
+            self.progress_bar["value"] = 100
+            self.progress_lbl.config(text="Restarting into updated version...")
+
+            bat_path = os.path.join(exe_dir, "_geodesync_swap.bat")
+            with open(bat_path, "w") as f:
+                f.write(
+                    f"@echo off\r\n"
+                    f"timeout /t 1 /nobreak >nul\r\n"
+                    f"move /y \"{temp_exe}\" \"{my_exe}\" >nul\r\n"
+                    f"start \"\" \"{my_exe}\"\r\n"
+                    f"del \"%~f0\"\r\n"
+                )
+
+            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000)
+            self.destroy()
+            sys.exit(0)
+
+        except Exception as e:
+            self.log(f"Self-update error: {e}. Opening GitHub release...", "WARN")
+            self.progress_frame.pack_forget()
+            webbrowser.open(self.latest_release_url)
+
     def show_help_dialog(self):
         msg = (
             "HOW GEODESYNC WORKS (FAQ):\n\n"
@@ -1228,12 +1693,14 @@ class GeodeSyncApp(tk.Tk):
             "Whenever Geometry Dash updates (like to 2.209), Geode mods crash until developers update them. Downgrading to 2.2081 lets you keep playing with all your mods immediately.\n\n"
             "2. How does the 1-Click Fix work?\n"
             "You literally just click the button! GeodeSync signals Steam to download clean 2.2081 files in the background, swaps the files into your game, and locks Steam so it won't auto-update.\n\n"
-            "3. What is Crash Doctor?\n"
-            "Crash Doctor scans your Geode crash logs to detect which mod crashed your game, and lets you disable broken mods with 1 click.\n\n"
-            "4. What is Fix Click Delay?\n"
-            "Configures low-latency FMOD audio buffering (~2.7ms) and CBF mouse polling fix to eliminate sound lag when clicking in levels.\n\n"
-            "5. Will I lose my icons or save data?\n"
-            "No! Your save files are stored separately in AppData and are never touched. You can also click '💾 Backup Saves' for extra peace of mind!"
+            "3. What is Save Doctor?\n"
+            "Scans and tests the integrity of your GD save files. If your game crashes and wipes your icons/progress, Save Doctor automatically restores from healthy fallbacks!\n\n"
+            "4. What is Cache Cleaner?\n"
+            "Safely purges gigabytes of orphaned song files, audio caches, and crash logs stored in LocalAppData to free up drive space.\n\n"
+            "5. What is Mod Profiles?\n"
+            "Lets you switch between 'Pure Vanilla' (to play or verify unmodded levels) and your modded setup in 1 click, or save custom mod presets.\n\n"
+            "6. What is Fix Click Delay?\n"
+            "Configures low-latency FMOD audio buffering (~2.7ms) and CBF mouse polling fix to eliminate sound lag when clicking in levels."
         )
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 

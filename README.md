@@ -4,7 +4,7 @@
 
 # ⚡ GeodeSync
 
-> Modern, zero-friction Geometry Dash version switcher, Geode protector, crash doctor, and input latency optimizer.
+> Modern, zero-friction Geometry Dash version switcher, Geode protector, save doctor, cache cleaner, and input latency optimizer.
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
@@ -16,15 +16,18 @@
 
 When RobTop pushes an update to **Geometry Dash** (such as 2.209), the **Geode** mod loader and community mods temporarily break until developers can release compatibility patches.
 
-**GeodeSync** gives players an automated, 1-click desktop app to:
+**GeodeSync** gives players an automated desktop suite to:
 1. **Downgrade to Geode-compatible builds** (e.g. 2.2081) using Valve's official Steam depot mechanism.
 2. **Real-time Live Progress Bar:** Track Steam depot download progress dynamically (`MB / ~195 MB` & percentage).
-3. **⚡ 1-Click Fix Click Delay:** Lowers FMOD WASAPI audio buffer to 128 samples, tunes click queues, and optimizes Click Between Frames (CBF) mouse polling for zero-delay input.
-4. **🩺 1-Click Crash Doctor:** Scans Geode crash logs, pinpoints faulty mod IDs and exception codes, and allows 1-click disabling of broken mods.
-5. **🚀 Official Geode Auto-Installer:** Detects if Geode is missing, pulls the latest installer from GitHub, and sets it up seamlessly.
-6. **🔄 Version Archive Selector:** Effortlessly switch between GD 2.2081, 2.2074, 2.113, or custom manifests.
-7. **Prevent unwanted auto-updates:** Locks Steam's game manifest to Read-Only so Steam never overwrites your game.
-8. **1-Click Save Data Backup & Restore:** Protects your stars, demons, coins, and levels with automated backups.
+3. **💽 1-Click Save Doctor:** Tests XOR 11 / gzip save integrity, detects corruption, and automatically recovers lost stars/icons/levels from healthy fallbacks.
+4. **🧹 GD Storage & Cache Cleaner:** Safely purges gigabytes of orphaned song downloads (`*.mp3`, `*.ogg`) and crash logs from LocalAppData to reclaim disk space.
+5. **🔄 Mod Profiles & Vanilla Switcher:** 1-Click toggle into Pure Vanilla mode for demon verifications, with save/load profiles for custom mod sets.
+6. **⚡ 1-Click Fix Click Delay:** Lowers FMOD WASAPI audio buffer to 128 samples (~2.7ms), tunes click queues, and optimizes Click Between Frames (CBF) mouse polling.
+7. **🩺 1-Click Crash Doctor:** Scans Geode crash logs, pinpoints faulty mod IDs and exception codes, and allows 1-click disabling of broken mods.
+8. **🚀 Official Geode Auto-Installer:** Detects if Geode is missing, pulls the latest installer from GitHub, and sets it up seamlessly.
+9. **🔄 Version Archive Selector:** Switch between GD 2.2081, 2.2074, 2.113, or custom manifests.
+10. **Prevent unwanted auto-updates:** Locks Steam's game manifest to Read-Only so Steam never overwrites your game.
+11. **1-Click Save Data Backup & Restore:** Protects your stars, demons, coins, and levels with automated backups.
 
 ---
 
@@ -46,6 +49,7 @@ Grab the latest version from the **[Releases](https://github.com/willmakesrandom
 
 * **Depot Downloader:** Interacts with Steam Console (`download_depot 322170 322171 <manifest_id>`).
 * **Manifest Protection:** Toggles `IsReadOnly` on `steamapps/appmanifest_322170.acf` so Steam can't overwrite downgraded game files.
+* **Save Doctor & Integrity:** Native decryptor using XOR 11 + Base64 + zlib parsing to verify and repair `CCGameManager.dat` and `CCLocalLevels.dat`.
 * **Auto-Updater:** Queries `version.json` and GitHub Releases on launch in a non-blocking background thread.
 * **Safety Backup:** Automatically archives previous executables and libraries in `backup_latest` before patching.
 
