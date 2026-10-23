@@ -17,6 +17,7 @@ from main import (
     request_macos_steam_launch,
     select_macos_update_asset,
     safe_copy_item,
+    should_apply_downloaded_depot,
     validate_macos_update_zip,
     validate_macos_game_app,
     verify_macos_update_digest,
@@ -35,6 +36,12 @@ class MacUpdateValidationTests(unittest.TestCase):
         self.assertFalse(is_newer_app_version("1.1.3.1", "1.1.5"))
         self.assertFalse(is_newer_app_version("1.1.5", "1.1.5.0"))
         self.assertFalse(is_newer_app_version("preview", "1.1.5"))
+
+    def test_steam_completion_log_never_overrides_invalid_depot(self):
+        self.assertFalse(should_apply_downloaded_depot(True, False))
+        self.assertFalse(should_apply_downloaded_depot(False, False))
+        self.assertTrue(should_apply_downloaded_depot(False, True))
+        self.assertTrue(should_apply_downloaded_depot(True, True))
 
     def test_requires_matching_sha256_asset_digest(self):
         digest = "a" * 64
@@ -142,6 +149,28 @@ class MacGameLaunchTests(unittest.TestCase):
                 with open(os.path.join(app, "Contents", "Info.plist"), "ab") as stream:
                     stream.write(b"<plist><dict/></plist>")
                 self.assertFalse(manager.has_downloaded_depot())
+
+    def test_macos_depot_resolution_ignores_stale_outer_steam_cache(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = GDManager.__new__(GDManager)
+            manager.steam_path = "/Applications/Steam.app"
+            canonical = os.path.join(root, "Steam.AppBundle", "Steam", "Contents", "MacOS", "steamapps", "content", "app_322170", "depot_322172")
+            legacy = os.path.join(root, "steamapps", "content", "app_322170", "depot_322172")
+            os.makedirs(legacy)
+            legacy_app = self.make_app(legacy)
+            with open(os.path.join(legacy_app, "Contents", "Info.plist"), "ab") as stream:
+                stream.write(b"<plist><dict/></plist>")
+
+            real_expanduser = os.path.expanduser
+            def expand_steam_root(path):
+                if path.startswith("~/Library/Application Support/Steam"):
+                    return path.replace("~/Library/Application Support/Steam", root, 1)
+                return real_expanduser(path)
+
+            with mock.patch("main.IS_MAC", True), mock.patch("main.os.path.expanduser", side_effect=expand_steam_root):
+                self.assertEqual(manager.get_depot_path(), canonical)
+                self.make_app(canonical)
+                self.assertEqual(manager.get_depot_path(), canonical)
 
     def test_launch_checks_bundle_and_reports_steam_dispatch_separately(self):
         runner = mock.Mock(return_value=mock.Mock(returncode=0, stdout="", stderr=""))

@@ -1,9 +1,9 @@
 {
-  "app_version": "1.1.5.1",
+  "app_version": "1.1.5.2",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v1.1.5.1 bundles the macOS depot validation and earlier downgrade/recovery hotfixes, and prevents the updater from offering an older release."
+  "announcement": "GeodeSync v1.1.5.2 bundles the macOS depot validation and earlier downgrade/recovery hotfixes, and prevents the updater from offering an older release."
 }
