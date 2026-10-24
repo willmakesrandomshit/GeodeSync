@@ -1,9 +1,9 @@
 {
-  "app_version": "2.0.4",
+  "app_version": "2.0.5",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.0.4: Always-On 24/7 Discord Rich Presence with 3D crystal emblem, dual repo & Discord community buttons, background minimize mode, and zero freeze updates!"
+  "announcement": "GeodeSync v2.0.5: Fixed [WinError 32] file sharing lock when applying game files, automatic retry on locked files, and always-on 24/7 Discord RPC."
 }

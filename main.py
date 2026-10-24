@@ -44,7 +44,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -701,13 +701,41 @@ def _tree_size(path):
     return total
 
 
+def _copy_file_with_retry(source, destination, retries=6, delay=0.4):
+    for attempt in range(retries):
+        try:
+            shutil.copy2(source, destination)
+            return
+        except OSError as e:
+            if getattr(e, "winerror", None) in (32, 33, 5) and attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+            elif attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                raise
+
+
+def _safe_replace(source, destination, retries=6, delay=0.4):
+    for attempt in range(retries):
+        try:
+            os.replace(source, destination)
+            return
+        except OSError as e:
+            if getattr(e, "winerror", None) in (32, 33, 5) and attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+            elif attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                raise
+
+
 def _copy_entry(source, destination):
     if os.path.islink(source):
         os.symlink(os.readlink(source), destination)
     elif os.path.isdir(source):
-        shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copy2)
+        shutil.copytree(source, destination, symlinks=True, copy_function=_copy_file_with_retry)
     else:
-        shutil.copy2(source, destination)
+        _copy_file_with_retry(source, destination)
 
 
 def _rollback_install_transaction(stage_root, destination_root, journal):
@@ -723,7 +751,7 @@ def _rollback_install_transaction(stage_root, destination_root, journal):
         if os.path.lexists(previous_path):
             if os.path.lexists(installed_path):
                 _remove_path(installed_path)
-            os.replace(previous_path, installed_path)
+            _safe_replace(previous_path, installed_path)
         elif name not in original_items and not os.path.lexists(staged_path) and os.path.lexists(installed_path):
             _remove_path(installed_path)
 
@@ -802,8 +830,8 @@ def install_depot_transactionally(source_root, destination_root, validator=None,
                 old_path = os.path.join(previous, item)
                 new_path = os.path.join(incoming, item)
                 if os.path.lexists(destination):
-                    os.replace(destination, old_path)
-                os.replace(new_path, destination)
+                    _safe_replace(destination, old_path)
+                _safe_replace(new_path, destination)
         except Exception:
             _rollback_install_transaction(stage_root, destination_root, journal)
             raise
@@ -1339,9 +1367,42 @@ class GDManager:
                 if not os.path.exists(exe):
                     return False
                 actual_size = os.path.getsize(exe)
-                return actual_size == expected_size if expected_size else actual_size == SIZE_22081
+                if actual_size != (expected_size if expected_size else SIZE_22081):
+                    return False
+                resources_dir = os.path.join(d_path, "Resources")
+                if not os.path.isdir(resources_dir):
+                    return False
+                for kf in ("Dash.mp3", "GJ_GameSheet-hd.png"):
+                    kf_path = os.path.join(resources_dir, kf)
+                    if not os.path.isfile(kf_path) or os.path.getsize(kf_path) == 0:
+                        return False
+                if self.get_depot_current_size() < 150 * 1024 * 1024:
+                    return False
+                return True
             except Exception:
                 return False
+        return False
+
+    def is_depot_locked(self):
+        d_path = self.get_depot_path()
+        if not d_path or not os.path.isdir(d_path):
+            return False
+        test_files = [os.path.join(d_path, "GeometryDash.exe")]
+        res_dir = os.path.join(d_path, "Resources")
+        if os.path.isdir(res_dir):
+            for f in ("Dash.mp3", "Deadlocked.mp3", "GJ_GameSheet-hd.png"):
+                p = os.path.join(res_dir, f)
+                if os.path.isfile(p):
+                    test_files.append(p)
+        for p in test_files:
+            try:
+                with open(p, "rb") as f:
+                    f.read(1024)
+            except OSError as e:
+                if getattr(e, "winerror", None) in (32, 33, 5):
+                    return True
+            except Exception:
+                pass
         return False
 
     def is_geode_installed(self):
@@ -2221,7 +2282,7 @@ class GeodeSyncApp(tk.Tk):
             except Exception as e:
                 self.log(f"Warning launching Steam: {e}", "WARN")
 
-        if self.mgr.has_downloaded_depot():
+        if self.mgr.has_downloaded_depot() and not self.mgr.is_depot_locked():
             self.log(f"{self.mgr.target_gd_version} files already present on disk. Applying directly...", "INFO")
             self._apply_downgrade_files()
             return
@@ -2300,8 +2361,10 @@ class GeodeSyncApp(tk.Tk):
                 except Exception:
                     pass
 
-            if self.mgr.has_downloaded_depot():
-                break
+            if self.mgr.has_downloaded_depot() and not self.mgr.is_depot_locked():
+                time.sleep(1.0)
+                if not self.mgr.is_depot_locked():
+                    break
 
         self.progress_bar["value"] = 100
         self.progress_lbl.config(text="Download complete! Applying files...")
@@ -2370,9 +2433,22 @@ class GeodeSyncApp(tk.Tk):
             self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
             self.log(f"Safe game switch failed; rollback/recovery preserved the previous files: {e}", "ERROR")
+            err_msg = str(e)
+            if "WinError 32" in err_msg or "WinError 33" in err_msg or "being used by another process" in err_msg:
+                user_msg = (
+                    "Steam or Geometry Dash currently has the game files in use.\n\n"
+                    "1. Make sure Geometry Dash is fully closed.\n"
+                    "2. Wait a few moments for Steam to finish writing files.\n"
+                    "3. Click '1-Click Fix' again to finish the switch."
+                )
+            else:
+                user_msg = (
+                    "GeodeSync could not finish installing the selected game version. "
+                    f"It restored the previous files or kept recovery data for the next launch.\n\n{e}"
+                )
             messagebox.showerror(
                 "Game switch was not completed",
-                f"GeodeSync could not finish installing the selected game version. It restored the previous files or kept recovery data for the next launch.\n\n{e}",
+                user_msg,
             )
             self.refresh_status()
             return
