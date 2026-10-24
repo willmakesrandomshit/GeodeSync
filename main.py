@@ -4433,23 +4433,6 @@ fi
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
 
-def ensure_clean_launch():
-    if not IS_WIN:
-        return
-    current_pid = os.getpid()
-    try:
-        cmd = f"Get-Process GeodeSync -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {current_pid} }} | Stop-Process -Force"
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command", cmd],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=0x08000000 if IS_WIN else 0
-        )
-    except Exception:
-        pass
-
-
 if __name__ == "__main__":
-    ensure_clean_launch()
     app = GeodeSyncApp()
     app.mainloop()
