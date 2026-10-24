@@ -8,16 +8,18 @@ GeodeSync helps manage Geometry Dash versions installed through Steam. It can sw
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.5.4-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-green.svg)
 
 ## Start here
 
 1. Download the package for your computer from [GitHub Releases](https://github.com/willmakesrandomshit/GeodeSync/releases).
-2. Open GeodeSync and check the Geometry Dash status shown on the main screen.
-3. Follow the single **Next step** card for the detected game setup. Use **Restore current game** to return to Steam's current version.
-4. Open **More tools** for backups, mod settings, and other utilities.
+2. Open GeodeSync and follow the **Next step** card for your detected setup.
+3. Before switching game versions, close Geometry Dash and review the confirmation. GeodeSync stages and validates the depot before changing installed files, backs up detected saves, and keeps a recovery journal so a switch interrupted by an app exit or crash can be rolled back on the next launch.
+4. Use **Game profiles** to save a supported game version and active mod selection together. Profiles are stored locally in your app data folder.
+5. Use **Export support report** to create a shareable diagnostic file with recent activity and system status. It excludes save contents and mod files; review the report before sharing it.
+6. Open **More tools** for backups and the other utilities.
 
-GeodeSync does not replace Steam or Geode. Keep save backups before changing game files, and use Steam's **Verify integrity** if the game itself is damaged.
+GeodeSync does not replace Steam or Geode. Keep save backups before changing game files, and use Steam's **Verify integrity** if the game itself is damaged. Game switching remains dependent on Steam completing and exposing a valid depot; the app will leave installed files unchanged when depot validation fails.
 
 ## Downloads
 

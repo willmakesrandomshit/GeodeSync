@@ -1,21 +1,24 @@
 # GeodeSync sharing copy
 
-Use this copy after the v1.1.5.3 GitHub Release is available.
+Use this copy after the v2.0.0 GitHub Release is available.
 
 ## Short post
 
-GeodeSync v1.1.5.3 is available for Windows and macOS. The main screen now focuses on the recommended game action, with optional tools grouped in a simple drawer.
+GeodeSync v2.0.0 is available for Windows and macOS. It adds recoverable game switching, saved local game profiles, persistent preferences, and a shareable support report, all in a simpler setup-focused interface.
 
 Download: https://github.com/willmakesrandomshit/GeodeSync/releases/latest
 
 ## What changed
 
-- Simplified the main screen and grouped optional utilities under **Tools**.
-- Includes the macOS game-depot validation and recovery safeguards from v1.1.5.2.
+- Stages and validates Steam game files before replacing the current installation, and rolls back interrupted switches.
+- Backs up detected saves before switching game versions.
+- Saves supported game versions and active mod selections as local profiles.
+- Exports a diagnostics report without including save contents or mod files.
+- Keeps the next setup action at the center of a simpler, consistent interface.
 
 ## Platform packages
 
-- Windows: `GeodeSync-v1.1.5.3-Windows.zip`
+- Windows: `GeodeSync-v2.0.0-Windows.zip`
 - Apple silicon: `GeodeSync-macOS-arm64.zip`
 - Intel Mac: `GeodeSync-macOS-x86_64.zip`
 

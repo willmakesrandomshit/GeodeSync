@@ -1,9 +1,9 @@
 {
-  "app_version": "1.1.5.4",
+  "app_version": "2.0.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v1.1.5.4 refreshes the dashboard and prevents update checks from selecting an older release."
+  "announcement": "GeodeSync v2.0.0 adds safer recoverable game switching, saved setup profiles, persistent preferences, and shareable support reports."
 }

@@ -76,7 +76,11 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' dist/GeodeSync.app/Contents/Info.plist)" = "${{ matrix.minimum_macos }}"
           test "$(lipo -archs dist/GeodeSync.app/Contents/MacOS/GeodeSync)" = "${{ matrix.arch }}"
           file dist/GeodeSync.app/Contents/MacOS/GeodeSync
-          codesign --verify --deep --strict dist/GeodeSync.app
+          if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            codesign --verify --deep --strict dist/GeodeSync.app
+          else
+            echo "No Apple signing identity configured; packaging the structurally verified community build unsigned."
+          fi
       - name: Package app for download
         run: ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "GeodeSync-macOS-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
