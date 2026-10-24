@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import json
 import shutil
 import stat
@@ -14,10 +15,41 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.1.5.4"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
-RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
+
+
+def is_newer_app_version(candidate, current):
+    def parts(version):
+        value = str(version or "").strip().lstrip("v")
+        return tuple(int(part) for part in value.split(".")) if re.fullmatch(r"\d+(?:\.\d+)*", value) else None
+
+    candidate_parts = parts(candidate)
+    current_parts = parts(current)
+    if candidate_parts is None or current_parts is None:
+        return False
+    width = max(len(candidate_parts), len(current_parts))
+    return candidate_parts + (0,) * (width - len(candidate_parts)) > current_parts + (0,) * (width - len(current_parts))
+
+
+def fetch_latest_published_release(timeout=8):
+    req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        releases = json.loads(resp.read().decode())
+    stable = []
+    for release in releases if isinstance(releases, list) else []:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+            continue
+        tag = str(release.get("tag_name", "")).strip()
+        parts = tuple(int(part) for part in tag.lstrip("v").split(".")) if re.fullmatch(r"v?\d+(?:\.\d+)*", tag) else None
+        key = parts + (0,) * max(0, 8 - len(parts)) if parts is not None else None
+        if key is not None:
+            stable.append((key, release))
+    if not stable:
+        raise ValueError("No published stable GeodeSync release was found.")
+    return max(stable, key=lambda item: item[0])[1]
 
 APP_ID = "322170"
 DEPOT_ID = "322171"
@@ -810,13 +842,11 @@ class GeodeSyncApp(tk.Tk):
             pass
 
         try:
-            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                rel = json.loads(resp.read().decode())
-                tag = rel.get("tag_name", "").lstrip("v")
-                if tag and tag != APP_VERSION:
-                    self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                    self.show_update_banner(tag)
+            rel = fetch_latest_published_release(timeout=8)
+            tag = rel.get("tag_name", "").lstrip("v")
+            if is_newer_app_version(tag, APP_VERSION):
+                self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                self.show_update_banner(tag)
         except Exception:
             pass
 
