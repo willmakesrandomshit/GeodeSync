@@ -121,6 +121,15 @@ class SafeGameSwitchTests(unittest.TestCase):
             self.assertEqual(self.read(os.path.join(destination, "game.bin")), "new")
             self.assertFalse(os.path.exists(stage))
 
+    def test_safe_copy_item_copies_file_atomically_without_bad_descriptor(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = os.path.join(root, "source.dat")
+            dst = os.path.join(root, "destination.dat")
+            self.write(src, "important data")
+            from main import safe_copy_item
+            safe_copy_item(src, dst)
+            self.assertEqual(self.read(dst), "important data")
+
 
 if __name__ == "__main__":
     unittest.main()

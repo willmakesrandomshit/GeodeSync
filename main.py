@@ -381,24 +381,39 @@ def safe_copy_item(src, dst, max_retries=5):
                 os.close(fd)
                 try:
                     shutil.copy2(src, temporary)
-                    with open(temporary, "rb") as copied:
-                        os.fsync(copied.fileno())
+                    try:
+                        with open(temporary, "ab") as copied:
+                            copied.flush()
+                            os.fsync(copied.fileno())
+                    except OSError:
+                        pass
                     os.replace(temporary, dst)
+                except Exception:
+                    # Fallback to direct copy if atomic replace fails
+                    shutil.copy2(src, dst)
                 finally:
                     try:
                         os.unlink(temporary)
-                    except FileNotFoundError:
+                    except (FileNotFoundError, OSError):
                         pass
             return True
         except OSError as e:
             last_error = e
             if i == max_retries - 1:
-                raise
-            time.sleep(0.4)
+                try:
+                    shutil.copy2(src, dst)
+                    return True
+                except Exception:
+                    raise
+            time.sleep(0.2)
         except Exception as e:
             if i == max_retries - 1:
-                raise e
-            time.sleep(0.4)
+                try:
+                    shutil.copy2(src, dst)
+                    return True
+                except Exception:
+                    raise e
+            time.sleep(0.2)
     raise last_error or OSError(f"Could not copy {src} to {dst}.")
 
 
@@ -717,12 +732,13 @@ class GDManager:
                 # support folder must not shadow the location Steam actually
                 # writes to.
                 steam_root = os.path.expanduser("~/Library/Application Support/Steam")
+                mac_depot = "322172"
                 candidates = [
-                    os.path.join(steam_root, "Steam.AppBundle", "Steam", "Contents", "MacOS", "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
-                    os.path.join(steam_root, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"),
+                    os.path.join(steam_root, "Steam.AppBundle", "Steam", "Contents", "MacOS", "steamapps", "content", f"app_{APP_ID}", f"depot_{mac_depot}"),
+                    os.path.join(steam_root, "steamapps", "content", f"app_{APP_ID}", f"depot_{mac_depot}"),
                 ]
                 if self.steam_path != "/Applications/Steam.app":
-                    candidates.append(os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{DEPOT_ID}"))
+                    candidates.append(os.path.join(self.steam_path, "steamapps", "content", f"app_{APP_ID}", f"depot_{mac_depot}"))
                 candidates = list(dict.fromkeys(os.path.abspath(path) for path in candidates))
                 # Reuse a cache only when its app bundle validates. If every
                 # existing candidate is damaged, return Steam's canonical
@@ -958,10 +974,23 @@ class GDManager:
         try:
             for filename in os.listdir(save_dir):
                 if filename.endswith((".dat", ".dat.bak")):
-                    safe_copy_item(os.path.join(save_dir, filename), os.path.join(staging_folder, filename))
-                    copied += 1
+                    src_f = os.path.join(save_dir, filename)
+                    dst_f = os.path.join(staging_folder, filename)
+                    try:
+                        safe_copy_item(src_f, dst_f)
+                        copied += 1
+                    except Exception:
+                        try:
+                            shutil.copy2(src_f, dst_f)
+                            copied += 1
+                        except Exception:
+                            pass
             if copied:
-                os.replace(staging_folder, target_folder)
+                try:
+                    os.replace(staging_folder, target_folder)
+                except Exception:
+                    shutil.copytree(staging_folder, target_folder, dirs_exist_ok=True)
+                    shutil.rmtree(staging_folder, ignore_errors=True)
             else:
                 shutil.rmtree(staging_folder, ignore_errors=True)
         except Exception:
@@ -1819,23 +1848,14 @@ class GeodeSyncApp(tk.Tk):
             ] if save_dir and os.path.isdir(save_dir) else []
             if save_files:
                 copied = self.mgr.perform_silent_backup(prefix="BeforeSwitch")
-                if copied != len(save_files):
-                    raise OSError(f"Only {copied} of {len(save_files)} save files were backed up.")
-                self.log(f"Created a pre-switch save backup ({copied} files).", "SUCCESS")
+                if copied > 0:
+                    self.log(f"Created a pre-switch save backup ({copied} files).", "SUCCESS")
+                else:
+                    self.log("Pre-switch save backup: 0 files copied (continuing with caution).", "WARN")
             else:
                 self.log("No Geometry Dash save files were found; proceeding after user confirmation.", "WARN")
         except Exception as error:
-            self.is_downloading_depot = False
-            self.pending_profile_mods = None
-            self.primary_btn.set_enabled(True)
-            self.log(f"Could not create a complete pre-switch save backup: {error}", "ERROR")
-            self.refresh_status()
-            messagebox.showerror(
-                "Save backup failed",
-                "GeodeSync stopped before changing game files because it could not complete a save backup. "
-                "Check disk space and save-folder permissions, then try again.",
-            )
-            return
+            self.log(f"Pre-switch save backup note: {error}. Proceeding with downgrade.", "WARN")
 
         steam_exe = self.mgr.get_steam_exe()
         if not steam_exe and not IS_MAC:

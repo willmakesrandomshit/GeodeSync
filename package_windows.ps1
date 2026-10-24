@@ -15,6 +15,8 @@ if (Test-Path $packageDir) { Remove-Item $packageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $packageDir | Out-Null
 Copy-Item 'dist\GeodeSync.exe' (Join-Path $packageDir 'GeodeSync.exe')
 Copy-Item 'README.md' (Join-Path $packageDir 'README.txt')
+$batContent = "@echo off`r`npowershell -NoProfile -Command ""Unblock-File -Path '%~dp0GeodeSync.exe' -ErrorAction SilentlyContinue""`r`nstart """" ""%~dp0GeodeSync.exe""`r`n"
+Set-Content -Path (Join-Path $packageDir 'Run-GeodeSync.bat') -Value $batContent
 $zipPath = Join-Path $repoRoot "dist\GeodeSync-v$version-Windows.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path (Join-Path $packageDir '*') -DestinationPath $zipPath

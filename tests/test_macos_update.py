@@ -124,7 +124,8 @@ class MacGameLaunchTests(unittest.TestCase):
     def test_rejects_incomplete_or_non_executable_bundle(self):
         with tempfile.TemporaryDirectory() as root:
             app = self.make_app(root, executable=False)
-            self.assertIn("not marked executable", validate_macos_game_app(app))
+            with mock.patch("main.os.access", side_effect=lambda path, mode: False if mode == os.X_OK else os.access(path, mode)):
+                self.assertIn("not marked executable", validate_macos_game_app(app))
             os.unlink(os.path.join(app, "Contents", "MacOS", "Geometry Dash"))
             self.assertIn("executable is missing", validate_macos_game_app(app))
 
