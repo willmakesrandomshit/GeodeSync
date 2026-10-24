@@ -51,83 +51,177 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10
 
 
 class DiscordRPC:
-    CLIENT_ID = "1219662703889158225"
+    CLIENT_ID = "1178492879627366472"
 
-    def __init__(self):
+    def __init__(self, enabled=True):
+        self._enabled = enabled
         self._sock = None
         self._connected = False
-        threading.Thread(target=self._connect, daemon=True).start()
+        self._lock = threading.Lock()
+        self._start_time = int(time.time())
+        self._current_details = "Geometry Dash Companion"
+        self._current_state = "Geode Mods Protected 🛡️"
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
 
-    def _connect(self):
-        try:
-            if IS_WIN:
-                for i in range(10):
-                    pipe_name = rf"\\.\pipe\discord-ipc-{i}"
+    def set_enabled(self, val):
+        self._enabled = bool(val)
+        if not self._enabled:
+            self._close_socket()
+        else:
+            self._start_time = int(time.time())
+
+    def is_connected(self):
+        return self._connected and self._enabled
+
+    def _close_socket(self):
+        with self._lock:
+            if self._sock:
+                try:
+                    self._sock.close()
+                except Exception:
+                    pass
+                self._sock = None
+            self._connected = False
+
+    def _attempt_connect(self):
+        if not self._enabled:
+            return False
+        if IS_WIN:
+            for i in range(10):
+                pipe_name = rf"\\.\pipe\discord-ipc-{i}"
+                try:
+                    sock = open(pipe_name, "r+b", buffering=0)
+                    if self._perform_handshake(sock):
+                        with self._lock:
+                            self._sock = sock
+                            self._connected = True
+                        return True
+                    else:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+        else:
+            sock_paths = [
+                os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "discord-ipc-0"),
+                "/tmp/discord-ipc-0",
+                f"{tempfile.gettempdir()}/discord-ipc-0",
+            ]
+            for p in sock_paths:
+                if os.path.exists(p):
                     try:
-                        self._sock = open(pipe_name, "r+b", buffering=0)
-                        self._connected = True
-                        break
+                        import socket
+                        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        sock.connect(p)
+                        if self._perform_handshake(sock):
+                            with self._lock:
+                                self._sock = sock
+                                self._connected = True
+                            return True
+                        else:
+                            try:
+                                sock.close()
+                            except Exception:
+                                pass
                     except Exception:
                         continue
+        return False
+
+    def _perform_handshake(self, sock):
+        try:
+            handshake = json.dumps({"v": 1, "client_id": self.CLIENT_ID}).encode("utf-8")
+            header = struct.pack("<II", 0, len(handshake))
+            if hasattr(sock, "write"):
+                sock.write(header + handshake)
+                resp_hdr = sock.read(8)
             else:
-                sock_paths = [
-                    os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "discord-ipc-0"),
-                    "/tmp/discord-ipc-0",
-                    f"{tempfile.gettempdir()}/discord-ipc-0",
-                ]
-                for p in sock_paths:
-                    if os.path.exists(p):
-                        import socket
-                        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                        s.connect(p)
-                        self._sock = s
-                        self._connected = True
-                        break
-
-            if self._connected:
-                handshake = json.dumps({"v": 1, "client_id": self.CLIENT_ID}).encode()
-                self._send(0, handshake)
-                self.update_presence()
+                sock.sendall(header + handshake)
+                resp_hdr = sock.recv(8)
+            if len(resp_hdr) == 8:
+                op, length = struct.unpack("<II", resp_hdr)
+                if hasattr(sock, "read"):
+                    body = sock.read(length)
+                else:
+                    body = sock.recv(length)
+                return op == 1
         except Exception:
-            self._connected = False
+            pass
+        return False
 
-    def _send(self, op, data):
-        if not self._sock or not self._connected:
-            return
-        try:
-            length = len(data)
-            header = struct.pack("<II", op, length)
-            payload = header + data
-            if hasattr(self._sock, "write"):
-                self._sock.write(payload)
-                self._sock.flush()
-            elif hasattr(self._sock, "sendall"):
-                self._sock.sendall(payload)
-        except Exception:
-            self._connected = False
+    def _run_loop(self):
+        while self._running:
+            try:
+                if self._enabled:
+                    if not self._connected:
+                        if self._attempt_connect():
+                            self._send_activity()
+                    else:
+                        self._send_activity()
+            except Exception:
+                self._close_socket()
+            time.sleep(4)
 
-    def update_presence(self, details="Geometry Dash 2.2081", state="Geode Mods Protected 🛡️"):
-        if not self._connected:
+    def _send_activity(self):
+        if not self._connected or not self._sock or not self._enabled:
             return
-        try:
-            frame = {
-                "cmd": "SET_ACTIVITY",
-                "args": {
-                    "pid": os.getpid(),
-                    "activity": {
-                        "details": details,
-                        "state": state,
-                        "assets": {
-                            "large_image": "geode_logo",
-                            "large_text": f"GeodeSync v{APP_VERSION}"
+        with self._lock:
+            try:
+                frame = {
+                    "cmd": "SET_ACTIVITY",
+                    "args": {
+                        "pid": os.getpid(),
+                        "activity": {
+                            "details": self._current_details,
+                            "state": self._current_state,
+                            "timestamps": {"start": self._start_time},
+                            "assets": {
+                                "large_image": "gd_large",
+                                "large_text": f"GeodeSync v{APP_VERSION}"
+                            },
+                            "buttons": [
+                                {"label": "Get GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"}
+                            ]
                         }
-                    }
-                },
-                "nonce": str(time.time())
-            }
-            self._send(1, json.dumps(frame).encode())
-        except Exception:
-            self._connected = False
+                    },
+                    "nonce": str(time.time())
+                }
+                data = json.dumps(frame).encode("utf-8")
+                header = struct.pack("<II", 1, len(data))
+                payload = header + data
+                if hasattr(self._sock, "write"):
+                    self._sock.write(payload)
+                    resp_hdr = self._sock.read(8)
+                    if len(resp_hdr) == 8:
+                        _, length = struct.unpack("<II", resp_hdr)
+                        self._sock.read(length)
+                    else:
+                        self._connected = False
+                elif hasattr(self._sock, "sendall"):
+                    self._sock.sendall(payload)
+                    resp_hdr = self._sock.recv(8)
+                    if len(resp_hdr) == 8:
+                        _, length = struct.unpack("<II", resp_hdr)
+                        self._sock.recv(length)
+                    else:
+                        self._connected = False
+            except Exception:
+                self._connected = False
+
+    def update_presence(self, details=None, state=None):
+        if details is not None:
+            self._current_details = str(details)
+        if state is not None:
+            self._current_state = str(state)
+        if self._connected:
+            threading.Thread(target=self._send_activity, daemon=True).start()
+
+    def close(self):
+        self._running = False
+        self._close_socket()
 
 
 UI = {
@@ -1319,7 +1413,8 @@ class GeodeSyncApp(tk.Tk):
             self.mgr.manifest_path = self.mgr.get_manifest_path()
         self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
         self.sounds_enabled = bool(self.settings.get("sounds_enabled", True))
-        self.discord_rpc = DiscordRPC()
+        self.discord_rpc_enabled = bool(self.settings.get("discord_rpc_enabled", True))
+        self.discord_rpc = DiscordRPC(enabled=self.discord_rpc_enabled)
         self._restore_selected_version()
         try:
             self.recovered_transactions = recover_pending_install_transactions(self.mgr.gd_path) if self.mgr.gd_path else []
@@ -1378,6 +1473,7 @@ class GeodeSyncApp(tk.Tk):
             "target_manifest": str(self.mgr.target_manifest),
             "auto_backup_enabled": bool(self.auto_backup_enabled),
             "sounds_enabled": bool(self.sounds_enabled),
+            "discord_rpc_enabled": bool(getattr(self, "discord_rpc_enabled", True)),
         })
         atomic_write_json(self.settings_path, self.settings)
 
@@ -1631,10 +1727,15 @@ class GeodeSyncApp(tk.Tk):
         add_tool("🔄 Check updates", self.manual_check_updates, color=UI["lime"], row=4, column=0, bold=True)
         add_tool("📋 Export report", self.export_support_report, color=UI["amber"], row=4, column=1)
         self.sounds_btn = add_tool("🔊 GD Sounds: ON", self.toggle_sounds, color=UI["lime"], row=4, column=2)
+        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=5, column=0)
+        add_tool("📢 Share GeodeSync", self.share_geodesync, color=UI["lime"], row=5, column=1, bold=True)
+        add_tool("⭐ Star on GitHub", lambda: open_url_or_path(f"https://github.com/{GITHUB_REPO}"), color=UI["amber"], row=5, column=2)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
         if not self.sounds_enabled:
             self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
+        if not self.discord_rpc_enabled:
+            self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
 
         # 4. ACTIVITY LOG
         log_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
@@ -1723,6 +1824,10 @@ class GeodeSyncApp(tk.Tk):
             self.lock_badge.config(text="Locked (Protected)", fg=UI["lime"], bg=UI["lime_dark"])
         else:
             self.lock_badge.config(text="Unlocked (Normal)", fg=UI["amber"], bg=UI["panel_alt"])
+
+        if hasattr(self, "discord_rpc"):
+            status_desc = "Geode Mods Protected 🛡️" if is_locked else "Ready to Switch"
+            self.discord_rpc.update_presence(f"GD {ver_text}", status_desc)
 
         has_geode = self.mgr.is_geode_installed()
         if has_geode:
@@ -2790,6 +2895,8 @@ class GeodeSyncApp(tk.Tk):
             return
 
         self.log("Launching Geometry Dash...", "INFO")
+        if hasattr(self, "discord_rpc"):
+            self.discord_rpc.update_presence("Playing Geometry Dash", "Geode Mods Protected 🛡️")
         if not open_url_or_path(f"steam://run/{APP_ID}"):
             self.log("Could not pass the Geometry Dash launch request to Steam.", "ERROR")
             messagebox.showerror("Launch failed", "Could not pass the Geometry Dash launch request to Steam.")
@@ -3646,6 +3753,85 @@ fi
         except Exception as e:
             self.log(f"Failed to create shortcut: {e}", "WARN")
             messagebox.showerror("Error", f"Could not create desktop shortcut:\n{e}")
+
+    def toggle_rpc(self):
+        self.discord_rpc_enabled = not getattr(self, "discord_rpc_enabled", True)
+        if self.discord_rpc_enabled:
+            self.rpc_btn.config(text="🎮 Discord RPC: ON", fg=UI["lilac"])
+            self.discord_rpc.set_enabled(True)
+            self.log("Discord Rich Presence enabled. Status showing on Discord profile.", "SUCCESS")
+            self.play_ding()
+        else:
+            self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
+            self.discord_rpc.set_enabled(False)
+            self.log("Discord Rich Presence disabled.", "INFO")
+        self._save_settings()
+
+    def share_geodesync(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("📢 Share GeodeSync")
+        dialog.geometry("520x460")
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=16, pady=12)
+        head.pack(fill="x")
+        tk.Label(
+            head,
+            text="📢 Help Fellow GD Players Protect Their Mods",
+            font=("Segoe UI", 12, "bold"),
+            bg=UI["header"],
+            fg=UI["lime"],
+        ).pack(anchor="w")
+        tk.Label(
+            head,
+            text="Whenever GD updates, mods break. Share GeodeSync so your friends don't lose their saves or mods!",
+            font=("Segoe UI", 9),
+            bg=UI["header"],
+            fg=UI["muted"],
+            wraplength=480,
+            justify="left",
+        ).pack(anchor="w", pady=(3, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=12)
+        content.pack(fill="both", expand=True)
+
+        templates = [
+            (
+                "💬 Discord Message (for GD & Modding Servers)",
+                f"Hey guys! If your Geode mods broke on the new GD update, use GeodeSync to lock your game version or switch back safely without losing your saves or mods: https://github.com/{GITHUB_REPO}"
+            ),
+            (
+                "🌐 Reddit / Socials Post",
+                f"Geometry Dash version switcher & Geode mod protector (Windows, Mac, Linux) - 1-click downgrade, Steam update lock, save backups: https://github.com/{GITHUB_REPO}"
+            ),
+            (
+                "🔗 Direct Download Link",
+                f"https://github.com/{GITHUB_REPO}/releases/latest"
+            )
+        ]
+
+        for title, text in templates:
+            card = tk.Frame(content, bg=UI["panel"], padx=10, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+            card.pack(fill="x", pady=5)
+            tk.Label(card, text=title, font=("Segoe UI", 9, "bold"), bg=UI["panel"], fg=UI["text"]).pack(anchor="w")
+            txt_box = tk.Text(card, height=3, bg=UI["inset"], fg=UI["text"], insertbackground=UI["text"], relief="flat", wrap="word", font=("Segoe UI", 8))
+            txt_box.pack(fill="x", pady=4)
+            txt_box.insert("1.0", text)
+            txt_box.config(state="disabled")
+
+            def make_copy(t=text):
+                self.clipboard_clear()
+                self.clipboard_append(t)
+                self.play_ding()
+                messagebox.showinfo("Copied!", "Copied text to clipboard! Paste it into Discord or social media.")
+
+            copy_btn = ModernButton(card, text="📋 Copy to Clipboard", bg=UI["panel_alt"], hover_bg=UI["border"], command=make_copy)
+            copy_btn.pack(anchor="e")
+
+        close_btn = ModernButton(content, text="Close", bg=UI["panel_alt"], hover_bg=UI["border"], command=dialog.destroy)
+        close_btn.pack(pady=(8, 0))
 
     # ==========================================
     # v1.1.3 PRO FEATURE: FPS UNLOCKER & REFRESH RATE
