@@ -44,7 +44,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -57,10 +57,10 @@ class DiscordRPC:
         self._enabled = enabled
         self._sock = None
         self._connected = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._start_time = int(time.time())
         self._current_details = "Geometry Dash Companion"
-        self._current_state = "Geode Mods Protected 🛡️"
+        self._current_state = "Geode Mods Synced & Protected 🛡️"
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -180,11 +180,13 @@ class DiscordRPC:
                             "timestamps": {"start": self._start_time},
                             "assets": {
                                 "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon.png",
-                                "large_text": f"GeodeSync v{APP_VERSION} · Mod Protector"
+                                "large_text": f"GeodeSync v{APP_VERSION} · Geometry Dash Mod Manager",
+                                "small_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/real_geode_logo.png",
+                                "small_text": "Geode Mod Loader Active"
                             },
                             "buttons": [
-                                {"label": "⬇️ Download GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"},
-                                {"label": "🛡️ Fix Broken Mods", "url": f"https://github.com/{GITHUB_REPO}#readme"}
+                                {"label": "View GitHub Repo", "url": f"https://github.com/{GITHUB_REPO}"},
+                                {"label": "Join Discord Server", "url": "https://discord.gg/tyQG5xNGCx"}
                             ]
                         }
                     },
@@ -212,12 +214,18 @@ class DiscordRPC:
             except Exception:
                 self._connected = False
 
-    def update_presence(self, details=None, state=None):
-        if details is not None:
+    def update_presence(self, details=None, state=None, reset_timer=False):
+        changed = False
+        if details is not None and details != self._current_details:
             self._current_details = str(details)
-        if state is not None:
+            changed = True
+        if state is not None and state != self._current_state:
             self._current_state = str(state)
-        if self._connected:
+            changed = True
+        if reset_timer:
+            self._start_time = int(time.time())
+            changed = True
+        if self._connected and changed:
             threading.Thread(target=self._send_activity, daemon=True).start()
 
     def clear_presence(self):
@@ -242,7 +250,7 @@ class DiscordRPC:
                     self._sock.sendall(payload)
             except Exception:
                 pass
-            self._close_socket()
+        self._close_socket()
 
     def close(self):
         self._running = False
@@ -1465,6 +1473,7 @@ class GeodeSyncApp(tk.Tk):
         self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
         self.sounds_enabled = bool(self.settings.get("sounds_enabled", True))
         self.discord_rpc_enabled = bool(self.settings.get("discord_rpc_enabled", True))
+        self.run_in_bg_enabled = bool(self.settings.get("run_in_bg_enabled", True))
         self.discord_rpc = DiscordRPC(enabled=self.discord_rpc_enabled)
         self._restore_selected_version()
         try:
@@ -1495,6 +1504,15 @@ class GeodeSyncApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
+        if getattr(self, "run_in_bg_enabled", True):
+            self.withdraw()
+            if not getattr(self, "_bg_notified", False):
+                self._bg_notified = True
+                self.log("GeodeSync running in background with Discord Presence active. Click 'Quit GeodeSync' or launch app to restore.", "INFO")
+        else:
+            self.quit_app()
+
+    def quit_app(self):
         try:
             self._monitor_running = False
             if hasattr(self, "discord_rpc"):
@@ -1507,6 +1525,32 @@ class GeodeSyncApp(tk.Tk):
         except Exception:
             pass
         os._exit(0)
+
+    def restore_from_background(self):
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+            if IS_WIN:
+                try:
+                    import ctypes
+                    ctypes.windll.user32.ShowWindow(self.winfo_id(), 9)
+                    ctypes.windll.user32.SetForegroundWindow(self.winfo_id())
+                except Exception:
+                    pass
+            self.refresh_status()
+        except Exception:
+            pass
+
+    def toggle_bg_mode(self):
+        self.run_in_bg_enabled = not getattr(self, "run_in_bg_enabled", True)
+        if self.run_in_bg_enabled:
+            self.bg_mode_btn.config(text="🌙 Run in BG: ON", fg=UI["lime"])
+            self.log("Background Mode: ON (Discord Rich Presence stays active when window is closed).", "SUCCESS")
+        else:
+            self.bg_mode_btn.config(text="🌙 Run in BG: OFF", fg=UI["muted"])
+            self.log("Background Mode: OFF (Closing window exits the app).", "INFO")
+        self._save_settings()
 
     @staticmethod
     def _is_valid_game_path(path):
@@ -1540,6 +1584,7 @@ class GeodeSyncApp(tk.Tk):
             "auto_backup_enabled": bool(self.auto_backup_enabled),
             "sounds_enabled": bool(self.sounds_enabled),
             "discord_rpc_enabled": bool(getattr(self, "discord_rpc_enabled", True)),
+            "run_in_bg_enabled": bool(getattr(self, "run_in_bg_enabled", True)),
         })
         atomic_write_json(self.settings_path, self.settings)
 
@@ -1796,12 +1841,17 @@ class GeodeSyncApp(tk.Tk):
         self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=5, column=0)
         add_tool("📢 Share GeodeSync", self.share_geodesync, color=UI["lime"], row=5, column=1, bold=True)
         add_tool("⭐ Star on GitHub", lambda: open_url_or_path(f"https://github.com/{GITHUB_REPO}"), color=UI["amber"], row=5, column=2)
+        add_tool("💬 Join Discord", lambda: open_url_or_path("https://discord.gg/tyQG5xNGCx"), color=UI["lilac"], row=6, column=0)
+        self.bg_mode_btn = add_tool("🌙 Run in BG: ON", self.toggle_bg_mode, color=UI["lime"], row=6, column=1)
+        add_tool("❌ Quit GeodeSync", self.quit_app, color=UI["red"], row=6, column=2, bold=True)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
         if not self.sounds_enabled:
             self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
         if not self.discord_rpc_enabled:
             self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
+        if not self.run_in_bg_enabled:
+            self.bg_mode_btn.config(text="🌙 Run in BG: OFF", fg=UI["muted"])
 
         # 4. ACTIVITY LOG
         log_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
@@ -1830,6 +1880,10 @@ class GeodeSyncApp(tk.Tk):
         repo_link = tk.Label(footer, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["background"], cursor="hand2")
         repo_link.pack(side="left", padx=16)
         repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
+
+        discord_link = tk.Label(footer, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lime"], bg=UI["background"], cursor="hand2")
+        discord_link.pack(side="left", padx=8)
+        discord_link.bind("<Button-1>", lambda e: webbrowser.open("https://discord.gg/tyQG5xNGCx"))
 
         choose_path_btn = tk.Button(footer, text="Choose game folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=9, pady=4, cursor="hand2")
         choose_path_btn.pack(side="right")
@@ -2962,7 +3016,8 @@ class GeodeSyncApp(tk.Tk):
 
         self.log("Launching Geometry Dash...", "INFO")
         if hasattr(self, "discord_rpc"):
-            self.discord_rpc.update_presence("Playing Geometry Dash", "Geode Mods Protected 🛡️")
+            ver_text, _ = self.mgr.get_gd_version_info()
+            self.discord_rpc.update_presence("Playing Geometry Dash", f"GD {ver_text} · Mods Protected 🛡️", reset_timer=True)
         if not open_url_or_path(f"steam://run/{APP_ID}"):
             self.log("Could not pass the Geometry Dash launch request to Steam.", "ERROR")
             messagebox.showerror("Launch failed", "Could not pass the Geometry Dash launch request to Steam.")
@@ -3728,18 +3783,23 @@ fi
     # v1.1.3 PRO FEATURE: AUTO-BACKUP ON GD EXIT
     # ==========================================
     def _auto_backup_monitor_thread(self):
-        was_running = False
+        was_running = None
         while getattr(self, "_monitor_running", True):
             try:
                 is_running = self.mgr.is_gd_process_running()
-                if is_running and not was_running:
-                    ver_text, _ = self.mgr.get_gd_version_info()
+                ver_text, _ = self.mgr.get_gd_version_info()
+                is_locked = self.mgr.is_manifest_locked()
+
+                if is_running:
+                    status_desc = f"GD {ver_text} · Mods Protected 🛡️" if is_locked else f"GD {ver_text} · In Game"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Playing Geometry Dash", f"GD {ver_text} · Mods Protected 🛡️")
-                elif was_running and not is_running:
-                    ver_text, _ = self.mgr.get_gd_version_info()
+                        self.discord_rpc.update_presence("Playing Geometry Dash", status_desc, reset_timer=(was_running is False))
+                else:
+                    idle_desc = f"GD {ver_text} · Synced & Protected" if is_locked else f"GD {ver_text} · Ready to Play"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Geometry Dash Companion", f"GD {ver_text} · Synced & Ready")
+                        self.discord_rpc.update_presence("Geometry Dash Companion", idle_desc, reset_timer=(was_running is True))
+
+                if was_running is True and not is_running:
                     if getattr(self, "auto_backup_enabled", True):
                         copied = self.mgr.perform_silent_backup()
                         if copied:
@@ -4297,6 +4357,48 @@ fi
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
 
+SINGLE_INSTANCE_PORT = 43928
+
+
+def check_single_instance():
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.6)
+        s.connect(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        s.sendall(b"SHOW\n")
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def start_instance_listener(app):
+    def _listen():
+        try:
+            import socket
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+            srv.listen(5)
+            while True:
+                client, _ = srv.accept()
+                try:
+                    data = client.recv(1024)
+                    if b"SHOW" in data:
+                        app.after(0, app.restore_from_background)
+                except Exception:
+                    pass
+                finally:
+                    client.close()
+        except Exception:
+            pass
+    threading.Thread(target=_listen, daemon=True).start()
+
+
 if __name__ == "__main__":
+    if check_single_instance():
+        sys.exit(0)
     app = GeodeSyncApp()
+    start_instance_listener(app)
     app.mainloop()

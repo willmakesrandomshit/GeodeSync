@@ -40,5 +40,33 @@ class TestDiscordRPC(unittest.TestCase):
         self.assertEqual(rpc._current_state, "Protected")
         rpc.close()
 
+    def test_send_activity_payload(self):
+        with patch("threading.Thread"):
+            rpc = main.DiscordRPC(enabled=False)
+        rpc._connected = True
+        rpc._enabled = True
+        mock_sock = MagicMock()
+        mock_resp_body = b'{"cmd":"SET_ACTIVITY","data":{}}'
+        mock_resp_hdr = struct.pack("<II", 1, len(mock_resp_body))
+        mock_sock.read.side_effect = [mock_resp_hdr, mock_resp_body]
+        rpc._sock = mock_sock
+
+        rpc._send_activity()
+        mock_sock.write.assert_called_once()
+        sent_data = mock_sock.write.call_args[0][0]
+        op, length = struct.unpack("<II", sent_data[:8])
+        self.assertEqual(op, 1)
+        payload = json.loads(sent_data[8:8+length].decode("utf-8"))
+        self.assertEqual(payload["cmd"], "SET_ACTIVITY")
+        activity = payload["args"]["activity"]
+        self.assertIn("assets", activity)
+        self.assertIn("buttons", activity)
+        self.assertEqual(len(activity["buttons"]), 2)
+        self.assertEqual(activity["buttons"][0]["label"], "View GitHub Repo")
+        self.assertEqual(activity["buttons"][1]["label"], "Join Discord Server")
+        self.assertIn("geodesync_rpc_icon.png", activity["assets"]["large_image"])
+        self.assertIn("real_geode_logo.png", activity["assets"]["small_image"])
+        rpc.close()
+
 if __name__ == "__main__":
     unittest.main()
