@@ -122,10 +122,49 @@ jobs:
             GeodeSync-v*-Windows.zip
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux release assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+      - name: Install build tool
+        run: |
+          python -m pip install pyinstaller
+      - name: Build Linux executable
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
+      - name: Package Linux downloads
+        run: |
+          mkdir -p dist/GeodeSync-Linux
+          cp dist/GeodeSync dist/GeodeSync-Linux/GeodeSync
+          chmod +x dist/GeodeSync-Linux/GeodeSync
+          cp README.md dist/GeodeSync-Linux/README.md
+          cat << 'EOF' > dist/GeodeSync-Linux/run.sh
+#!/bin/bash
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+chmod +x "$DIR/GeodeSync"
+"$DIR/GeodeSync" "$@"
+EOF
+          chmod +x dist/GeodeSync-Linux/run.sh
+          VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['app_version'])")
+          tar -czvf "GeodeSync-v${VERSION}-Linux.tar.gz" -C dist/GeodeSync-Linux .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GeodeSync-Linux
+          path: GeodeSync-v*-Linux.tar.gz
+          if-no-files-found: error
+
   attach-to-release:
     name: Attach platform builds to GitHub Release
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -138,6 +177,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: GeodeSync-Windows
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: GeodeSync-Linux
           path: .
       - name: Confirm release ref matches application version
         id: version
@@ -166,4 +209,5 @@ jobs:
             GeodeSync.exe
             GeodeSync-v*-Windows.zip
             GeodeSync-macOS-*.zip
+            GeodeSync-v*-Linux.tar.gz
           fail_on_unmatched_files: true

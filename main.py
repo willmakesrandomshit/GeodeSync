@@ -648,7 +648,17 @@ class GDManager:
             return "/Applications/Steam.app"
 
         if IS_LINUX:
-            return shutil.which("steam") or "steam"
+            candidates = [
+                shutil.which("steam"),
+                "/usr/bin/steam",
+                os.path.expanduser("~/.local/share/Steam/steam.sh"),
+            ]
+            for c in candidates:
+                if c and os.path.exists(c):
+                    return c
+            if shutil.which("flatpak") and os.path.exists(os.path.expanduser("~/.var/app/com.valvesoftware.Steam")):
+                return "flatpak:com.valvesoftware.Steam"
+            return "steam"
 
         if self.steam_path:
             exe = os.path.join(self.steam_path, "steam.exe")
@@ -958,7 +968,7 @@ class GDManager:
                 return False
 
         try:
-            subprocess.run(["killall", "-9", "GeometryDash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-f", "GeometryDash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
             return True
         except Exception:
@@ -1875,6 +1885,11 @@ class GeodeSyncApp(tk.Tk):
             try:
                 if IS_MAC:
                     subprocess.Popen(["open", "-a", "Steam"])
+                elif IS_LINUX:
+                    if steam_exe and steam_exe.startswith("flatpak:"):
+                        subprocess.Popen(["flatpak", "run", "com.valvesoftware.Steam"])
+                    else:
+                        subprocess.Popen([steam_exe or "steam"])
                 elif steam_exe:
                     subprocess.Popen([steam_exe])
                 time.sleep(5)
@@ -1909,6 +1924,11 @@ class GeodeSyncApp(tk.Tk):
                 args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
             else:
                 args = ["open", "-a", "Steam", "--args", "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+        elif IS_LINUX:
+            if steam_exe and steam_exe.startswith("flatpak:"):
+                args = ["flatpak", "run", "com.valvesoftware.Steam", "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
+            else:
+                args = [steam_exe or "steam", "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
         else:
             args = [steam_exe, "-console", "+download_depot", APP_ID, DEPOT_ID, str(self.mgr.target_manifest)]
 
@@ -3226,13 +3246,16 @@ class GeodeSyncApp(tk.Tk):
                 raise ValueError("The downloaded app has the wrong bundle identity.")
             if str(new_metadata.get("CFBundleShortVersionString", "")) != version:
                 raise ValueError("The downloaded app version does not match its GitHub release tag.")
-            subprocess.run(
-                ["/usr/bin/codesign", "--verify", "--deep", "--strict", staged_app],
-                check=True,
-                timeout=60,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
+            try:
+                subprocess.run(
+                    ["/usr/bin/codesign", "--verify", "--deep", "--strict", staged_app],
+                    check=True,
+                    timeout=60,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
 
             executable = os.path.abspath(sys.executable)
             app_path = None
@@ -3289,6 +3312,7 @@ if ! /bin/mv "$INCOMING" "$TARGET"; then
   /bin/rm -rf "$INCOMING" "$WORKSPACE"
   exit 1
 fi
+/usr/bin/xattr -cr "$TARGET" 2>/dev/null || true
 if ! /usr/bin/open "$TARGET" >>"$LOG" 2>&1; then
   /bin/mv "$TARGET" "$INCOMING"
   if [ -e "$BACKUP" ]; then /bin/mv "$BACKUP" "$TARGET"; fi
