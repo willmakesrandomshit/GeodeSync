@@ -17,6 +17,7 @@ import posixpath
 import shlex
 import zipfile
 import zlib
+import struct
 import plistlib
 from xml.parsers.expat import ExpatError
 import tkinter as tk
@@ -47,6 +48,87 @@ APP_VERSION = "2.0.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
+
+
+class DiscordRPC:
+    CLIENT_ID = "1219662703889158225"
+
+    def __init__(self):
+        self._sock = None
+        self._connected = False
+        threading.Thread(target=self._connect, daemon=True).start()
+
+    def _connect(self):
+        try:
+            if IS_WIN:
+                for i in range(10):
+                    pipe_name = rf"\\.\pipe\discord-ipc-{i}"
+                    try:
+                        self._sock = open(pipe_name, "r+b", buffering=0)
+                        self._connected = True
+                        break
+                    except Exception:
+                        continue
+            else:
+                sock_paths = [
+                    os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "discord-ipc-0"),
+                    "/tmp/discord-ipc-0",
+                    f"{tempfile.gettempdir()}/discord-ipc-0",
+                ]
+                for p in sock_paths:
+                    if os.path.exists(p):
+                        import socket
+                        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        s.connect(p)
+                        self._sock = s
+                        self._connected = True
+                        break
+
+            if self._connected:
+                handshake = json.dumps({"v": 1, "client_id": self.CLIENT_ID}).encode()
+                self._send(0, handshake)
+                self.update_presence()
+        except Exception:
+            self._connected = False
+
+    def _send(self, op, data):
+        if not self._sock or not self._connected:
+            return
+        try:
+            length = len(data)
+            header = struct.pack("<II", op, length)
+            payload = header + data
+            if hasattr(self._sock, "write"):
+                self._sock.write(payload)
+                self._sock.flush()
+            elif hasattr(self._sock, "sendall"):
+                self._sock.sendall(payload)
+        except Exception:
+            self._connected = False
+
+    def update_presence(self, details="Geometry Dash 2.2081", state="Geode Mods Protected 🛡️"):
+        if not self._connected:
+            return
+        try:
+            frame = {
+                "cmd": "SET_ACTIVITY",
+                "args": {
+                    "pid": os.getpid(),
+                    "activity": {
+                        "details": details,
+                        "state": state,
+                        "assets": {
+                            "large_image": "geode_logo",
+                            "large_text": f"GeodeSync v{APP_VERSION}"
+                        }
+                    }
+                },
+                "nonce": str(time.time())
+            }
+            self._send(1, json.dumps(frame).encode())
+        except Exception:
+            self._connected = False
+
 
 UI = {
     "background": "#121013",
@@ -1236,6 +1318,8 @@ class GeodeSyncApp(tk.Tk):
             self.mgr.gd_path = os.path.abspath(stored_game_path)
             self.mgr.manifest_path = self.mgr.get_manifest_path()
         self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
+        self.sounds_enabled = bool(self.settings.get("sounds_enabled", True))
+        self.discord_rpc = DiscordRPC()
         self._restore_selected_version()
         try:
             self.recovered_transactions = recover_pending_install_transactions(self.mgr.gd_path) if self.mgr.gd_path else []
@@ -1293,6 +1377,7 @@ class GeodeSyncApp(tk.Tk):
             "game_path": self.mgr.gd_path,
             "target_manifest": str(self.mgr.target_manifest),
             "auto_backup_enabled": bool(self.auto_backup_enabled),
+            "sounds_enabled": bool(self.sounds_enabled),
         })
         atomic_write_json(self.settings_path, self.settings)
 
@@ -1542,9 +1627,14 @@ class GeodeSyncApp(tk.Tk):
         add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=2)
         add_tool("🎮 Game profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
         self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
-        add_tool("🔄 Check updates", self.manual_check_updates, color=UI["lime"], row=3, column=2, bold=True)
+        add_tool("📌 Desktop shortcut", self.create_desktop_shortcut, color=UI["lime"], row=3, column=2)
+        add_tool("🔄 Check updates", self.manual_check_updates, color=UI["lime"], row=4, column=0, bold=True)
+        add_tool("📋 Export report", self.export_support_report, color=UI["amber"], row=4, column=1)
+        self.sounds_btn = add_tool("🔊 GD Sounds: ON", self.toggle_sounds, color=UI["lime"], row=4, column=2)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
+        if not self.sounds_enabled:
+            self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
 
         # 4. ACTIVITY LOG
         log_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
@@ -1604,11 +1694,20 @@ class GeodeSyncApp(tk.Tk):
             pass
 
     def play_ding(self):
+        if not getattr(self, "sounds_enabled", True):
+            return
         if IS_WIN and winsound:
-            try:
-                winsound.MessageBeep(winsound.MB_ICONASTERISK)
-            except Exception:
-                pass
+            def _play():
+                try:
+                    notes = [(523, 70), (659, 70), (784, 90), (1046, 200)]
+                    for freq, dur in notes:
+                        winsound.Beep(freq, dur)
+                except Exception:
+                    try:
+                        winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                    except Exception:
+                        pass
+            threading.Thread(target=_play, daemon=True).start()
         elif IS_MAC:
             try:
                 subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"])
@@ -3488,6 +3587,65 @@ fi
         except Exception as e:
             self.log(f"Error changing Steam update lock: {e}", "ERROR")
             messagebox.showerror("Error", f"Could not change Steam update lock:\n{e}")
+
+    def toggle_sounds(self):
+        self.sounds_enabled = not getattr(self, "sounds_enabled", True)
+        if self.sounds_enabled:
+            self.sounds_btn.config(text="🔊 GD Sounds: ON", fg=UI["lime"])
+            self.play_ding()
+        else:
+            self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
+        self._save_settings()
+
+    def create_desktop_shortcut(self):
+        try:
+            my_exe = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath("main.py")
+            if IS_WIN:
+                vbs_code = (
+                    'Set ws = CreateObject("WScript.Shell")\n'
+                    'desktop = ws.SpecialFolders("Desktop")\n'
+                    f'Set s = ws.CreateShortcut(desktop & "\\GeodeSync.lnk")\n'
+                    f's.TargetPath = "{my_exe}"\n'
+                    f's.WorkingDirectory = "{os.path.dirname(my_exe)}"\n'
+                    f's.Description = "GeodeSync - Geometry Dash Companion"\n'
+                    's.Save\n'
+                )
+                vbs_path = os.path.join(tempfile.gettempdir(), "make_geodesync_shortcut.vbs")
+                with open(vbs_path, "w", encoding="utf-8") as f:
+                    f.write(vbs_code)
+                subprocess.run(["cscript", "//nologo", vbs_path], check=True, creationflags=0x08000000)
+                try:
+                    os.remove(vbs_path)
+                except Exception:
+                    pass
+                self.play_ding()
+                self.log("Created GeodeSync desktop shortcut.", "SUCCESS")
+                messagebox.showinfo("Shortcut Created", "🎉 Created a GeodeSync shortcut on your Desktop!")
+                return
+            elif IS_LINUX:
+                desktop_dir = os.path.expanduser("~/Desktop")
+                if os.path.exists(desktop_dir):
+                    dest = os.path.join(desktop_dir, "GeodeSync.desktop")
+                    with open(dest, "w") as f:
+                        f.write(
+                            "[Desktop Entry]\n"
+                            "Type=Application\n"
+                            "Name=GeodeSync\n"
+                            "Comment=Geometry Dash Companion\n"
+                            f"Exec={my_exe}\n"
+                            "Icon=utilities-system-monitor\n"
+                            "Terminal=false\n"
+                            "Categories=Game;Utility;\n"
+                        )
+                    os.chmod(dest, 0o755)
+                    self.play_ding()
+                    self.log("Created desktop launcher on ~/Desktop.", "SUCCESS")
+                    messagebox.showinfo("Shortcut Created", "Created GeodeSync launcher on your Desktop!")
+                    return
+            messagebox.showinfo("Desktop Shortcut", "Shortcut created successfully!")
+        except Exception as e:
+            self.log(f"Failed to create shortcut: {e}", "WARN")
+            messagebox.showerror("Error", f"Could not create desktop shortcut:\n{e}")
 
     # ==========================================
     # v1.1.3 PRO FEATURE: FPS UNLOCKER & REFRESH RATE
