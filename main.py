@@ -179,11 +179,12 @@ class DiscordRPC:
                             "state": self._current_state,
                             "timestamps": {"start": self._start_time},
                             "assets": {
-                                "large_image": "logo",
+                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/thumbnail_square.png",
                                 "large_text": f"GeodeSync v{APP_VERSION}"
                             },
                             "buttons": [
-                                {"label": "Get GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"}
+                                {"label": "Get GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"},
+                                {"label": "Geode SDK", "url": "https://geode-sdk.org"}
                             ]
                         }
                     },
