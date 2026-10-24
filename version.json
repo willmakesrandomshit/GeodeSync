@@ -1,9 +1,9 @@
 {
-  "app_version": "2.0.6",
+  "app_version": "2.0.7",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.0.6: All-new vibrant 3D crystal cube emblem, dual interactive buttons, instantaneous launch reliability, and rock-solid file lock protection."
+  "announcement": "GeodeSync v2.0.7: Live Geode version detection in Discord Presence & UI, automated 1-click Geode updates from GitHub, and brand-new 3D crystal emblem."
 }

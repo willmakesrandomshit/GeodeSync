@@ -44,7 +44,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -61,6 +61,7 @@ class DiscordRPC:
         self._start_time = int(time.time())
         self._current_details = "Geometry Dash Companion"
         self._current_state = "Geode Mods Synced & Protected 🛡️"
+        self._geode_ver = "v5.x"
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -182,7 +183,7 @@ class DiscordRPC:
                                 "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon_v2.png",
                                 "large_text": f"GeodeSync v{APP_VERSION} · Geometry Dash Mod Manager",
                                 "small_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/real_geode_logo.png",
-                                "small_text": "Geode Mod Loader Active"
+                                "small_text": f"Geode {self._geode_ver} Active"
                             },
                             "buttons": [
                                 {"label": "View GitHub Repo", "url": f"https://github.com/{GITHUB_REPO}"},
@@ -220,13 +221,16 @@ class DiscordRPC:
             except Exception:
                 self._connected = False
 
-    def update_presence(self, details=None, state=None, reset_timer=False):
+    def update_presence(self, details=None, state=None, reset_timer=False, geode_ver=None):
         changed = False
         if details is not None and details != self._current_details:
             self._current_details = str(details)
             changed = True
         if state is not None and state != self._current_state:
             self._current_state = str(state)
+            changed = True
+        if geode_ver is not None and str(geode_ver) != self._geode_ver:
+            self._geode_ver = str(geode_ver)
             changed = True
         if reset_timer:
             self._start_time = int(time.time())
@@ -357,6 +361,64 @@ def fetch_latest_published_release(timeout=8):
     except Exception:
         pass
     raise ValueError("Could not connect to GitHub to check for updates.")
+
+
+GEODE_REPO = "geode-sdk/geode"
+GEODE_API = f"https://api.github.com/repos/{GEODE_REPO}/releases/latest"
+
+
+def fetch_latest_geode_release(timeout=6):
+    req = urllib.request.Request(GEODE_API, headers={"User-Agent": "GeodeSync-Client"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def install_or_update_geode(gd_path, log_callback=None):
+    if not gd_path or not os.path.isdir(gd_path):
+        raise FileNotFoundError("Geometry Dash game folder not found.")
+
+    release = fetch_latest_geode_release()
+    tag = str(release.get("tag_name", "")).strip()
+    assets = release.get("assets", [])
+
+    target_asset = None
+    if IS_WIN:
+        target_asset = next((a for a in assets if str(a.get("name", "")).endswith("-win.zip")), None)
+    elif IS_MAC:
+        target_asset = next((a for a in assets if str(a.get("name", "")).endswith("-mac.zip")), None)
+    else:
+        target_asset = next((a for a in assets if str(a.get("name", "")).endswith("-linux.zip") or str(a.get("name", "")).endswith("-linux.sh")), None)
+
+    if not target_asset or not target_asset.get("browser_download_url"):
+        raise ValueError(f"No compatible Geode asset found for {platform.system()} in release {tag}")
+
+    download_url = target_asset["browser_download_url"]
+    if log_callback:
+        log_callback(f"Downloading Geode {tag} package ({round(target_asset.get('size', 0) / (1024 * 1024), 1)} MB)...")
+
+    req = urllib.request.Request(download_url, headers={"User-Agent": "GeodeSync-Client"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read()
+
+    import io
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    if IS_WIN:
+        for name in zf.namelist():
+            if name.endswith("/") or name in ("", ".", ".."):
+                continue
+            dest_file = os.path.join(gd_path, name)
+            with open(dest_file, "wb") as f:
+                f.write(zf.read(name))
+    elif IS_MAC:
+        fw_dir = os.path.join(gd_path, "Geometry Dash.app", "Contents", "Frameworks")
+        os.makedirs(fw_dir, exist_ok=True)
+        for name in zf.namelist():
+            if name.endswith("/") or name in ("", ".", ".."):
+                continue
+            dest_file = os.path.join(fw_dir, name)
+            with open(dest_file, "wb") as f:
+                f.write(zf.read(name))
+    return tag
 
 
 def should_apply_downloaded_depot(steam_reported_complete, depot_valid):
@@ -1424,6 +1486,59 @@ class GDManager:
         geode_dir = os.path.join(self.gd_path, "geode")
         return (os.path.exists(dll) and os.path.exists(proxy)) or os.path.exists(geode_dir)
 
+    def get_installed_geode_version(self):
+        if not self.gd_path or not os.path.isdir(self.gd_path):
+            return None
+
+        # 1. Parse latest Geode log in geode/logs/
+        log_dir = os.path.join(self.gd_path, "geode", "logs")
+        if os.path.isdir(log_dir):
+            try:
+                files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
+                if files:
+                    files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
+                    latest_log = os.path.join(log_dir, files[0])
+                    with open(latest_log, "r", encoding="utf-8", errors="ignore") as stream:
+                        for _ in range(35):
+                            line = stream.readline()
+                            if not line:
+                                break
+                            m = re.search(r"Running Geode (v\d+\.\d+\.\d+(?:-[\w.]+)?|[0-9]+\.[0-9]+\.[0-9]+)", line, re.IGNORECASE)
+                            if m:
+                                ver = m.group(1)
+                                if not ver.startswith("v"):
+                                    ver = f"v{ver}"
+                                return ver
+            except Exception:
+                pass
+
+        # 2. Check PE version info on Windows (Geode.dll)
+        if IS_WIN:
+            geode_dll = os.path.join(self.gd_path, "Geode.dll")
+            if os.path.isfile(geode_dll):
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    size = ctypes.windll.version.GetFileVersionInfoSizeW(geode_dll, None)
+                    if size > 0:
+                        res = ctypes.create_string_buffer(size)
+                        ctypes.windll.version.GetFileVersionInfoW(geode_dll, None, size, res)
+                        p_val = wintypes.LPVOID()
+                        u_len = wintypes.UINT()
+                        if ctypes.windll.version.VerQueryValueW(res, r"\\", ctypes.byref(p_val), ctypes.byref(u_len)):
+                            buf = ctypes.cast(p_val, ctypes.POINTER(wintypes.DWORD))
+                            ms, ls = buf[2], buf[3]
+                            major, minor, build = ms >> 16, ms & 0xFFFF, ls >> 16
+                            if major > 0:
+                                return f"v{major}.{minor}.{build}"
+                except Exception:
+                    pass
+
+        # 3. Fallback: if Geode.dll / Geode.dylib / geode folder exists
+        if self.is_geode_installed():
+            return "v5.x"
+        return None
+
 
 class ModernButton(tk.Canvas):
     def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
@@ -1829,8 +1944,9 @@ class GeodeSyncApp(tk.Tk):
         f_g = tk.Frame(grid_chips, bg=UI["panel"])
         f_g.pack(side="left", expand=True, fill="x", padx=3)
         tk.Label(f_g, text="Geode Mod Loader", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
-        self.geode_badge = tk.Label(f_g, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=8, pady=4)
+        self.geode_badge = tk.Label(f_g, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=8, pady=4, cursor="hand2")
         self.geode_badge.pack(anchor="w", pady=(2, 0))
+        self.geode_badge.bind("<Button-1>", lambda e: self.manual_update_geode())
 
         f_l = tk.Frame(grid_chips, bg=UI["panel"])
         f_l.pack(side="left", expand=True, fill="x", padx=3)
@@ -1905,6 +2021,7 @@ class GeodeSyncApp(tk.Tk):
         add_tool("💬 Join Discord", lambda: open_url_or_path("https://discord.gg/tyQG5xNGCx"), color=UI["lilac"], row=6, column=0)
         self.bg_mode_btn = add_tool("🌙 Run in BG: ON", self.toggle_bg_mode, color=UI["lime"], row=6, column=1)
         add_tool("❌ Quit GeodeSync", self.quit_app, color=UI["red"], row=6, column=2, bold=True)
+        add_tool("⚡ Update Geode", self.manual_update_geode, color=UI["lime"], row=7, column=0, bold=True)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
         if not self.sounds_enabled:
@@ -2006,13 +2123,14 @@ class GeodeSyncApp(tk.Tk):
         else:
             self.lock_badge.config(text="Unlocked (Normal)", fg=UI["amber"], bg=UI["panel_alt"])
 
+        geode_ver = self.mgr.get_installed_geode_version()
         if hasattr(self, "discord_rpc"):
-            status_desc = "Geode Mods Protected 🛡️" if is_locked else "Ready to Switch"
-            self.discord_rpc.update_presence(f"GD {ver_text}", status_desc)
+            g_tag = geode_ver or "v5.x"
+            status_desc = f"Geode {g_tag} · Mods Protected 🛡️" if is_locked else f"Geode {g_tag} · Ready"
+            self.discord_rpc.update_presence(f"GD {ver_text}", status_desc, geode_ver=g_tag)
 
-        has_geode = self.mgr.is_geode_installed()
-        if has_geode:
-            self.geode_badge.config(text="Installed", fg=UI["lilac"], bg=UI["lilac_dark"])
+        if geode_ver:
+            self.geode_badge.config(text=f"Geode {geode_ver}", fg=UI["lilac"], bg=UI["lilac_dark"])
         else:
             self.geode_badge.config(text="Not installed", fg=UI["red"], bg=UI["red_dark"])
 
@@ -3853,7 +3971,52 @@ fi
                 self.check_remote_updates()
             except Exception:
                 pass
+            try:
+                self.check_geode_updates()
+            except Exception:
+                pass
             time.sleep(120)
+
+    def check_geode_updates(self):
+        try:
+            rel = fetch_latest_geode_release(timeout=6)
+            latest_tag = str(rel.get("tag_name", "")).strip()
+            installed = self.mgr.get_installed_geode_version()
+            if latest_tag and installed:
+                latest_clean = latest_tag.lstrip("v")
+                inst_clean = installed.lstrip("v")
+                if is_newer_app_version(latest_clean, inst_clean):
+                    self.after(0, lambda: self.log(f"🔔 Newer Geode version available: {latest_tag} (Current: {installed}). Click '⚡ Update Geode' to install!", "WARN"))
+        except Exception:
+            pass
+
+    def manual_update_geode(self):
+        if not self.mgr.gd_path:
+            messagebox.showerror("Error", "Geometry Dash game folder not found.", parent=self)
+            return
+        if self.mgr.is_gd_process_running():
+            messagebox.showwarning("Game Running", "Please close Geometry Dash before updating Geode.", parent=self)
+            return
+        self.log("Checking latest Geode release from GitHub...", "INFO")
+        def _worker():
+            try:
+                rel = fetch_latest_geode_release(timeout=8)
+                tag = str(rel.get("tag_name", "")).strip()
+                installed = self.mgr.get_installed_geode_version()
+
+                msg = f"Latest Geode release: {tag}\nInstalled version: {installed or 'Not installed'}\n\nWould you like to install/update Geode now?"
+                if not messagebox.askyesno("Update Geode", msg, parent=self):
+                    return
+
+                self.after(0, lambda: self.log(f"Auto-updating Geode to {tag}...", "INFO"))
+                updated_tag = install_or_update_geode(self.mgr.gd_path, log_callback=lambda m: self.after(0, lambda: self.log(m, "INFO")))
+                self.after(0, self.refresh_status)
+                self.after(0, lambda: self.log(f"🎉 Geode successfully updated to {updated_tag}!", "SUCCESS"))
+                self.after(0, lambda: messagebox.showinfo("Geode Updated!", f"🎉 Geode was successfully updated to {updated_tag}!\n\nAll your mods and configurations are preserved.", parent=self))
+            except Exception as e:
+                self.after(0, lambda: self.log(f"Failed to update Geode: {e}", "ERROR"))
+                self.after(0, lambda: messagebox.showerror("Update Error", f"Could not update Geode:\n{e}", parent=self))
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ==========================================
     # v1.1.3 PRO FEATURE: AUTO-BACKUP ON GD EXIT
@@ -3865,15 +4028,16 @@ fi
                 is_running = self.mgr.is_gd_process_running()
                 ver_text, _ = self.mgr.get_gd_version_info()
                 is_locked = self.mgr.is_manifest_locked()
+                geode_ver = self.mgr.get_installed_geode_version() or "v5.x"
 
                 if is_running:
-                    status_desc = f"GD {ver_text} · Mods Protected 🛡️" if is_locked else f"GD {ver_text} · In Game"
+                    status_desc = f"GD {ver_text} · Geode {geode_ver} 🛡️" if is_locked else f"GD {ver_text} · In Game"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Playing Geometry Dash", status_desc, reset_timer=(was_running is False))
+                        self.discord_rpc.update_presence("Playing Geometry Dash", status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
                 else:
-                    idle_desc = f"GD {ver_text} · Synced & Protected" if is_locked else f"GD {ver_text} · Ready to Play"
+                    idle_desc = f"GD {ver_text} · Geode {geode_ver} (Ready)" if is_locked else f"GD {ver_text} · Ready to Play"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Geometry Dash Companion", idle_desc, reset_timer=(was_running is True))
+                        self.discord_rpc.update_presence("Geometry Dash Companion", idle_desc, reset_timer=(was_running is True), geode_ver=geode_ver)
 
                 if was_running is True and not is_running:
                     if getattr(self, "auto_backup_enabled", True):
