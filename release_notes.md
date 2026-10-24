@@ -1,26 +1,33 @@
-# GeodeSync v1.1.3 — consolidated stability and macOS hotfix
+# GeodeSync v2.0.0 — safer switches and saved setups
 
-This release combines the earlier GeodeSync 1.1.3 features with the follow-up fixes for macOS installation, Steam recovery, game bundle validation, and app updates.
+GeodeSync v2 brings the everyday setup flow into one clearer home and makes game-file switching recoverable when Steam or the computer interrupts the process.
 
-## macOS downgrade and recovery
+## Safer game switching
 
-- Prevent overlapping downgrade actions and replace the Geometry Dash app bundle transactionally, preserving the old install if validation or replacement fails.
-- Resolve Steam's macOS depot from the canonical Steam.AppBundle location first; ignore stale or invalid cached depots.
-- Validate the downloaded game bundle and its `Info.plist` before installing it. A Steam completion log alone is not accepted as proof that files are ready.
-- If the depot is malformed or incomplete, leave the installed game untouched and report a recoverable error.
-- Verify Steam manifest lock and unlock operations. Do not start Steam file verification when safely unlocking the manifest failed.
-- Distinguish a Steam launch request from the game actually starting, and wait for slow launches before reporting failure.
-- Report malformed bundle metadata clearly, including trailing or invalid plist content.
+- Stage the complete Steam depot beside the installed game and validate it before touching the current installation.
+- Check free disk space before staging. Existing game entries are moved aside and restored if a replacement fails.
+- Write a recovery journal before replacing files. If the app exits or crashes mid-switch, the next launch restores the previous game files before another switch can begin.
+- Back up detected Geometry Dash saves before a version change; stop if that backup fails, and ask before proceeding when no saves are found.
+- Confirm that Geometry Dash is closed before replacing files.
+- Validate supported Windows game builds against their expected executable size and macOS depots as complete app bundles.
 
-## App updater and compatibility
+## Game profiles and preferences
 
-- Compare numeric app versions and never offer or install an older release.
-- Verify Mac updater architecture, app bundle structure, and GitHub SHA-256 digest before replacing the app.
-- Keep user saves and existing installations intact when an update or recovery step fails.
+- Save a local profile containing a supported game version and the selected active Geode mods.
+- Apply a profile through the same confirmation and recovery flow as a regular version switch.
+- Keep the chosen game folder, backup preference, and selected target version across restarts.
 
-## Builds
+## Better support and recovery
 
-- GitHub Actions builds Windows, Apple silicon, and Intel Mac packages and runs the regression suite.
-- Mac builds include Python, Tcl, and Tk. Unsigned builds may require Control-click → Open once in macOS.
+- Export a local support report with app, platform, Steam and game status, and recent activity.
+- Keep report contents focused on diagnostics: save contents and mod files are not included, and common paths, emails, and secret-like values are redacted.
+- Keep a bounded, rotating activity log and explain when startup recovery needs manual attention.
+- Add regression coverage for successful switches, failed validation, partial writes, restart recovery, and committed cleanup.
 
-This release does not claim to repair a Geometry Dash installation that was already left corrupted. Use Steam's Verify integrity after restoring the game, then try launching from Steam before applying a downgrade again.
+## Interface
+
+- Use one plum, lime, lilac, and warm-neutral visual system across the main screen and utility dialogs.
+- Show Steam, save, game version, Geode, and update-lock status together.
+- Put the recommended next action first and keep optional tools grouped out of the main flow.
+
+The Windows and macOS packages are built by the existing release workflow. macOS builds target Apple silicon on macOS 11 or newer and Intel on macOS 10.15 or newer. Signing and notarization are applied only when the repository's Apple signing credentials are configured.

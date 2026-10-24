@@ -43,10 +43,30 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "2.0.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
-RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
+
+UI = {
+    "background": "#121013",
+    "header": "#19161b",
+    "panel": "#201c22",
+    "panel_alt": "#29242c",
+    "inset": "#171419",
+    "border": "#3c3440",
+    "text": "#f6f0e8",
+    "muted": "#b8adb9",
+    "quiet": "#897e8b",
+    "lime": "#c2e66b",
+    "lime_hover": "#a8ce50",
+    "lime_dark": "#27351b",
+    "lilac": "#c497e8",
+    "lilac_dark": "#34233f",
+    "amber": "#e4b968",
+    "red": "#f08087",
+    "red_dark": "#46242a",
+}
 
 APP_ID = "322170"
 DEPOT_ID = "322172" if IS_MAC else "322171"
@@ -68,6 +88,34 @@ def is_newer_app_version(candidate, current):
         return False
     width = max(len(candidate_parts), len(current_parts))
     return candidate_parts + (0,) * (width - len(candidate_parts)) > current_parts + (0,) * (width - len(current_parts))
+
+
+def version_sort_key(version):
+    version = str(version or "").strip().lstrip("v")
+    if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+        return None
+    parts = tuple(int(part) for part in version.split("."))
+    return parts + (0,) * max(0, 8 - len(parts))
+
+
+def fetch_latest_published_release(timeout=12):
+    """Choose the greatest stable published version, independent of GitHub's latest pointer."""
+    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        releases = json.loads(response.read().decode("utf-8"))
+    if not isinstance(releases, list):
+        raise ValueError("GitHub returned an invalid release list.")
+    stable = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+            continue
+        tag = str(release.get("tag_name", "")).strip()
+        key = version_sort_key(tag)
+        if key is not None:
+            stable.append((key, release))
+    if not stable:
+        raise ValueError("GitHub did not return a published stable GeodeSync release.")
+    return max(stable, key=lambda item: item[0])[1]
 
 
 def should_apply_downloaded_depot(steam_reported_complete, depot_valid):
@@ -354,6 +402,176 @@ def safe_copy_item(src, dst, max_retries=5):
     raise last_error or OSError(f"Could not copy {src} to {dst}.")
 
 
+def get_app_data_dir():
+    if IS_WIN:
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "GeodeSync")
+    if IS_MAC:
+        return os.path.expanduser("~/Library/Application Support/GeodeSync")
+    return os.path.expanduser("~/.config/geodesync")
+
+
+def atomic_write_json(path, value):
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".geodesync-write-", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _remove_path(path):
+    if os.path.islink(path) or (os.path.exists(path) and not os.path.isdir(path)):
+        os.unlink(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def _tree_size(path):
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    total = 0
+    for root, _dirs, files in os.walk(path, followlinks=False):
+        for filename in files:
+            try:
+                total += os.path.getsize(os.path.join(root, filename))
+            except OSError:
+                pass
+    return total
+
+
+def _copy_entry(source, destination):
+    if os.path.islink(source):
+        os.symlink(os.readlink(source), destination)
+    elif os.path.isdir(source):
+        shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copy2)
+    else:
+        shutil.copy2(source, destination)
+
+
+def _rollback_install_transaction(stage_root, destination_root, journal):
+    incoming = os.path.join(stage_root, "incoming")
+    previous = os.path.join(stage_root, "previous")
+    original_items = set(journal.get("original_items", []))
+    for name in reversed(journal.get("items", [])):
+        if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\\" in name or os.path.basename(name) != name:
+            continue
+        installed_path = os.path.join(destination_root, name)
+        staged_path = os.path.join(incoming, name)
+        previous_path = os.path.join(previous, name)
+        if os.path.lexists(previous_path):
+            if os.path.lexists(installed_path):
+                _remove_path(installed_path)
+            os.replace(previous_path, installed_path)
+        elif name not in original_items and not os.path.lexists(staged_path) and os.path.lexists(installed_path):
+            _remove_path(installed_path)
+
+
+def recover_pending_install_transactions(destination_root):
+    """Roll back interrupted game swaps left by a crash or power loss."""
+    destination_root = os.path.abspath(destination_root)
+    recovered = []
+    if not os.path.isdir(destination_root):
+        return recovered
+    for name in os.listdir(destination_root):
+        if not name.startswith(".geodesync-transaction-"):
+            continue
+        stage_root = os.path.join(destination_root, name)
+        if os.path.islink(stage_root):
+            raise ValueError("An unfinished GeodeSync recovery folder is a symbolic link; it was left untouched.")
+        journal_path = os.path.join(stage_root, "journal.json")
+        if not os.path.isfile(journal_path):
+            shutil.rmtree(stage_root, ignore_errors=True)
+            continue
+        with open(journal_path, "r", encoding="utf-8") as stream:
+            journal = json.load(stream)
+        if os.path.abspath(journal.get("destination", "")) != destination_root:
+            raise ValueError("An unfinished GeodeSync transaction points to a different game folder.")
+        if journal.get("state") != "committed":
+            _rollback_install_transaction(stage_root, destination_root, journal)
+        shutil.rmtree(stage_root)
+        recovered.append(name)
+    return recovered
+
+
+def install_depot_transactionally(source_root, destination_root, validator=None, reserve_bytes=128 * 1024 * 1024):
+    """Stage and validate every depot entry; rollback all changed entries on any interruption."""
+    source_root = os.path.abspath(source_root)
+    destination_root = os.path.abspath(destination_root)
+    if not os.path.isdir(source_root) or not os.path.isdir(destination_root):
+        raise FileNotFoundError("The Steam depot or Geometry Dash installation folder is missing.")
+    items = sorted(os.listdir(source_root))
+    if not items or any(
+        item in ("", ".", "..") or "/" in item or "\\" in item or os.path.basename(item) != item
+        for item in items
+    ):
+        raise ValueError("The downloaded game depot has no safe top-level files to install.")
+
+    required_bytes = sum(_tree_size(os.path.join(source_root, item)) for item in items) + reserve_bytes
+    available_bytes = shutil.disk_usage(destination_root).free
+    if available_bytes < required_bytes:
+        raise OSError(
+            f"Not enough free space to safely stage this game update. "
+            f"Need about {required_bytes // (1024 * 1024)} MB; "
+            f"{available_bytes // (1024 * 1024)} MB is available."
+        )
+
+    stage_root = tempfile.mkdtemp(prefix=".geodesync-transaction-", dir=destination_root)
+    incoming = os.path.join(stage_root, "incoming")
+    previous = os.path.join(stage_root, "previous")
+    os.makedirs(incoming)
+    os.makedirs(previous)
+    try:
+        for item in items:
+            _copy_entry(os.path.join(source_root, item), os.path.join(incoming, item))
+        if validator:
+            problem = validator(incoming)
+            if problem:
+                raise OSError(f"The downloaded game files failed validation: {problem}")
+        journal = {
+            "destination": destination_root,
+            "state": "installing",
+            "items": items,
+            "original_items": [item for item in items if os.path.lexists(os.path.join(destination_root, item))],
+        }
+        atomic_write_json(os.path.join(stage_root, "journal.json"), journal)
+        try:
+            for item in items:
+                destination = os.path.join(destination_root, item)
+                old_path = os.path.join(previous, item)
+                new_path = os.path.join(incoming, item)
+                if os.path.lexists(destination):
+                    os.replace(destination, old_path)
+                os.replace(new_path, destination)
+        except Exception:
+            _rollback_install_transaction(stage_root, destination_root, journal)
+            raise
+    except Exception:
+        # Before the journal is written, nothing in the installed game was touched.
+        if os.path.exists(os.path.join(stage_root, "journal.json")):
+            try:
+                _rollback_install_transaction(stage_root, destination_root, journal)
+            except Exception:
+                # Preserve the journal and old files for recovery at next launch.
+                raise
+            else:
+                shutil.rmtree(stage_root, ignore_errors=True)
+        else:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        raise
+    journal["state"] = "committed"
+    atomic_write_json(os.path.join(stage_root, "journal.json"), journal)
+    shutil.rmtree(stage_root, ignore_errors=True)
+
+
 class GDManager:
     def __init__(self):
         self.steam_path = self.detect_steam_path()
@@ -587,14 +805,14 @@ class GDManager:
 
     def get_gd_version_info(self):
         if not self.gd_path:
-            return "Not Installed", "#ef4444"
+            return "Not Installed", UI["red"]
 
         if IS_MAC:
             app_path = os.path.join(self.gd_path, "Geometry Dash.app")
             if not os.path.exists(app_path):
                 app_path = os.path.join(self.gd_path, "GeometryDash.app")
             if not os.path.exists(app_path):
-                return "Missing Geometry Dash.app", "#ef4444"
+                return "Missing Geometry Dash.app", UI["red"]
             plist_path = os.path.join(app_path, "Contents", "Info.plist")
             if os.path.exists(plist_path):
                 try:
@@ -603,34 +821,36 @@ class GDManager:
                         pl = plistlib.load(fp)
                     ver = str(pl.get("CFBundleShortVersionString") or pl.get("CFBundleVersion") or "")
                     if "2.2081" in ver or ver == "2.2081":
-                        return f"{self.target_gd_version} (Geode Compatible)", "#10b981"
+                        return f"{self.target_gd_version} (Geode Compatible)", UI["lime"]
                     elif ver:
                         return f"{ver}", "#60a5fa"
                 except Exception:
                     pass
-            return f"{self.target_gd_version} (macOS)", "#10b981"
+            return f"{self.target_gd_version} (macOS)", UI["lime"]
 
         exe_path = os.path.join(self.gd_path, "GeometryDash.exe")
         if not os.path.exists(exe_path):
-            return "Missing Executable", "#ef4444"
+            return "Missing Executable", UI["red"]
 
         try:
             size = os.path.getsize(exe_path)
         except Exception:
-            return "Inaccessible", "#ef4444"
+            return "Inaccessible", UI["red"]
 
-        if size == SIZE_22081:
-            return f"{self.target_gd_version} (Geode Compatible)", "#10b981"
-        elif size == SIZE_2209:
-            return "2.209 (Incompatible with Geode)", "#f59e0b"
-        else:
-            mb = round(size / (1024 * 1024), 2)
-            return f"Custom Build ({mb} MB)", "#60a5fa"
+        for meta in KNOWN_VERSIONS.values():
+            if meta.get("size") and size == meta["size"]:
+                return f"{meta['ver']} (supported depot)", UI["lime"]
+        if size == SIZE_2209:
+            return "2.209 (Incompatible with Geode)", UI["amber"]
+        mb = round(size / (1024 * 1024), 2)
+        return f"Custom Build ({mb} MB)", UI["muted"]
 
     def is_current_gd_22081(self):
         if not self.gd_path:
             return False
         if IS_MAC:
+            if self.target_gd_version != "2.2081":
+                return False
             app_path = os.path.join(self.gd_path, "Geometry Dash.app")
             if not os.path.exists(app_path):
                 app_path = os.path.join(self.gd_path, "GeometryDash.app")
@@ -654,7 +874,12 @@ class GDManager:
         exe = os.path.join(self.gd_path, "GeometryDash.exe")
         if os.path.exists(exe):
             try:
-                return os.path.getsize(exe) == SIZE_22081
+                expected_size = next(
+                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
+                     if str(meta.get("manifest")) == str(self.target_manifest)),
+                    None,
+                )
+                return os.path.getsize(exe) == (expected_size or SIZE_22081)
             except Exception:
                 return False
         return False
@@ -720,24 +945,34 @@ class GDManager:
         except Exception:
             return False
 
-    def perform_silent_backup(self):
+    def perform_silent_backup(self, prefix="Auto"):
         save_dir = self.get_save_data_dir()
         if not save_dir or not os.path.exists(save_dir):
             return 0
         backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
         os.makedirs(backup_root, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        target_folder = os.path.join(backup_root, f"Auto_{timestamp}")
-        os.makedirs(target_folder, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+        target_folder = os.path.join(backup_root, f"{prefix}_{timestamp}")
+        staging_folder = tempfile.mkdtemp(prefix=".geodesync-save-stage-", dir=backup_root)
         copied = 0
-        for f in os.listdir(save_dir):
-            if f.endswith(".dat") or f.endswith(".dat.bak"):
-                safe_copy_item(os.path.join(save_dir, f), os.path.join(target_folder, f))
-                copied += 1
-        # Keep latest 10 auto-backups to prevent disk bloat
-        auto_folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if d.startswith("Auto_")]
-        auto_folders.sort(key=os.path.getmtime, reverse=True)
-        for old in auto_folders[10:]:
+        try:
+            for filename in os.listdir(save_dir):
+                if filename.endswith((".dat", ".dat.bak")):
+                    safe_copy_item(os.path.join(save_dir, filename), os.path.join(staging_folder, filename))
+                    copied += 1
+            if copied:
+                os.replace(staging_folder, target_folder)
+            else:
+                shutil.rmtree(staging_folder, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(staging_folder, ignore_errors=True)
+            raise
+
+        # Keep ten routine snapshots and five explicit pre-switch snapshots.
+        retention = 5 if prefix == "BeforeSwitch" else 10
+        matching = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if d.startswith(f"{prefix}_")]
+        matching.sort(key=os.path.getmtime, reverse=True)
+        for old in matching[retention:]:
             try:
                 shutil.rmtree(old)
             except Exception:
@@ -819,7 +1054,15 @@ class GDManager:
                 return app_path is not None and validate_macos_game_app(app_path) is None
             exe = os.path.join(d_path, "GeometryDash.exe")
             try:
-                return os.path.exists(exe) and os.path.getsize(exe) == SIZE_22081
+                expected_size = next(
+                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
+                     if str(meta.get("manifest")) == str(self.target_manifest)),
+                    None,
+                )
+                if not os.path.exists(exe):
+                    return False
+                actual_size = os.path.getsize(exe)
+                return actual_size == expected_size if expected_size else actual_size == SIZE_22081
             except Exception:
                 return False
         return False
@@ -839,7 +1082,7 @@ class GDManager:
 
 
 class ModernButton(tk.Canvas):
-    def __init__(self, parent, text, command, bg="#8b5cf6", hover_bg="#7c3aed", fg="#ffffff", height=46, width=None, font=("Segoe UI", 11, "bold")):
+    def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
         super().__init__(parent, height=height, bg=parent["bg"], highlightthickness=0)
         self.command = command
         self.normal_bg = bg
@@ -864,8 +1107,8 @@ class ModernButton(tk.Canvas):
         r = 10
 
         if not self.enabled:
-            fill = "#374151"
-            text_color = "#9ca3af"
+            fill = UI["border"]
+            text_color = UI["quiet"]
         else:
             fill = self.current_bg
             text_color = self.fg
@@ -897,11 +1140,13 @@ class ModernButton(tk.Canvas):
         self.enabled = enabled
         self.draw()
 
-    def set_config(self, text: str, bg: str, hover_bg: str, command=None):
+    def set_config(self, text: str, bg: str, hover_bg: str, command=None, fg=None):
         self.text = text
         self.normal_bg = bg
         self.hover_bg = hover_bg
         self.current_bg = bg
+        if fg:
+            self.fg = fg
         if command:
             self.command = command
         self.draw()
@@ -910,10 +1155,10 @@ class ModernButton(tk.Canvas):
 class GeodeSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"GeodeSync v{APP_VERSION} • 1-Click Geometry Dash Suite")
-        self.geometry("780x780")
-        self.minsize(740, 720)
-        self.configure(bg="#0f141c")
+        self.title(f"GeodeSync v{APP_VERSION} • Geometry Dash companion")
+        self.geometry("860x820")
+        self.minsize(760, 720)
+        self.configure(bg=UI["background"])
 
         if IS_WIN:
             try:
@@ -932,74 +1177,223 @@ class GeodeSyncApp(tk.Tk):
                 pass
 
         self.mgr = GDManager()
+        self.data_dir = get_app_data_dir()
+        self.settings_path = os.path.join(self.data_dir, "settings.json")
+        self.profiles_dir = os.path.join(self.data_dir, "game-profiles")
+        self.activity_log_path = os.path.join(self.data_dir, "activity.log")
+        self._log_lock = threading.Lock()
+        self.recent_events = []
+        self.pending_profile_mods = None
+        self.settings = self._load_settings()
+        stored_game_path = self.settings.get("game_path")
+        if stored_game_path and self._is_valid_game_path(stored_game_path):
+            self.mgr.gd_path = os.path.abspath(stored_game_path)
+            self.mgr.manifest_path = self.mgr.get_manifest_path()
+        self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
+        self._restore_selected_version()
+        try:
+            self.recovered_transactions = recover_pending_install_transactions(self.mgr.gd_path) if self.mgr.gd_path else []
+            self.recovery_error = None
+        except Exception as error:
+            self.recovered_transactions = []
+            self.recovery_error = str(error)
         self.latest_release_url = None
         self.is_downloading_depot = False
-        self.auto_backup_enabled = True
         self._monitor_running = True
 
         self.create_ui()
+        self._load_activity()
         self.refresh_status()
+        for recovered in self.recovered_transactions:
+            self.log(f"Recovered an unfinished game switch ({recovered}); the previous files were restored.", "WARN")
+        if self.recovery_error:
+            self.log(f"Could not automatically recover an interrupted game switch: {self.recovery_error}", "ERROR")
+            messagebox.showerror(
+                "Game recovery needs attention",
+                "GeodeSync found an interrupted game switch but could not safely finish restoring it. "
+                "The recovery files have been kept in the Geometry Dash folder. Export a support report before trying another switch.",
+            )
 
         threading.Thread(target=self.check_remote_updates, daemon=True).start()
         threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
 
+    @staticmethod
+    def _is_valid_game_path(path):
+        if not path or not os.path.isdir(path):
+            return False
+        if IS_MAC:
+            return any(os.path.exists(os.path.join(path, name)) for name in ("Geometry Dash.app", "GeometryDash.app"))
+        return os.path.isfile(os.path.join(path, "GeometryDash.exe"))
+
+    def _load_settings(self):
+        try:
+            with open(self.settings_path, "r", encoding="utf-8") as stream:
+                data = json.load(stream)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _restore_selected_version(self):
+        manifest = str(self.settings.get("target_manifest", ""))
+        choice = next((item for item in KNOWN_VERSIONS.values() if str(item["manifest"]) == manifest), None)
+        self.user_selected_target = bool(choice)
+        if choice:
+            self.mgr.target_manifest = choice["manifest"]
+            self.mgr.target_gd_version = choice["ver"]
+
+    def _save_settings(self):
+        self.settings.update({
+            "schema_version": 1,
+            "game_path": self.mgr.gd_path,
+            "target_manifest": str(self.mgr.target_manifest),
+            "auto_backup_enabled": bool(self.auto_backup_enabled),
+        })
+        atomic_write_json(self.settings_path, self.settings)
+
+    def _append_activity(self, line):
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            with self._log_lock:
+                with open(self.activity_log_path, "a", encoding="utf-8") as stream:
+                    stream.write(line + "\n")
+                if os.path.getsize(self.activity_log_path) > 512 * 1024:
+                    with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as stream:
+                        tail = stream.readlines()[-1200:]
+                    with open(self.activity_log_path, "w", encoding="utf-8") as stream:
+                        stream.writelines(tail)
+        except OSError:
+            pass
+
+    def _load_activity(self):
+        try:
+            with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as stream:
+                lines = stream.readlines()[-300:]
+        except OSError:
+            return
+        self.log_text.config(state="normal")
+        self.log_text.insert("end", "".join(lines))
+        self.log_text.see("end")
+        self.log_text.config(state="disabled")
+
+    @staticmethod
+    def _redact_diagnostic_text(text):
+        home = os.path.expanduser("~")
+        if home and home != "/":
+            text = text.replace(home, "~")
+        text = re.sub(r"(?i)(token|password|secret|api[_ -]?key)\s*[:=]\s*\S+", r"\1=[REDACTED]", text)
+        text = re.sub(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", "[EMAIL]", text, flags=re.I)
+        text = re.sub(r"(?i)([A-Z]:\\Users\\)[^\\]+", r"\1[USER]", text)
+        text = re.sub(r"/Users/[^/]+", "/Users/[USER]", text)
+        return text
+
+    def export_support_report(self):
+        destination = filedialog.asksaveasfilename(
+            title="Save GeodeSync support report",
+            defaultextension=".txt",
+            filetypes=[("Text report", "*.txt")],
+            initialfile="GeodeSync-support-report.txt",
+        )
+        if not destination:
+            return
+        save_dir = self.mgr.get_save_data_dir()
+        save_count = 0
+        try:
+            if save_dir and os.path.isdir(save_dir):
+                save_count = sum(name.endswith((".dat", ".dat.bak")) for name in os.listdir(save_dir))
+        except OSError:
+            pass
+        game_version, _color = self.mgr.get_gd_version_info()
+        report_lines = [
+            "GeodeSync Support Report",
+            f"App version: {APP_VERSION}",
+            f"Platform: {platform.system()} {platform.release()} ({platform.machine()})",
+            f"Python: {platform.python_version()}",
+            f"Steam detected: {'yes' if self.mgr.steam_path and os.path.isdir(self.mgr.steam_path) else 'no'}",
+            f"Game detected: {'yes' if self.mgr.gd_path and os.path.isdir(self.mgr.gd_path) else 'no'}",
+            f"Game version: {game_version}",
+            f"Geode detected: {'yes' if self.mgr.is_geode_installed() else 'no'}",
+            f"Steam update lock: {'locked' if self.mgr.is_manifest_locked() else 'unlocked'}",
+            f"Selected game version: {self.mgr.target_gd_version}",
+            f"Save files detected: {save_count}",
+            "",
+            "Recent activity (home folders and email addresses are redacted):",
+        ]
+        try:
+            with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as stream:
+                events = stream.readlines()[-250:]
+        except OSError:
+            events = []
+        report_lines.extend(self._redact_diagnostic_text(line.rstrip()) for line in events)
+        try:
+            with open(destination, "w", encoding="utf-8") as stream:
+                stream.write("\n".join(report_lines) + "\n")
+        except OSError as error:
+            messagebox.showerror("Could not save report", f"GeodeSync could not write the report:\n{error}")
+            return
+        self.log(f"Saved privacy-filtered support report to {destination}.", "SUCCESS")
+        messagebox.showinfo(
+            "Support report saved",
+            "The report contains app and game status plus recent activity. It does not include save-file contents or mod files. "
+            "Review the text before sharing it.",
+        )
+
     def create_ui(self):
         # Update Banner
-        self.update_banner = tk.Frame(self, bg="#064e3b", padx=16, pady=8)
-        self.update_label = tk.Label(self.update_banner, text="✨ New update available!", font=("Segoe UI", 9, "bold"), fg="#34d399", bg="#064e3b")
+        self.update_banner = tk.Frame(self, bg=UI["lime_dark"], padx=18, pady=9)
+        self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update Now (1-Click)", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=10, pady=2, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Install update", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
-        header = tk.Frame(self, bg="#161e2e", padx=24, pady=14)
+        header = tk.Frame(self, bg=UI["header"], padx=26, pady=18)
         header.pack(fill="x")
 
-        title_box = tk.Frame(header, bg="#161e2e")
+        title_box = tk.Frame(header, bg=UI["header"])
         title_box.pack(side="left")
 
-        title = tk.Label(title_box, text=f"⚡ GeodeSync  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg="#ffffff", bg="#161e2e")
+        title = tk.Label(title_box, text=f"⚡  GeodeSync  ·  v{APP_VERSION}", font=("Segoe UI", 18, "bold"), fg=UI["text"], bg=UI["header"])
         title.pack(anchor="w")
 
-        subtitle = tk.Label(title_box, text="1-Click Geometry Dash Mod Protector, Save Doctor & Performance Suite", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e")
+        subtitle = tk.Label(title_box, text="A simple home for your Geometry Dash setup", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"])
         subtitle.pack(anchor="w")
 
-        badge_box = tk.Frame(header, bg="#161e2e")
+        badge_box = tk.Frame(header, bg=UI["header"])
         badge_box.pack(side="right")
 
-        help_btn = tk.Button(badge_box, text="❓ How It Works", command=self.show_help_dialog, font=("Segoe UI", 9, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2")
+        help_btn = tk.Button(badge_box, text="How it works", command=self.show_help_dialog, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
         help_btn.pack(side="right", padx=6)
 
         # Main Body
-        body = tk.Frame(self, bg="#0f141c", padx=24, pady=10)
+        body = tk.Frame(self, bg=UI["background"], padx=26, pady=16)
         body.pack(fill="both", expand=True)
 
         # 1. SMART GUIDED NEXT STEP
-        self.guide_card = tk.Frame(body, bg="#1e293b", padx=18, pady=12, highlightbackground="#3b82f6", highlightthickness=2)
-        self.guide_card.pack(fill="x", pady=(0, 10))
+        self.guide_card = tk.Frame(body, bg=UI["panel"], padx=22, pady=18, highlightbackground=UI["border"], highlightthickness=1)
+        self.guide_card.pack(fill="x", pady=(0, 12))
 
-        guide_top = tk.Frame(self.guide_card, bg="#1e293b")
+        guide_top = tk.Frame(self.guide_card, bg=UI["panel"])
         guide_top.pack(fill="x")
 
-        self.guide_badge = tk.Label(guide_top, text="RECOMMENDED ACTION", font=("Segoe UI", 8, "bold"), fg="#38bdf8", bg="#0f172a", padx=8, pady=2)
+        self.guide_badge = tk.Label(guide_top, text="NEXT STEP", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=9, pady=4)
         self.guide_badge.pack(side="left")
 
-        self.guide_title = tk.Label(self.guide_card, text="Checking your installation...", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#1e293b")
-        self.guide_title.pack(anchor="w", pady=(6, 2))
+        self.guide_title = tk.Label(self.guide_card, text="Checking your installation…", font=("Segoe UI", 16, "bold"), fg=UI["text"], bg=UI["panel"])
+        self.guide_title.pack(anchor="w", pady=(10, 4))
 
-        self.guide_desc = tk.Label(self.guide_card, text="Please wait while GeodeSync detects your game setup.", font=("Segoe UI", 9), fg="#94a3b8", bg="#1e293b", wraplength=680, justify="left")
-        self.guide_desc.pack(anchor="w", pady=(0, 8))
+        self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is checking the game and mod loader.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"], wraplength=740, justify="left")
+        self.guide_desc.pack(anchor="w", pady=(0, 12))
 
         # Real-Time Progress Bar Frame (Hidden by default, shown during downloads/tasks)
-        self.progress_frame = tk.Frame(self.guide_card, bg="#1e293b")
-        self.progress_lbl = tk.Label(self.progress_frame, text="Downloading Steam Depot...", font=("Segoe UI", 8, "bold"), fg="#38bdf8", bg="#1e293b")
+        self.progress_frame = tk.Frame(self.guide_card, bg=UI["panel"])
+        self.progress_lbl = tk.Label(self.progress_frame, text="Working…", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel"])
         self.progress_lbl.pack(anchor="w", pady=(0, 3))
         
         # Style ttk Progressbar
         style = ttk.Style()
         style.theme_use('default')
-        style.configure("Cyber.Horizontal.TProgressbar", background="#8b5cf6", troughcolor="#0f172a", bordercolor="#1e293b", lightcolor="#a855f7", darkcolor="#7c3aed")
+        style.configure("Cyber.Horizontal.TProgressbar", background=UI["lime"], troughcolor=UI["inset"], bordercolor=UI["panel"], lightcolor=UI["lime"], darkcolor=UI["lime_hover"])
         
         self.progress_bar = ttk.Progressbar(self.progress_frame, style="Cyber.Horizontal.TProgressbar", orient="horizontal", mode="determinate", length=400)
         self.progress_bar.pack(fill="x", pady=(0, 6))
@@ -1009,128 +1403,133 @@ class GeodeSyncApp(tk.Tk):
             self.guide_card,
             text="Checking...",
             command=None,
-            bg="#3b82f6",
-            hover_bg="#2563eb",
-            height=44,
+            bg=UI["lime"],
+            hover_bg=UI["lime_hover"],
+            fg=UI["background"],
+            height=48,
             font=("Segoe UI", 11, "bold")
         )
         self.primary_btn.pack(fill="x")
 
         # 2. STATUS SUMMARY CHIPS
-        status_card = tk.Frame(body, bg="#1a2333", padx=16, pady=8, highlightbackground="#2d3748", highlightthickness=1)
-        status_card.pack(fill="x", pady=(0, 8))
+        status_card = tk.Frame(body, bg=UI["panel"], padx=18, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        status_card.pack(fill="x", pady=(0, 12))
 
-        st_title = tk.Label(status_card, text="SYSTEM DETECTION STATUS", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333")
+        st_title = tk.Label(status_card, text="YOUR SETUP", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"])
         st_title.pack(anchor="w", pady=(0, 4))
 
-        grid_chips = tk.Frame(status_card, bg="#1a2333")
+        grid_chips = tk.Frame(status_card, bg=UI["panel"])
         grid_chips.pack(fill="x")
 
-        f_v = tk.Frame(grid_chips, bg="#1a2333")
+        f_v = tk.Frame(grid_chips, bg=UI["panel"])
         f_v.pack(side="left", expand=True, fill="x", padx=3)
-        tk.Label(f_v, text="Geometry Dash", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
-        self.ver_badge = tk.Label(f_v, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#10b981", bg="#132a24", padx=6, pady=2)
+        tk.Label(f_v, text="Geometry Dash", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+        self.ver_badge = tk.Label(f_v, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=8, pady=4)
         self.ver_badge.pack(anchor="w", pady=(2, 0))
 
-        f_g = tk.Frame(grid_chips, bg="#1a2333")
+        f_g = tk.Frame(grid_chips, bg=UI["panel"])
         f_g.pack(side="left", expand=True, fill="x", padx=3)
-        tk.Label(f_g, text="Geode Mod Loader", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
-        self.geode_badge = tk.Label(f_g, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#a855f7", bg="#2a163d", padx=6, pady=2)
+        tk.Label(f_g, text="Geode Mod Loader", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+        self.geode_badge = tk.Label(f_g, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=8, pady=4)
         self.geode_badge.pack(anchor="w", pady=(2, 0))
 
-        f_l = tk.Frame(grid_chips, bg="#1a2333")
+        f_l = tk.Frame(grid_chips, bg=UI["panel"])
         f_l.pack(side="left", expand=True, fill="x", padx=3)
-        tk.Label(f_l, text="Auto-Update Lock", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(anchor="w")
-        self.lock_badge = tk.Label(f_l, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#f59e0b", bg="#332412", padx=6, pady=2)
+        tk.Label(f_l, text="Steam update lock", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+        self.lock_badge = tk.Label(f_l, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=8, pady=4)
         self.lock_badge.pack(anchor="w", pady=(2, 0))
 
-        # 3. UTILITY TOOLBAR (Clean Main Row + Expandable "More Tools" Drawer)
-        tools_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
-        tools_card.pack(fill="x", pady=(0, 8))
+        f_steam = tk.Frame(grid_chips, bg=UI["panel"])
+        f_steam.pack(side="left", expand=True, fill="x", padx=3)
+        tk.Label(f_steam, text="Steam", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+        self.steam_badge = tk.Label(f_steam, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=8, pady=4)
+        self.steam_badge.pack(anchor="w", pady=(2, 0))
 
-        # Main Core Row (The essentials)
-        row_main = tk.Frame(tools_card, bg="#161e2e")
+        f_saves = tk.Frame(grid_chips, bg=UI["panel"])
+        f_saves.pack(side="left", expand=True, fill="x", padx=3)
+        tk.Label(f_saves, text="Saves", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+        self.saves_badge = tk.Label(f_saves, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=8, pady=4)
+        self.saves_badge.pack(anchor="w", pady=(2, 0))
+
+        # 3. Keep the first screen focused on the recommended action. Utilities
+        # stay available in a compact drawer instead of competing with it.
+        tools_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+        tools_card.pack(fill="x", pady=(0, 12))
+
+        row_main = tk.Frame(tools_card, bg=UI["header"])
         row_main.pack(fill="x")
 
-        tk.Label(row_main, text="Quick Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+        self.more_toggle_btn = tk.Button(row_main, text="More tools  +", command=self.toggle_more_tools, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
+        self.more_toggle_btn.pack(side="left")
 
-        backup_save_btn = tk.Button(row_main, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        backup_save_btn.pack(side="left", padx=2)
-
-        fix_audio_btn = tk.Button(row_main, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        fix_audio_btn.pack(side="left", padx=2)
-
-        crash_doc_btn = tk.Button(row_main, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        crash_doc_btn.pack(side="left", padx=2)
-
-        essential_pack_btn = tk.Button(row_main, text="📦 Essential Mods (Jukebox & CBF)", command=self.install_essential_mods, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#eab308", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        essential_pack_btn.pack(side="left", padx=2)
-
-        self.more_toggle_btn = tk.Button(row_main, text="🛠️ More Tools ▾", command=self.toggle_more_tools, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        self.more_toggle_btn.pack(side="left", padx=2)
-
-        self.restore_gd_btn = tk.Button(row_main, text="🔄 Restore GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        self.restore_gd_btn = tk.Button(row_main, text="Restore current game", command=self.upgrade_clicked, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["amber"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
 
-        # Expandable "More Tools" Tray (Collapsed by default)
-        self.more_frame = tk.Frame(tools_card, bg="#111827", padx=10, pady=8, highlightbackground="#1f2937", highlightthickness=1)
-        # Not packed on startup
+        # The drawer is collapsed by default. A three-column grid stays usable
+        # at narrower window sizes and keeps every existing tool reachable.
+        self.more_frame = tk.Frame(tools_card, bg=UI["inset"], padx=8, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+        tool_grid = tk.Frame(self.more_frame, bg=UI["inset"])
+        tool_grid.pack(fill="x")
+        for column in range(3):
+            tool_grid.columnconfigure(column, weight=1)
 
-        more_row = tk.Frame(self.more_frame, bg="#111827")
-        more_row.pack(fill="x")
+        def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
+            button = tk.Button(
+                tool_grid, text=label, command=command,
+                font=("Segoe UI", 8, "bold" if bold else "normal"),
+                bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
+                activeforeground=UI["text"], relief="flat", padx=7, pady=7,
+                cursor="hand2",
+            )
+            button.grid(row=row, column=column, sticky="ew", padx=3, pady=3)
+            return button
 
-        tk.Label(more_row, text="Extra Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#111827").pack(side="left", padx=(0, 6))
-
-        save_doc_btn = tk.Button(more_row, text="💽 Save Doctor", command=self.run_save_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#a78bfa", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        save_doc_btn.pack(side="left", padx=2)
-
-        clean_cache_btn = tk.Button(more_row, text="🧹 Cache Cleaner", command=self.open_cache_cleaner, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#34d399", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        clean_cache_btn.pack(side="left", padx=2)
-
-        fps_unlock_btn = tk.Button(more_row, text="🎯 FPS Unlocker", command=self.open_fps_unlocker, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        fps_unlock_btn.pack(side="left", padx=2)
-
-        self.auto_backup_btn = tk.Button(more_row, text="☁️ Auto-Backup: ON", command=self.toggle_auto_backup, font=("Segoe UI", 8, "bold"), bg="#064e3b", fg="#34d399", activebackground="#065f46", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        self.auto_backup_btn.pack(side="left", padx=2)
-
-        mod_profiles_btn = tk.Button(more_row, text="🔄 Mod Profiles", command=self.open_mod_profiles, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        mod_profiles_btn.pack(side="left", padx=2)
-
-        open_mods_btn = tk.Button(more_row, text="📂 Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        open_mods_btn.pack(side="left", padx=2)
-
-        version_sel_btn = tk.Button(more_row, text="⚙️ Version Selector", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        version_sel_btn.pack(side="right")
+        add_tool("Backup saves", self.backup_saves, color=UI["lime"], row=0, column=0, bold=True)
+        add_tool("♻ Restore saves", self.restore_saves, color=UI["muted"], row=0, column=1)
+        add_tool("Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=2)
+        add_tool("Cache cleaner", self.open_cache_cleaner, color=UI["lime"], row=1, column=0)
+        add_tool("Mods folder", self.open_mods_folder, row=1, column=1)
+        add_tool("Version selector", self.open_version_selector, color=UI["lilac"], row=1, column=2)
+        add_tool("Fix click delay", self.fix_click_delay, color=UI["lime"], row=2, column=0)
+        add_tool("Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=1)
+        add_tool("Essential mods", self.install_essential_mods, color=UI["amber"], row=2, column=2)
+        add_tool("FPS unlocker", self.open_fps_unlocker, color=UI["lime"], row=3, column=0)
+        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
+        add_tool("🔄 Mod profiles", self.open_mod_profiles, row=3, column=2)
+        add_tool("Game profiles", self.open_game_profiles, color=UI["lilac"], row=4, column=0, bold=True)
+        add_tool("Export support report", self.export_support_report, color=UI["amber"], row=4, column=1)
+        if not self.auto_backup_enabled:
+            self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
 
         # 4. ACTIVITY LOG
-        log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=6, highlightbackground="#2d3748", highlightthickness=1)
+        log_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         log_card.pack(fill="both", expand=True)
 
-        log_head = tk.Frame(log_card, bg="#161e2e")
+        log_head = tk.Frame(log_card, bg=UI["header"])
         log_head.pack(fill="x", pady=(0, 3))
 
-        log_title = tk.Label(log_head, text="ACTIVITY LOG", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e")
+        log_title = tk.Label(log_head, text="Activity", font=("Segoe UI", 9, "bold"), fg=UI["muted"], bg=UI["header"])
         log_title.pack(side="left")
 
-        clear_btn = tk.Button(log_head, text="Clear", command=self.clear_log, font=("Segoe UI", 7), bg="#1e293b", fg="#94a3b8", relief="flat", padx=4, pady=0, cursor="hand2")
+        clear_btn = tk.Button(log_head, text="Clear", command=self.clear_log, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=9, pady=3, cursor="hand2")
         clear_btn.pack(side="right")
 
-        self.log_text = tk.Text(log_card, bg="#0d1117", fg="#c9d1d9", font=("Consolas", 8), relief="flat", wrap="word", height=5, padx=8, pady=6)
+        self.log_text = tk.Text(log_card, bg=UI["inset"], fg=UI["text"], font=("Consolas", 9), relief="flat", wrap="word", height=5, padx=10, pady=9, insertbackground=UI["lime"])
         self.log_text.pack(fill="both", expand=True)
         self.log_text.config(state="disabled")
 
         # Footer
-        footer = tk.Frame(self, bg="#0f141c", padx=24, pady=6)
+        footer = tk.Frame(self, bg=UI["background"], padx=26, pady=8)
         footer.pack(fill="x", side="bottom")
 
-        self.path_lbl = tk.Label(footer, text=f"GD Path: {self.mgr.gd_path or 'Not Found'}", font=("Segoe UI", 8), fg="#64748b", bg="#0f141c")
+        self.path_lbl = tk.Label(footer, text=f"Game folder: {self.mgr.gd_path or 'Not found'}", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["background"])
         self.path_lbl.pack(side="left")
 
-        repo_link = tk.Label(footer, text=f"GitHub: {GITHUB_REPO}", font=("Segoe UI", 8, "underline"), fg="#38bdf8", bg="#0f141c", cursor="hand2")
+        repo_link = tk.Label(footer, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["background"], cursor="hand2")
         repo_link.pack(side="left", padx=16)
         repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
 
-        choose_path_btn = tk.Button(footer, text="Browse GD Folder...", command=self.browse_gd_path, font=("Segoe UI", 7), bg="#1e293b", fg="#94a3b8", relief="flat", padx=6, cursor="hand2")
+        choose_path_btn = tk.Button(footer, text="Choose game folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=9, pady=4, cursor="hand2")
         choose_path_btn.pack(side="right")
 
     def log(self, message: str, level: str = "INFO"):
@@ -1142,14 +1541,22 @@ class GeodeSyncApp(tk.Tk):
             "WARN": "[WARN]",
             "ERROR": "[ERR]"
         }.get(level, "[INFO]")
-        self.log_text.insert("end", f"[{time_str}] {color_prefix} {message}\n")
+        line = f"[{time_str}] {color_prefix} {message}"
+        self.log_text.insert("end", line + "\n")
         self.log_text.see("end")
         self.log_text.config(state="disabled")
+        self._append_activity(line)
 
     def clear_log(self):
         self.log_text.config(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.config(state="disabled")
+        try:
+            with self._log_lock:
+                with open(self.activity_log_path, "w", encoding="utf-8"):
+                    pass
+        except OSError:
+            pass
 
     def play_ding(self):
         if IS_WIN and winsound:
@@ -1169,17 +1576,37 @@ class GeodeSyncApp(tk.Tk):
 
         is_locked = self.mgr.is_manifest_locked()
         if is_locked:
-            self.lock_badge.config(text="🔒 Locked (Safe)", fg="#34d399", bg="#064e3b")
+            self.lock_badge.config(text="Locked", fg=UI["lime"], bg=UI["lime_dark"])
         else:
-            self.lock_badge.config(text="🔓 Unlocked", fg="#f59e0b", bg="#332412")
+            self.lock_badge.config(text="Unlocked", fg=UI["amber"], bg=UI["panel_alt"])
 
         has_geode = self.mgr.is_geode_installed()
         if has_geode:
-            self.geode_badge.config(text="✓ Installed", fg="#c084fc", bg="#2a163d")
+            self.geode_badge.config(text="Installed", fg=UI["lilac"], bg=UI["lilac_dark"])
         else:
-            self.geode_badge.config(text="❌ NOT INSTALLED", fg="#f87171", bg="#3b1111")
+            self.geode_badge.config(text="Not installed", fg=UI["red"], bg=UI["red_dark"])
 
-        self.path_lbl.config(text=f"GD Path: {self.mgr.gd_path or 'Not Found'}")
+        self.path_lbl.config(text=f"Game folder: {self.mgr.gd_path or 'Not found'}")
+
+        steam_found = bool(self.mgr.steam_path and os.path.isdir(self.mgr.steam_path))
+        self.steam_badge.config(
+            text="Found" if steam_found else "Not found",
+            fg=UI["lime"] if steam_found else UI["red"],
+            bg=UI["lime_dark"] if steam_found else UI["red_dark"],
+        )
+        save_dir = self.mgr.get_save_data_dir()
+        try:
+            save_files = [
+                name for name in os.listdir(save_dir)
+                if name.endswith((".dat", ".dat.bak"))
+            ] if save_dir and os.path.isdir(save_dir) else []
+        except OSError:
+            save_files = []
+        self.saves_badge.config(
+            text=f"{len(save_files)} files" if save_files else "Not found yet",
+            fg=UI["lime"] if save_files else UI["muted"],
+            bg=UI["lime_dark"] if save_files else UI["panel_alt"],
+        )
 
         if not self.is_downloading_depot:
             self.update_smart_guide(has_geode, is_locked)
@@ -1188,47 +1615,49 @@ class GeodeSyncApp(tk.Tk):
         is_22081 = self.mgr.is_current_gd_22081()
 
         if not has_geode:
-            self.guide_card.config(highlightbackground="#ef4444")
-            self.guide_badge.config(text="ACTION REQUIRED • GEODE NOT DETECTED", fg="#f87171", bg="#450a0a")
-            self.guide_title.config(text="⚠️ Geode Mod Loader Not Installed")
+            self.guide_card.config(highlightbackground=UI["red"])
+            self.guide_badge.config(text="GEODE NOT FOUND", fg=UI["red"], bg=UI["red_dark"])
+            self.guide_title.config(text="Install the Geode mod loader")
             self.guide_desc.config(
-                text="GeodeSync requires the Geode mod loader to run mods. "
-                     "Click below to automatically download and launch the official Geode installer!"
+                text="GeodeSync found the game, but not Geode. Download the official installer to add the mod loader."
             )
             self.primary_btn.set_config(
-                text="📥 1-Click Install Geode (Auto-Download Official Setup)",
-                bg="#ef4444",
-                hover_bg="#dc2626",
+                text="Download and install Geode",
+                bg=UI["red"],
+                hover_bg="#dc6972",
+                fg=UI["background"],
                 command=self.auto_install_geode
             )
             return
 
         if not is_22081:
-            self.guide_card.config(highlightbackground="#8b5cf6")
-            self.guide_badge.config(text="AUTOMATED 1-CLICK FIX READY", fg="#c084fc", bg="#3b0764")
-            self.guide_title.config(text="⚡ Automatic Downgrade & Protect")
+            self.guide_card.config(highlightbackground=UI["lilac"])
+            self.guide_badge.config(text="MOD COMPATIBILITY", fg=UI["lilac"], bg=UI["lilac_dark"])
+            self.guide_title.config(text="Switch to the Geode-compatible game version")
             self.guide_desc.config(
-                text=f"Geometry Dash is on 2.209 which breaks mods. "
-                     f"Click below to automatically download {self.mgr.target_gd_version} from Steam, install it, and protect your game from auto-updates!"
+                text=f"Your installed game version is not the selected Geode-compatible version. "
+                     f"GeodeSync will download {self.mgr.target_gd_version} from Steam, verify the files, and protect it from automatic updates."
             )
             self.primary_btn.set_config(
-                text=f"⚡ 1-Click Fix: Auto-Download & Downgrade to {self.mgr.target_gd_version}",
-                bg="#8b5cf6",
-                hover_bg="#7c3aed",
+                text=f"Install game version {self.mgr.target_gd_version}",
+                bg=UI["lilac"],
+                hover_bg="#ae7ed5",
+                fg=UI["background"],
                 command=self.start_automated_downgrade
             )
             return
 
-        self.guide_card.config(highlightbackground="#10b981")
-        self.guide_badge.config(text="ALL GOOD • READY TO PLAY", fg="#34d399", bg="#064e3b")
-        self.guide_title.config(text="🎉 Everything is set! Your mods are ready.")
+        self.guide_card.config(highlightbackground=UI["lime"])
+        self.guide_badge.config(text="READY TO PLAY", fg=UI["lime"], bg=UI["lime_dark"])
+        self.guide_title.config(text="You’re all set")
         self.guide_desc.config(
-            text="Geometry Dash is running 2.2081 with Geode active, and Steam auto-updates are locked. You can safely launch the game and play with all your mods!"
+            text=f"Geometry Dash {self.mgr.target_gd_version} is installed, Geode is active, and Steam updates are locked."
         )
         self.primary_btn.set_config(
-            text="▶ Launch Geometry Dash with Mods",
-            bg="#10b981",
-            hover_bg="#059669",
+            text="Launch Geometry Dash",
+            bg=UI["lime"],
+            hover_bg=UI["lime_hover"],
+            fg=UI["background"],
             command=self.launch_gd
         )
 
@@ -1298,9 +1727,17 @@ class GeodeSyncApp(tk.Tk):
     # ==========================================
     # v1.1.2 FEATURE: REAL-TIME STEAM DOWNLOAD TRACKER
     # ==========================================
-    def start_automated_downgrade(self):
+    def start_automated_downgrade(self, profile_mods=None):
         if self.is_downloading_depot:
-            return
+            return False
+
+        if not messagebox.askyesno(
+            "Review game switch",
+            f"GeodeSync will switch the Steam game files to Geometry Dash {self.mgr.target_gd_version}.\n\n"
+            "It will back up detected saves, stage and check the downloaded files, and roll the game files back if installation fails. "
+            "Steam auto-updates will be locked after a successful switch. Continue?",
+        ):
+            return False
 
         if self.mgr.is_gd_process_running():
             res = messagebox.askyesno(
@@ -1309,21 +1746,40 @@ class GeodeSyncApp(tk.Tk):
                 "Would you like GeodeSync to close GD automatically now?"
             )
             if res:
-                self.mgr.close_gd_process()
+                if not self.mgr.close_gd_process() or self.mgr.is_gd_process_running():
+                    messagebox.showerror("Geometry Dash is still running", "Close Geometry Dash before changing its game files.")
+                    return False
             else:
-                return
+                return False
+
+        save_dir = self.mgr.get_save_data_dir()
+        try:
+            save_files = [
+                name for name in os.listdir(save_dir)
+                if name.endswith((".dat", ".dat.bak"))
+            ] if save_dir and os.path.isdir(save_dir) else []
+        except OSError:
+            save_files = []
+        if not save_files and not messagebox.askyesno(
+            "No save backup found",
+            "GeodeSync could not find Geometry Dash save files to back up. Continue with the version switch anyway?",
+        ):
+            return False
 
         # Claim the operation synchronously before starting a worker. If the
         # depot is already cached, the worker can reach the file swap almost
         # immediately; setting this only after Steam starts downloading allowed
         # rapid clicks to launch two concurrent replacements of Geometry Dash.app.
         self.is_downloading_depot = True
+        self.pending_profile_mods = list(profile_mods) if profile_mods is not None else None
         self.primary_btn.set_enabled(False)
-        self.primary_btn.set_config(text="Preparing downgrade…", bg="#334155", hover_bg="#334155")
+        self.primary_btn.set_config(text="Preparing safe switch…", bg=UI["panel_alt"], hover_bg=UI["panel_alt"], fg=UI["text"])
         try:
             threading.Thread(target=self._run_auto_downgrade, daemon=True).start()
+            return True
         except Exception:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
             self.refresh_status()
             raise
@@ -1333,6 +1789,7 @@ class GeodeSyncApp(tk.Tk):
             self._run_auto_downgrade_impl()
         except Exception as e:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.log(f"Downgrade stopped unexpectedly: {e}", "ERROR")
             try:
                 self.primary_btn.set_enabled(True)
@@ -1348,14 +1805,42 @@ class GeodeSyncApp(tk.Tk):
     def _run_auto_downgrade_impl(self):
         if not self.mgr.gd_path:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
             self.log("Geometry Dash folder not detected.", "ERROR")
             messagebox.showerror("Error", "Geometry Dash installation directory not found.")
             return
 
+        save_dir = self.mgr.get_save_data_dir()
+        try:
+            save_files = [
+                name for name in os.listdir(save_dir)
+                if name.endswith((".dat", ".dat.bak"))
+            ] if save_dir and os.path.isdir(save_dir) else []
+            if save_files:
+                copied = self.mgr.perform_silent_backup(prefix="BeforeSwitch")
+                if copied != len(save_files):
+                    raise OSError(f"Only {copied} of {len(save_files)} save files were backed up.")
+                self.log(f"Created a pre-switch save backup ({copied} files).", "SUCCESS")
+            else:
+                self.log("No Geometry Dash save files were found; proceeding after user confirmation.", "WARN")
+        except Exception as error:
+            self.is_downloading_depot = False
+            self.pending_profile_mods = None
+            self.primary_btn.set_enabled(True)
+            self.log(f"Could not create a complete pre-switch save backup: {error}", "ERROR")
+            self.refresh_status()
+            messagebox.showerror(
+                "Save backup failed",
+                "GeodeSync stopped before changing game files because it could not complete a save backup. "
+                "Check disk space and save-folder permissions, then try again.",
+            )
+            return
+
         steam_exe = self.mgr.get_steam_exe()
         if not steam_exe and not IS_MAC:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
             self.log("Steam executable not found.", "ERROR")
             messagebox.showerror("Error", "Steam installation not found.")
@@ -1387,7 +1872,7 @@ class GeodeSyncApp(tk.Tk):
 
         self.guide_title.config(text="⏳ Steam is downloading files in background...")
         self.guide_desc.config(text="Monitoring Steam depot progress in real time...")
-        self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg="#334155", hover_bg="#334155")
+        self.primary_btn.set_config(text="⏳ Downloading from Steam... (Please wait)", bg=UI["border"], hover_bg=UI["border"])
         self.primary_btn.set_enabled(False)
 
         # Show real-time progress bar
@@ -1411,6 +1896,7 @@ class GeodeSyncApp(tk.Tk):
         except Exception as e:
             self.log(f"Failed to execute Steam command: {e}", "ERROR")
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.progress_frame.pack_forget()
             self.primary_btn.set_enabled(True)
             self.refresh_status()
@@ -1462,6 +1948,7 @@ class GeodeSyncApp(tk.Tk):
             self._apply_downgrade_files()
         elif steam_reported_complete:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.log("Steam reported the depot complete, but its Geometry Dash.app failed validation; installed game files were left unchanged.", "ERROR")
             messagebox.showerror(
                 "Steam download is incomplete",
@@ -1472,6 +1959,7 @@ class GeodeSyncApp(tk.Tk):
             self.refresh_status()
         else:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.log("Steam download timed out or took longer than 6 mins.", "WARN")
             messagebox.showwarning("Download in Progress", "Steam is still downloading in the background. Check your Steam client and click again when ready!")
             self.refresh_status()
@@ -1480,52 +1968,51 @@ class GeodeSyncApp(tk.Tk):
         depot = self.mgr.get_depot_path()
         if not depot or not os.path.exists(depot):
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
             self.log("Depot path not found.", "ERROR")
             self.refresh_status()
             return
 
-        self.log("Backing up current files...", "INFO")
-        backup_dir = os.path.join(self.mgr.gd_path, "backup_latest")
+        self.log(f"Staging and checking Geometry Dash {self.mgr.target_gd_version}...", "INFO")
         try:
-            if not os.path.exists(backup_dir):
-                os.makedirs(backup_dir, exist_ok=True)
+            def validate_staged_depot(staged_root):
                 if IS_MAC:
-                    app_src = os.path.join(self.mgr.gd_path, "Geometry Dash.app")
-                    if os.path.exists(app_src):
-                        safe_copy_item(app_src, os.path.join(backup_dir, "Geometry Dash.app"))
-                else:
-                    for f in ["GeometryDash.exe", "libcocos2d.dll", "libExtensions.dll"]:
-                        src_f = os.path.join(self.mgr.gd_path, f)
-                        if os.path.exists(src_f):
-                            safe_copy_item(src_f, os.path.join(backup_dir, f))
-                self.log("Created backup of current files.", "INFO")
-        except Exception as e:
-            self.log(f"Backup warning: {e}", "WARN")
+                    app_path = find_macos_game_app(staged_root)
+                    if not app_path:
+                        return "Geometry Dash.app is missing from the downloaded depot."
+                    return validate_macos_game_app(app_path)
+                expected_size = next(
+                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
+                     if str(meta.get("manifest")) == str(self.mgr.target_manifest)),
+                    None,
+                )
+                executable = os.path.join(staged_root, "GeometryDash.exe")
+                if not os.path.isfile(executable):
+                    return "GeometryDash.exe is missing from the downloaded depot."
+                if expected_size and os.path.getsize(executable) != expected_size:
+                    return f"GeometryDash.exe size does not match the selected {self.mgr.target_gd_version} depot."
+                return None
 
-        self.log(f"Installing {self.mgr.target_gd_version} game files...", "INFO")
-        try:
-            for item in os.listdir(depot):
-                s = os.path.join(depot, item)
-                d = os.path.join(self.mgr.gd_path, item)
-                if IS_MAC and item in ("Geometry Dash.app", "GeometryDash.app"):
-                    problem = validate_macos_game_app(s)
-                    if problem:
-                        raise OSError(f"The downloaded game app is not complete: {problem}")
-                    _copy_directory_transactionally(s, d, validate_macos_game_app)
-                    continue
-                if os.path.isdir(s) and os.path.lexists(d):
-                    # Never silently merge a new tree into an old one after a failed delete.
-                    shutil.rmtree(d)
-                safe_copy_item(s, d)
+            install_depot_transactionally(depot, self.mgr.gd_path, validator=validate_staged_depot)
             self.log(f"Game files successfully replaced with {self.mgr.target_gd_version}!", "SUCCESS")
         except Exception as e:
             self.is_downloading_depot = False
+            self.pending_profile_mods = None
             self.primary_btn.set_enabled(True)
-            self.log(f"Failed to copy files: {e}", "ERROR")
-            messagebox.showerror("Error", f"Failed to overwrite game files:\n{e}")
+            self.log(f"Safe game switch failed; rollback/recovery preserved the previous files: {e}", "ERROR")
+            messagebox.showerror(
+                "Game switch was not completed",
+                f"GeodeSync could not finish installing the selected game version. It restored the previous files or kept recovery data for the next launch.\n\n{e}",
+            )
             self.refresh_status()
             return
+
+        profile_mods = self.pending_profile_mods
+        profile_applied = True
+        self.pending_profile_mods = None
+        if profile_mods is not None:
+            profile_applied = self._apply_active_mods(profile_mods)
 
         try:
             self.mgr.set_manifest_locked(True)
@@ -1537,8 +2024,16 @@ class GeodeSyncApp(tk.Tk):
         self.primary_btn.set_enabled(True)
         self.refresh_status()
         self.play_ding()
-        self.log(f"1-Click Fix Complete! Geometry Dash is now {self.mgr.target_gd_version}.", "SUCCESS")
-        messagebox.showinfo("1-Click Fix Complete!", f"Geometry Dash has been successfully downgraded to {self.mgr.target_gd_version}!\n\nSteam auto-updates are locked. Geode and your mods are ready to play.")
+        locked = self.mgr.is_manifest_locked()
+        if locked:
+            self.log(f"Safe switch complete. Geometry Dash {self.mgr.target_gd_version} is installed and Steam updates are locked.", "SUCCESS")
+            if profile_applied:
+                messagebox.showinfo("Game switch complete", f"Geometry Dash {self.mgr.target_gd_version} is installed. Your saves were backed up before the switch, and Steam updates are locked.")
+            else:
+                messagebox.showwarning("Game switched; profile needs attention", f"Geometry Dash {self.mgr.target_gd_version} is installed and Steam updates are locked, but some profile mods could not be switched. Review the activity log.")
+        else:
+            self.log(f"Geometry Dash {self.mgr.target_gd_version} was installed, but Steam's update lock could not be verified.", "WARN")
+            messagebox.showwarning("Game installed; update lock needs attention", "The game files were switched successfully, but GeodeSync could not verify Steam's update lock. Review the activity log before launching Steam.")
 
     # ==========================================
     # v1.1.2 FEATURE: 1-CLICK AUDIO & CLICK DELAY OPTIMIZER
@@ -1672,14 +2167,19 @@ class GeodeSyncApp(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Select Target Geometry Dash Version")
         dialog.geometry("480x280")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="⚙️ Choose Target Version", font=("Segoe UI", 12, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text="Select which official Steam depot version to downgrade/switch to:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 12))
+        tk.Label(dialog, text="⚙️ Choose Target Version", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Select which official Steam depot version to downgrade/switch to:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 12))
 
-        selected_ver = tk.StringVar(value=list(KNOWN_VERSIONS.keys())[0])
+        current_choice = next(
+            (name for name, meta in KNOWN_VERSIONS.items()
+             if str(meta["manifest"]) == str(self.mgr.target_manifest)),
+            list(KNOWN_VERSIONS.keys())[0],
+        )
+        selected_ver = tk.StringVar(value=current_choice)
 
         for name, data in KNOWN_VERSIONS.items():
             rb = tk.Radiobutton(
@@ -1688,11 +2188,11 @@ class GeodeSyncApp(tk.Tk):
                 variable=selected_ver,
                 value=name,
                 font=("Segoe UI", 9),
-                fg="#e2e8f0",
-                bg="#161e2e",
-                selectcolor="#0f172a",
-                activebackground="#161e2e",
-                activeforeground="#38bdf8"
+                fg=UI["text"],
+                bg=UI["header"],
+                selectcolor=UI["inset"],
+                activebackground=UI["header"],
+                activeforeground=UI["lilac"]
             )
             rb.pack(anchor="w", padx=24, pady=4)
 
@@ -1701,18 +2201,213 @@ class GeodeSyncApp(tk.Tk):
             meta = KNOWN_VERSIONS[choice]
             self.mgr.target_manifest = meta["manifest"]
             self.mgr.target_gd_version = meta["ver"]
+            self.user_selected_target = True
+            self._save_settings()
             self.log(f"Target GD version set to: {meta['ver']} (Manifest: {meta['manifest']})", "INFO")
             dialog.destroy()
             self.refresh_status()
 
-        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box = tk.Frame(dialog, bg=UI["header"])
         btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
 
-        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
         cancel_btn.pack(side="left")
 
-        apply_btn = tk.Button(btn_box, text="Set as Target Version", command=apply_ver, font=("Segoe UI", 8, "bold"), bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", activeforeground="#ffffff", relief="flat", padx=14, pady=4, cursor="hand2")
+        apply_btn = tk.Button(btn_box, text="Set as Target Version", command=apply_ver, font=("Segoe UI", 8, "bold"), bg=UI["lilac"], fg=UI["text"], activebackground=UI["lilac_dark"], activeforeground=UI["text"], relief="flat", padx=14, pady=4, cursor="hand2")
         apply_btn.pack(side="right")
+
+    def _load_game_profiles(self):
+        os.makedirs(self.profiles_dir, exist_ok=True)
+        known_manifests = {str(meta["manifest"]) for meta in KNOWN_VERSIONS.values()}
+        profiles = []
+        for filename in sorted(os.listdir(self.profiles_dir)):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(self.profiles_dir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as stream:
+                    profile = json.load(stream)
+                if not isinstance(profile, dict) or str(profile.get("manifest")) not in known_manifests:
+                    raise ValueError("Unknown game version profile")
+                mods = profile.get("active_mods", [])
+                if not isinstance(mods, list) or any(
+                    not isinstance(mod, str) or not re.fullmatch(r"[^/\\]+\.geode", mod)
+                    for mod in mods
+                ):
+                    raise ValueError("Invalid mod list in profile")
+                profiles.append((filename, profile))
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                self.log(f"Skipped unreadable game profile {filename}: {error}", "WARN")
+        return profiles
+
+    def _apply_active_mods(self, desired_mods):
+        mods_dir = self.get_mods_dir()
+        if not mods_dir:
+            self.log("Could not find the Geode mods folder for this profile.", "ERROR")
+            return False
+        if not isinstance(desired_mods, (list, tuple, set)) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[^/\\]+\.geode", name)
+            for name in desired_mods
+        ):
+            self.log("The selected profile contains an invalid mod filename; no mods were changed.", "ERROR")
+            return False
+        wanted = set(desired_mods)
+        try:
+            filenames = os.listdir(mods_dir)
+        except OSError as error:
+            self.log(f"Could not read the Geode mods folder: {error}", "ERROR")
+            return False
+        present = {
+            filename[:-9] if filename.endswith(".geode.disabled") else filename
+            for filename in filenames
+            if filename.endswith(".geode") or filename.endswith(".geode.disabled")
+        }
+        # Validate the complete plan before touching any files. Missing files or
+        # conflicting active/disabled copies must not leave a half-applied set.
+        errors = [f"Profile mod {missing} is not installed" for missing in sorted(wanted - present)]
+        operations = []
+        for filename in filenames:
+            source = os.path.join(mods_dir, filename)
+            if filename.endswith(".geode") and filename not in wanted:
+                target = source + ".disabled"
+                if os.path.lexists(target):
+                    errors.append(f"Cannot disable {filename}: disabled copy already exists")
+                else:
+                    operations.append((source, target))
+            elif filename.endswith(".geode.disabled") and filename[:-9] in wanted:
+                target = os.path.join(mods_dir, filename[:-9])
+                if os.path.lexists(target):
+                    errors.append(f"Cannot enable {filename[:-9]}: active copy already exists")
+                else:
+                    operations.append((source, target))
+        if errors:
+            for error in errors:
+                self.log(error, "WARN")
+            return False
+
+        changed = []
+        try:
+            for source, target in operations:
+                os.replace(source, target)
+                changed.append((source, target))
+        except OSError as error:
+            rollback_errors = []
+            for source, target in reversed(changed):
+                try:
+                    os.replace(target, source)
+                except OSError as rollback_error:
+                    rollback_errors.append(str(rollback_error))
+            self.log(f"Could not apply the complete profile mod set: {error}", "ERROR")
+            if rollback_errors:
+                self.log("Mod-profile rollback needs attention: " + "; ".join(rollback_errors), "ERROR")
+            return False
+        self.log(f"Applied profile mod selection ({len(wanted)} enabled).", "SUCCESS")
+        return True
+
+    def open_game_profiles(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Game profiles")
+        dialog.geometry("560x430")
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Game profiles", font=("Segoe UI", 16, "bold"), fg=UI["text"], bg=UI["background"]).pack(anchor="w", padx=20, pady=(18, 4))
+        tk.Label(dialog, text="Save a game version and active mod set together. Applying a different version starts the safe switch.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["background"], wraplength=510, justify="left").pack(anchor="w", padx=20, pady=(0, 12))
+
+        list_frame = tk.Frame(dialog, bg=UI["panel"], padx=8, pady=8)
+        list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+        profile_list = tk.Listbox(list_frame, bg=UI["inset"], fg=UI["text"], selectbackground=UI["lilac_dark"], font=("Segoe UI", 10), relief="flat", activestyle="none")
+        profile_list.pack(fill="both", expand=True)
+        profiles = []
+
+        def populate():
+            nonlocal profiles
+            profiles = self._load_game_profiles()
+            profile_list.delete(0, "end")
+            for _filename, profile in profiles:
+                profile_list.insert("end", f"{profile.get('name', 'Unnamed')}   ·   GD {profile.get('game_version', '?')}   ·   {len(profile.get('active_mods', []))} mods")
+
+        def save_current():
+            name = simpledialog.askstring("Save game profile", "Name this setup (for example: Vanilla or Recording):", parent=dialog)
+            if not name:
+                return
+            safe_name = re.sub(r"[^A-Za-z0-9 _-]", "", name).strip().strip(".-_")
+            if not safe_name:
+                messagebox.showerror("Invalid name", "Use letters, numbers, spaces, dashes, or underscores.", parent=dialog)
+                return
+            if not self.mgr.gd_path:
+                messagebox.showerror("Game not found", "Choose your Geometry Dash game folder before saving a game profile.", parent=dialog)
+                return
+            mods_dir = self.get_mods_dir()
+            active_mods = sorted(
+                filename for filename in os.listdir(mods_dir)
+                if filename.endswith(".geode")
+            ) if mods_dir else []
+            record = {
+                "schema_version": 1,
+                "name": safe_name,
+                "game_version": self.mgr.target_gd_version,
+                "manifest": str(self.mgr.target_manifest),
+                "active_mods": active_mods,
+                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            }
+            filename = re.sub(r"[^A-Za-z0-9_-]+", "_", safe_name).strip("_") + ".json"
+            atomic_write_json(os.path.join(self.profiles_dir, filename), record)
+            self.log(f"Saved game profile '{safe_name}' ({len(active_mods)} active mods).", "SUCCESS")
+            populate()
+
+        def apply_selected():
+            selection = profile_list.curselection()
+            if not selection:
+                messagebox.showinfo("Select a profile", "Choose a game profile first.", parent=dialog)
+                return
+            _filename, profile = profiles[selection[0]]
+            meta = next((item for item in KNOWN_VERSIONS.values() if str(item["manifest"]) == str(profile["manifest"])), None)
+            if not meta:
+                messagebox.showerror("Unsupported profile", "This profile refers to a game version that is not available in this build.", parent=dialog)
+                return
+            old_manifest, old_version = self.mgr.target_manifest, self.mgr.target_gd_version
+            self.mgr.target_manifest = meta["manifest"]
+            self.mgr.target_gd_version = meta["ver"]
+            self.user_selected_target = True
+            mods = profile.get("active_mods", [])
+            if self.mgr.is_current_gd_22081():
+                success = self._apply_active_mods(mods)
+                self._save_settings()
+                dialog.destroy()
+                self.refresh_status()
+                if success:
+                    messagebox.showinfo("Profile applied", f"'{profile.get('name', 'Profile')}' is active.")
+                else:
+                    messagebox.showwarning("Profile partly applied", "The game version matches, but some mods could not be switched. Review the activity log.")
+                return
+            if not self.start_automated_downgrade(profile_mods=mods):
+                self.mgr.target_manifest, self.mgr.target_gd_version = old_manifest, old_version
+                dialog.destroy()
+                self.refresh_status()
+                return
+            self._save_settings()
+            self.log(f"Selected game profile '{profile.get('name', 'Profile')}'; switching to GD {meta['ver']}.", "INFO")
+            dialog.destroy()
+
+        def delete_selected():
+            selection = profile_list.curselection()
+            if not selection:
+                return
+            filename, profile = profiles[selection[0]]
+            if not messagebox.askyesno("Delete game profile", f"Delete '{profile.get('name', 'Profile')}'?", parent=dialog):
+                return
+            os.unlink(os.path.join(self.profiles_dir, filename))
+            self.log(f"Deleted game profile '{profile.get('name', 'Profile')}'.", "INFO")
+            populate()
+
+        actions = tk.Frame(dialog, bg=UI["background"])
+        actions.pack(fill="x", padx=20, pady=(0, 16))
+        tk.Button(actions, text="Save current", command=save_current, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=12, pady=7).pack(side="left")
+        tk.Button(actions, text="Delete", command=delete_selected, font=("Segoe UI", 9), bg=UI["panel_alt"], fg=UI["red"], relief="flat", padx=12, pady=7).pack(side="left", padx=8)
+        tk.Button(actions, text="Apply profile", command=apply_selected, font=("Segoe UI", 9, "bold"), bg=UI["lilac"], fg=UI["background"], relief="flat", padx=12, pady=7).pack(side="right")
+        populate()
 
     def upgrade_clicked(self):
         res = messagebox.askyesno(
@@ -1846,6 +2541,7 @@ class GeodeSyncApp(tk.Tk):
             if is_valid:
                 self.mgr.gd_path = os.path.abspath(selected)
                 self.mgr.manifest_path = self.mgr.get_manifest_path()
+                self._save_settings()
                 self.log(f"Updated GD directory to: {self.mgr.gd_path}", "INFO")
                 self.refresh_status()
             else:
@@ -1898,24 +2594,23 @@ class GeodeSyncApp(tk.Tk):
             req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
             with urllib.request.urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode())
-                manifest_key = "target_manifest_mac" if IS_MAC else "target_manifest_win"
-                if manifest_key in data and data[manifest_key]:
-                    self.mgr.target_manifest = data[manifest_key]
-                elif "target_manifest" in data and data["target_manifest"] and not IS_MAC:
-                    self.mgr.target_manifest = data["target_manifest"]
-                if "geode_target_gd" in data and data["geode_target_gd"]:
-                    self.mgr.target_gd_version = data["geode_target_gd"]
+                if not self.user_selected_target:
+                    manifest_key = "target_manifest_mac" if IS_MAC else "target_manifest_win"
+                    if manifest_key in data and data[manifest_key]:
+                        self.mgr.target_manifest = data[manifest_key]
+                    elif "target_manifest" in data and data["target_manifest"] and not IS_MAC:
+                        self.mgr.target_manifest = data["target_manifest"]
+                    if "geode_target_gd" in data and data["geode_target_gd"]:
+                        self.mgr.target_gd_version = data["geode_target_gd"]
         except Exception:
             pass
 
         try:
-            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                rel = json.loads(resp.read().decode())
-                tag = rel.get("tag_name", "").lstrip("v")
-                if is_newer_app_version(tag, APP_VERSION):
-                    self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                    self.show_update_banner(tag)
+            rel = fetch_latest_published_release(timeout=8)
+            tag = str(rel.get("tag_name", "")).lstrip("v")
+            if is_newer_app_version(tag, APP_VERSION):
+                self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                self.show_update_banner(tag)
         except Exception:
             pass
 
@@ -2065,14 +2760,14 @@ class GeodeSyncApp(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Geometry Dash Storage & Cache Cleaner")
         dialog.geometry("540x380")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="🧹 GD Storage & Cache Cleaner", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text="Free up gigabytes of disk space on your drive by safely clearing cached data:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 14))
+        tk.Label(dialog, text="🧹 GD Storage & Cache Cleaner", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Free up gigabytes of disk space on your drive by safely clearing cached data:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 14))
 
-        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card = tk.Frame(dialog, bg=UI["panel"], padx=16, pady=12, highlightbackground=UI["border"], highlightthickness=1)
         card.pack(fill="x", padx=20, pady=(0, 14))
 
         clean_logs_var = tk.BooleanVar(value=True)
@@ -2087,11 +2782,11 @@ class GeodeSyncApp(tk.Tk):
             text=f"💥 Crash Dumps & Old Log Files ({len(log_files)} files • {log_mb} MB) [100% Safe]",
             variable=clean_logs_var,
             font=("Segoe UI", 9, "bold"),
-            fg="#38bdf8",
-            bg="#1a2333",
-            selectcolor="#0f172a",
-            activebackground="#1a2333",
-            activeforeground="#38bdf8"
+            fg=UI["lilac"],
+            bg=UI["panel"],
+            selectcolor=UI["inset"],
+            activebackground=UI["panel"],
+            activeforeground=UI["lilac"]
         )
         cb1.pack(anchor="w", pady=(0, 6))
 
@@ -2100,19 +2795,19 @@ class GeodeSyncApp(tk.Tk):
             text=f"🎵 Downloaded Songs & SFX Cache ({len(song_files)} files • {song_gb} GB / {song_mb} MB)",
             variable=clean_songs_var,
             font=("Segoe UI", 9, "bold"),
-            fg="#e2e8f0",
-            bg="#1a2333",
-            selectcolor="#0f172a",
-            activebackground="#1a2333",
-            activeforeground="#e2e8f0"
+            fg=UI["text"],
+            bg=UI["panel"],
+            selectcolor=UI["inset"],
+            activebackground=UI["panel"],
+            activeforeground=UI["text"]
         )
         cb2.pack(anchor="w", pady=(0, 4))
         tk.Label(
             card,
             text="  * Note: Clearing song cache leaves saves 100% safe. Songs re-download if you replay them.",
             font=("Segoe UI", 8),
-            fg="#64748b",
-            bg="#1a2333"
+            fg=UI["quiet"],
+            bg=UI["panel"]
         ).pack(anchor="w")
 
         def perform_clean():
@@ -2150,13 +2845,13 @@ class GeodeSyncApp(tk.Tk):
             dialog.destroy()
             messagebox.showinfo("Cleanup Complete!", f"🎉 Successfully cleaned {del_count} cached files!\n\nReclaimed {freed_mb} MB of drive space.")
 
-        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box = tk.Frame(dialog, bg=UI["header"])
         btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
 
-        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
         cancel_btn.pack(side="left")
 
-        clean_btn = tk.Button(btn_box, text="⚡ Clean Selected Cache", command=perform_clean, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=16, pady=4, cursor="hand2")
+        clean_btn = tk.Button(btn_box, text="⚡ Clean Selected Cache", command=perform_clean, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["text"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=16, pady=4, cursor="hand2")
         clean_btn.pack(side="right")
 
     # ==========================================
@@ -2182,15 +2877,15 @@ class GeodeSyncApp(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Geode Mod Profile Switcher")
         dialog.geometry("520x400")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="🔄 Mod Profile & Vanilla Switcher", font=("Segoe UI", 12, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        status_lbl = tk.Label(dialog, text=f"Installed Mods: {len(active) + len(disabled)} ({len(active)} Active, {len(disabled)} Disabled)", font=("Segoe UI", 9), fg="#38bdf8", bg="#161e2e")
+        tk.Label(dialog, text="🔄 Mod Profile & Vanilla Switcher", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        status_lbl = tk.Label(dialog, text=f"Installed Mods: {len(active) + len(disabled)} ({len(active)} Active, {len(disabled)} Disabled)", font=("Segoe UI", 9), fg=UI["lilac"], bg=UI["header"])
         status_lbl.pack(anchor="w", padx=20, pady=(0, 12))
 
-        card = tk.Frame(dialog, bg="#1a2333", padx=14, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card = tk.Frame(dialog, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
         card.pack(fill="x", padx=20, pady=(0, 12))
 
         def disable_all():
@@ -2226,18 +2921,18 @@ class GeodeSyncApp(tk.Tk):
             self.refresh_status()
             messagebox.showinfo("All Mods Enabled", f"Re-enabled {len(dis)} mods successfully!")
 
-        tk.Label(card, text="Quick Presets:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w", pady=(0, 6))
+        tk.Label(card, text="Quick Presets:", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w", pady=(0, 6))
 
-        btn_row = tk.Frame(card, bg="#1a2333")
+        btn_row = tk.Frame(card, bg=UI["panel"])
         btn_row.pack(fill="x", pady=(0, 8))
 
-        tk.Button(btn_row, text="🛡️ Vanilla Mode (Disable All)", command=disable_all, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#f87171", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 8))
-        tk.Button(btn_row, text="⚡ Enable All Mods", command=enable_all, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(btn_row, text="🛡️ Vanilla Mode (Disable All)", command=disable_all, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["red"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 8))
+        tk.Button(btn_row, text="⚡ Enable All Mods", command=enable_all, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
 
-        card2 = tk.Frame(dialog, bg="#1a2333", padx=14, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card2 = tk.Frame(dialog, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
         card2.pack(fill="x", padx=20, pady=(0, 10))
 
-        tk.Label(card2, text="Custom Profiles:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w", pady=(0, 6))
+        tk.Label(card2, text="Custom Profiles:", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w", pady=(0, 6))
 
         def save_profile():
             name_win = simpledialog.askstring("Save Profile", "Enter profile name (e.g. Demon Grinding, Recording):", parent=dialog)
@@ -2260,12 +2955,12 @@ class GeodeSyncApp(tk.Tk):
             p_win = tk.Toplevel(dialog)
             p_win.title("Load Mod Profile")
             p_win.geometry("380x260")
-            p_win.configure(bg="#161e2e")
+            p_win.configure(bg=UI["header"])
             p_win.transient(dialog)
             p_win.grab_set()
 
-            tk.Label(p_win, text="Select Profile to Activate:", font=("Segoe UI", 10, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=16, pady=(12, 6))
-            p_listbox = tk.Listbox(p_win, bg="#0f172a", fg="#e2e8f0", font=("Segoe UI", 9), selectbackground="#8b5cf6")
+            tk.Label(p_win, text="Select Profile to Activate:", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=16, pady=(12, 6))
+            p_listbox = tk.Listbox(p_win, bg=UI["inset"], fg=UI["text"], font=("Segoe UI", 9), selectbackground=UI["lilac"])
             p_listbox.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
             for p in profiles:
@@ -2302,14 +2997,14 @@ class GeodeSyncApp(tk.Tk):
                 self.refresh_status()
                 messagebox.showinfo("Profile Applied", f"Loaded profile '{p_data.get('name')}' successfully!")
 
-            tk.Button(p_win, text="Apply Profile", command=apply_sel, font=("Segoe UI", 9, "bold"), bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", relief="flat", padx=12, pady=3, cursor="hand2").pack(pady=(0, 10))
+            tk.Button(p_win, text="Apply Profile", command=apply_sel, font=("Segoe UI", 9, "bold"), bg=UI["lilac"], fg=UI["text"], activebackground=UI["lilac_dark"], relief="flat", padx=12, pady=3, cursor="hand2").pack(pady=(0, 10))
 
-        btn_row2 = tk.Frame(card2, bg="#1a2333")
+        btn_row2 = tk.Frame(card2, bg=UI["panel"])
         btn_row2.pack(fill="x")
-        tk.Button(btn_row2, text="💾 Save Current Profile", command=save_profile, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left", padx=(0, 8))
-        tk.Button(btn_row2, text="📂 Load Profile", command=load_profile, font=("Segoe UI", 8), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left")
+        tk.Button(btn_row2, text="💾 Save Current Profile", command=save_profile, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left", padx=(0, 8))
+        tk.Button(btn_row2, text="📂 Load Profile", command=load_profile, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left")
 
-        close_btn = tk.Button(dialog, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=12, pady=4, cursor="hand2")
+        close_btn = tk.Button(dialog, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=12, pady=4, cursor="hand2")
         close_btn.pack(side="bottom", pady=14)
 
     # ==========================================
@@ -2333,17 +3028,16 @@ class GeodeSyncApp(tk.Tk):
         self.progress_lbl.config(text="Contacting GitHub for new release binary...")
 
         try:
-            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode())
-                tag = str(data.get("tag_name", "")).strip()
-                if not is_newer_app_version(tag, APP_VERSION):
-                    raise ValueError("GitHub did not report a newer GeodeSync release.")
-                asset_url = None
-                for asset in data.get("assets", []):
-                    if asset.get("name") == "GeodeSync.exe":
-                        asset_url = asset.get("browser_download_url")
-                        break
+            data = fetch_latest_published_release(timeout=12)
+            tag = str(data.get("tag_name", "")).strip()
+            if not is_newer_app_version(tag, APP_VERSION):
+                raise ValueError("GitHub did not report a newer GeodeSync release.")
+            self.latest_release_url = data.get("html_url", self.latest_release_url)
+            asset_url = None
+            for asset in data.get("assets", []):
+                if asset.get("name") == "GeodeSync.exe":
+                    asset_url = asset.get("browser_download_url")
+                    break
 
             if not asset_url:
                 raise Exception("GeodeSync.exe asset not found in release.")
@@ -2413,9 +3107,7 @@ class GeodeSyncApp(tk.Tk):
                 return
 
             self._schedule_update_progress("Checking the Mac update…", 5)
-            req = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req, timeout=15) as response:
-                release = json.loads(response.read().decode("utf-8"))
+            release = fetch_latest_published_release(timeout=15)
 
             tag = str(release.get("tag_name", "")).strip()
             release_url = release.get("html_url", release_url)
@@ -2594,11 +3286,12 @@ fi
     def toggle_auto_backup(self):
         self.auto_backup_enabled = not getattr(self, "auto_backup_enabled", True)
         if self.auto_backup_enabled:
-            self.auto_backup_btn.config(text="☁️ Auto-Backup: ON", fg="#34d399", bg="#064e3b")
+            self.auto_backup_btn.config(text="Auto-Backup: ON", fg=UI["lime"], bg=UI["panel_alt"])
             self.log("Auto-Backup on GD Exit ENABLED.", "INFO")
         else:
-            self.auto_backup_btn.config(text="☁️ Auto-Backup: OFF", fg="#94a3b8", bg="#1e293b")
+            self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"], bg=UI["panel_alt"])
             self.log("Auto-Backup on GD Exit DISABLED.", "INFO")
+        self._save_settings()
 
     # ==========================================
     # v1.1.3 PRO FEATURE: FPS UNLOCKER & REFRESH RATE
@@ -2630,17 +3323,17 @@ fi
         dialog = tk.Toplevel(self)
         dialog.title("Geometry Dash FPS Unlocker & Target Rate")
         dialog.geometry("500x380")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="🎯 Geometry Dash FPS Unlocker", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text=f"Current Game Setting: {current_fps} FPS", font=("Segoe UI", 10, "bold"), fg="#38bdf8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 12))
+        tk.Label(dialog, text="🎯 Geometry Dash FPS Unlocker", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text=f"Current Game Setting: {current_fps} FPS", font=("Segoe UI", 10, "bold"), fg=UI["lilac"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 12))
 
-        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card = tk.Frame(dialog, bg=UI["panel"], padx=16, pady=12, highlightbackground=UI["border"], highlightthickness=1)
         card.pack(fill="x", padx=20, pady=(0, 12))
 
-        tk.Label(card, text="Select Target Framerate Preset:", font=("Segoe UI", 9, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w", pady=(0, 8))
+        tk.Label(card, text="Select Target Framerate Preset:", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w", pady=(0, 8))
 
         selected_fps = tk.StringVar(value=current_fps if current_fps in ["60", "144", "240", "360", "480"] else "360")
 
@@ -2659,18 +3352,18 @@ fi
                 variable=selected_fps,
                 value=val,
                 font=("Segoe UI", 9),
-                fg="#e2e8f0",
-                bg="#1a2333",
-                selectcolor="#0f172a",
-                activebackground="#1a2333",
-                activeforeground="#38bdf8"
+                fg=UI["text"],
+                bg=UI["panel"],
+                selectcolor=UI["inset"],
+                activebackground=UI["panel"],
+                activeforeground=UI["lilac"]
             )
             rb.pack(anchor="w", pady=2)
 
-        custom_box = tk.Frame(card, bg="#1a2333")
+        custom_box = tk.Frame(card, bg=UI["panel"])
         custom_box.pack(fill="x", pady=(8, 0))
-        tk.Label(custom_box, text="Or Custom Target FPS:", font=("Segoe UI", 8), fg="#94a3b8", bg="#1a2333").pack(side="left")
-        custom_entry = tk.Entry(custom_box, font=("Segoe UI", 9), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff", width=8)
+        tk.Label(custom_box, text="Or Custom Target FPS:", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(side="left")
+        custom_entry = tk.Entry(custom_box, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["text"], width=8)
         custom_entry.pack(side="left", padx=8)
 
         def apply_fps():
@@ -2708,13 +3401,13 @@ fi
                 self.log(f"Failed to set FPS: {err}", "ERROR")
                 messagebox.showerror("Error", f"Failed to modify save file:\n{err}")
 
-        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box = tk.Frame(dialog, bg=UI["header"])
         btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
 
-        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
         cancel_btn.pack(side="left")
 
-        apply_btn = tk.Button(btn_box, text="⚡ Apply Target FPS", command=apply_fps, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", activeforeground="#ffffff", relief="flat", padx=16, pady=4, cursor="hand2")
+        apply_btn = tk.Button(btn_box, text="⚡ Apply Target FPS", command=apply_fps, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["text"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=16, pady=4, cursor="hand2")
         apply_btn.pack(side="right")
 
     # ==========================================
@@ -2729,25 +3422,25 @@ fi
         dialog = tk.Toplevel(self)
         dialog.title("Geometry Dash NONG Song Manager")
         dialog.geometry("540x480")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="🎵 NONG Song Manager (Custom Level Audio)", font=("Segoe UI", 13, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text="Easily replace any level's official audio with a custom Not-On-Newgrounds song:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 12))
+        tk.Label(dialog, text="🎵 NONG Song Manager (Custom Level Audio)", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Easily replace any level's official audio with a custom Not-On-Newgrounds song:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 12))
 
-        card = tk.Frame(dialog, bg="#1a2333", padx=16, pady=12, highlightbackground="#2d3748", highlightthickness=1)
+        card = tk.Frame(dialog, bg=UI["panel"], padx=16, pady=12, highlightbackground=UI["border"], highlightthickness=1)
         card.pack(fill="x", padx=20, pady=(0, 12))
 
-        tk.Label(card, text="Target Song ID (from in-game custom level):", font=("Segoe UI", 8, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w")
-        song_id_entry = tk.Entry(card, font=("Segoe UI", 10), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff")
+        tk.Label(card, text="Target Song ID (from in-game custom level):", font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w")
+        song_id_entry = tk.Entry(card, font=("Segoe UI", 10), bg=UI["inset"], fg=UI["text"], insertbackground=UI["text"])
         song_id_entry.pack(fill="x", pady=(2, 8))
 
-        tk.Label(card, text="Custom Audio Source (Local MP3 or Direct URL):", font=("Segoe UI", 8, "bold"), fg="#e2e8f0", bg="#1a2333").pack(anchor="w")
-        source_frame = tk.Frame(card, bg="#1a2333")
+        tk.Label(card, text="Custom Audio Source (Local MP3 or Direct URL):", font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w")
+        source_frame = tk.Frame(card, bg=UI["panel"])
         source_frame.pack(fill="x", pady=(2, 8))
 
-        source_entry = tk.Entry(source_frame, font=("Segoe UI", 9), bg="#0f172a", fg="#ffffff", insertbackground="#ffffff")
+        source_entry = tk.Entry(source_frame, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["text"])
         source_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         def browse_audio():
@@ -2759,7 +3452,7 @@ fi
                 source_entry.delete(0, "end")
                 source_entry.insert(0, file_path)
 
-        tk.Button(source_frame, text="Browse...", command=browse_audio, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right")
+        tk.Button(source_frame, text="Browse...", command=browse_audio, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=3, cursor="hand2").pack(side="right")
 
         def install_nong():
             sid = song_id_entry.get().strip()
@@ -2796,14 +3489,14 @@ fi
                 self.log(f"NONG install error: {err}", "ERROR")
                 messagebox.showerror("Error", f"Failed to install song:\n{err}")
 
-        tk.Button(card, text="⚡ Install NONG Song", command=install_nong, font=("Segoe UI", 9, "bold"), bg="#8b5cf6", fg="#ffffff", activebackground="#7c3aed", relief="flat", padx=14, pady=5, cursor="hand2").pack(anchor="w", pady=(4, 0))
+        tk.Button(card, text="⚡ Install NONG Song", command=install_nong, font=("Segoe UI", 9, "bold"), bg=UI["lilac"], fg=UI["text"], activebackground=UI["lilac_dark"], relief="flat", padx=14, pady=5, cursor="hand2").pack(anchor="w", pady=(4, 0))
 
-        list_frame = tk.Frame(dialog, bg="#1a2333", padx=14, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        list_frame = tk.Frame(dialog, bg=UI["panel"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 12))
 
-        tk.Label(list_frame, text="Replaced NONG Songs in Save Directory:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#1a2333").pack(anchor="w")
+        tk.Label(list_frame, text="Replaced NONG Songs in Save Directory:", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w")
 
-        nong_box = tk.Listbox(list_frame, bg="#0f172a", fg="#e2e8f0", font=("Segoe UI", 8), height=4, selectbackground="#8b5cf6")
+        nong_box = tk.Listbox(list_frame, bg=UI["inset"], fg=UI["text"], font=("Segoe UI", 8), height=4, selectbackground=UI["lilac"])
         nong_box.pack(fill="both", expand=True, pady=4)
 
         def refresh_list():
@@ -2836,9 +3529,9 @@ fi
                 messagebox.showinfo("Restored", f"Restored original song for ID {sid}!")
                 refresh_list()
 
-        btn_bar = tk.Frame(list_frame, bg="#1a2333")
+        btn_bar = tk.Frame(list_frame, bg=UI["panel"])
         btn_bar.pack(fill="x")
-        tk.Button(btn_bar, text="♻️ Revert Selected to Original", command=restore_selected, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", relief="flat", padx=8, pady=3, cursor="hand2").pack(side="left")
+        tk.Button(btn_bar, text="♻️ Revert Selected to Original", command=restore_selected, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2").pack(side="left")
 
     # ==========================================
     # v1.1.3 PRO FEATURE: ESSENTIAL MOD PACK INSTALLER
@@ -2852,12 +3545,12 @@ fi
         dialog = tk.Toplevel(self)
         dialog.title("Essential Geode Mod Pack")
         dialog.geometry("520x400")
-        dialog.configure(bg="#161e2e")
+        dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
-        tk.Label(dialog, text="📦 1-Click Essential Geode Mod Pack", font=("Segoe UI", 12, "bold"), fg="#ffffff", bg="#161e2e").pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text="Select community-recommended mods to download and install:", font=("Segoe UI", 9), fg="#94a3b8", bg="#161e2e").pack(anchor="w", padx=20, pady=(0, 10))
+        tk.Label(dialog, text="📦 1-Click Essential Geode Mod Pack", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(dialog, text="Select community-recommended mods to download and install:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 10))
 
         pack_mods = [
             ("fleym.nongd", "Jukebox (In-game NONG Custom Song Downloader • Recommended)"),
@@ -2868,7 +3561,7 @@ fi
         ]
 
         var_dict = {}
-        card = tk.Frame(dialog, bg="#1a2333", padx=14, pady=10, highlightbackground="#2d3748", highlightthickness=1)
+        card = tk.Frame(dialog, bg=UI["panel"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         card.pack(fill="x", padx=20, pady=(0, 12))
 
         for mod_id, title in pack_mods:
@@ -2876,8 +3569,8 @@ fi
             v = tk.BooleanVar(value=not is_installed)
             var_dict[mod_id] = v
             label_text = f"{title}" + (" [Already Installed]" if is_installed else "")
-            col = "#94a3b8" if is_installed else "#e2e8f0"
-            cb = tk.Checkbutton(card, text=label_text, variable=v, font=("Segoe UI", 9), fg=col, bg="#1a2333", selectcolor="#0f172a", activebackground="#1a2333", activeforeground="#38bdf8")
+            col = UI["muted"] if is_installed else UI["text"]
+            cb = tk.Checkbutton(card, text=label_text, variable=v, font=("Segoe UI", 9), fg=col, bg=UI["panel"], selectcolor=UI["inset"], activebackground=UI["panel"], activeforeground=UI["lilac"])
             cb.pack(anchor="w", pady=3)
 
         def do_install():
@@ -2889,13 +3582,13 @@ fi
             dialog.destroy()
             threading.Thread(target=self._run_modpack_install, args=(to_download,), daemon=True).start()
 
-        btn_box = tk.Frame(dialog, bg="#161e2e")
+        btn_box = tk.Frame(dialog, bg=UI["header"])
         btn_box.pack(fill="x", side="bottom", padx=20, pady=16)
 
-        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", relief="flat", padx=10, pady=4, cursor="hand2")
+        cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
         cancel_btn.pack(side="left")
 
-        apply_btn = tk.Button(btn_box, text="⚡ Download & Install Selected", command=do_install, font=("Segoe UI", 9, "bold"), bg="#10b981", fg="#ffffff", activebackground="#059669", relief="flat", padx=14, pady=4, cursor="hand2")
+        apply_btn = tk.Button(btn_box, text="⚡ Download & Install Selected", command=do_install, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["text"], activebackground=UI["lime_hover"], relief="flat", padx=14, pady=4, cursor="hand2")
         apply_btn.pack(side="right")
 
     def _run_modpack_install(self, mod_ids):
@@ -2944,10 +3637,10 @@ fi
     def toggle_more_tools(self):
         if self.more_frame.winfo_viewable():
             self.more_frame.pack_forget()
-            self.more_toggle_btn.config(text="🛠️ More Tools ▾", fg="#94a3b8")
+            self.more_toggle_btn.config(text="More tools  +", fg=UI["muted"])
         else:
             self.more_frame.pack(fill="x", pady=(8, 0))
-            self.more_toggle_btn.config(text="🛠️ More Tools ▴", fg="#38bdf8")
+            self.more_toggle_btn.config(text="More tools  −", fg=UI["lime"])
 
     def show_help_dialog(self):
         msg = (

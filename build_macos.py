@@ -110,14 +110,11 @@ def main() -> None:
     with info_plist.open("wb") as stream:
         plistlib.dump(metadata, stream, sort_keys=False)
 
-    # Images may inherit Finder metadata from the checked-out project. macOS
-    # does not permit that metadata inside a signed app bundle.
+    # Remove ordinary Finder metadata from the bundle. Some newer macOS
+    # versions attach a system-managed provenance attribute that xattr cannot
+    # actually remove; signing is therefore handled only by the release job
+    # when Developer ID credentials are configured.
     subprocess.run(["xattr", "-cr", str(app)], check=True)
-
-    # Ad-hoc signing seals the bundle for local use. Distribution signing and
-    # notarization require the owner's Apple Developer credentials.
-    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
-    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     print(f"Built self-contained {arch} app: {app}")
 
 

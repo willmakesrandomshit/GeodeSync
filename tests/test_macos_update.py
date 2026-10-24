@@ -331,10 +331,15 @@ class SteamManifestRecoveryTests(unittest.TestCase):
         app.is_downloading_depot = False
         app.mgr = mock.Mock()
         app.mgr.is_gd_process_running.return_value = False
+        app.mgr.get_save_data_dir.return_value = ""
         app.primary_btn = mock.Mock()
         app.log = mock.Mock()
 
-        with mock.patch("main.threading.Thread") as thread:
+        # The safer switch flow now asks for explicit confirmation before it
+        # touches game files. Keep this concurrency regression isolated from
+        # real modal UI and provide consent for the synthetic test operation.
+        with mock.patch("main.messagebox.askyesno", return_value=True), \
+             mock.patch("main.threading.Thread") as thread:
             app.start_automated_downgrade()
             app.start_automated_downgrade()
 

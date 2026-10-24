@@ -1,5 +1,6 @@
 build/
 dist/
+.GeodeSync-pyinstaller/
 *.spec
 __pycache__/
 *.pyc
