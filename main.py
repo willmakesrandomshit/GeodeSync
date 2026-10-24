@@ -1478,8 +1478,9 @@ class GeodeSyncApp(tk.Tk):
         f_l = tk.Frame(grid_chips, bg=UI["panel"])
         f_l.pack(side="left", expand=True, fill="x", padx=3)
         tk.Label(f_l, text="Steam update lock", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
-        self.lock_badge = tk.Label(f_l, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=8, pady=4)
+        self.lock_badge = tk.Label(f_l, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=8, pady=4, cursor="hand2")
         self.lock_badge.pack(anchor="w", pady=(2, 0))
+        self.lock_badge.bind("<Button-1>", lambda e: self.toggle_steam_lock())
 
         f_steam = tk.Frame(grid_chips, bg=UI["panel"])
         f_steam.pack(side="left", expand=True, fill="x", padx=3)
@@ -1619,9 +1620,9 @@ class GeodeSyncApp(tk.Tk):
 
         is_locked = self.mgr.is_manifest_locked()
         if is_locked:
-            self.lock_badge.config(text="Locked", fg=UI["lime"], bg=UI["lime_dark"])
+            self.lock_badge.config(text="Locked (Protected)", fg=UI["lime"], bg=UI["lime_dark"])
         else:
-            self.lock_badge.config(text="Unlocked", fg=UI["amber"], bg=UI["panel_alt"])
+            self.lock_badge.config(text="Unlocked (Normal)", fg=UI["amber"], bg=UI["panel_alt"])
 
         has_geode = self.mgr.is_geode_installed()
         if has_geode:
@@ -3380,6 +3381,34 @@ fi
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"], bg=UI["panel_alt"])
             self.log("Auto-Backup on GD Exit DISABLED.", "INFO")
         self._save_settings()
+
+    def toggle_steam_lock(self):
+        if not self.mgr.manifest_path or not os.path.exists(self.mgr.manifest_path):
+            messagebox.showerror("Error", "Could not locate Steam's appmanifest_322170.acf file.")
+            return
+
+        currently_locked = self.mgr.is_manifest_locked()
+        new_state = not currently_locked
+        try:
+            self.mgr.set_manifest_locked(new_state)
+            self.refresh_status()
+            state_str = "Locked" if new_state else "Unlocked"
+            self.log(f"Steam update lock set to: {state_str}.", "SUCCESS")
+            if new_state:
+                messagebox.showinfo(
+                    "Steam Updates Locked",
+                    "Steam update lock is now LOCKED (Protected)!\n\n"
+                    "Steam's Geometry Dash manifest is set to Read-Only, which blocks Steam from automatically overwriting your game with 2.209."
+                )
+            else:
+                messagebox.showinfo(
+                    "Steam Updates Unlocked",
+                    "Steam update lock is now UNLOCKED (Normal).\n\n"
+                    "Steam is permitted to update Geometry Dash."
+                )
+        except Exception as e:
+            self.log(f"Error changing Steam update lock: {e}", "ERROR")
+            messagebox.showerror("Error", f"Could not change Steam update lock:\n{e}")
 
     # ==========================================
     # v1.1.3 PRO FEATURE: FPS UNLOCKER & REFRESH RATE
