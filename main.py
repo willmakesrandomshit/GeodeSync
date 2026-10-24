@@ -43,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "1.1.5.2"
+APP_VERSION = "1.1.5.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1044,63 +1044,51 @@ class GeodeSyncApp(tk.Tk):
         self.lock_badge = tk.Label(f_l, text="Detecting...", font=("Segoe UI", 9, "bold"), fg="#f59e0b", bg="#332412", padx=6, pady=2)
         self.lock_badge.pack(anchor="w", pady=(2, 0))
 
-        # 3. UTILITY TOOLBAR (Clean Main Row + Expandable "More Tools" Drawer)
+        # 3. Keep the first screen focused on the recommended action. Utilities
+        # stay available in a compact drawer instead of competing with it.
         tools_card = tk.Frame(body, bg="#161e2e", padx=12, pady=8, highlightbackground="#2d3748", highlightthickness=1)
         tools_card.pack(fill="x", pady=(0, 8))
 
-        # Main Core Row (The essentials)
         row_main = tk.Frame(tools_card, bg="#161e2e")
         row_main.pack(fill="x")
 
-        tk.Label(row_main, text="Quick Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#161e2e").pack(side="left", padx=(0, 6))
+        self.more_toggle_btn = tk.Button(row_main, text="🧰 Tools ▾", command=self.toggle_more_tools, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=9, pady=4, cursor="hand2")
+        self.more_toggle_btn.pack(side="left")
 
-        backup_save_btn = tk.Button(row_main, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        backup_save_btn.pack(side="left", padx=2)
-
-        fix_audio_btn = tk.Button(row_main, text="⚡ Fix Click Delay", command=self.fix_click_delay, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#10b981", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        fix_audio_btn.pack(side="left", padx=2)
-
-        crash_doc_btn = tk.Button(row_main, text="🩺 Crash Doctor", command=self.run_crash_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        crash_doc_btn.pack(side="left", padx=2)
-
-        essential_pack_btn = tk.Button(row_main, text="📦 Essential Mods (Jukebox & CBF)", command=self.install_essential_mods, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#eab308", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        essential_pack_btn.pack(side="left", padx=2)
-
-        self.more_toggle_btn = tk.Button(row_main, text="🛠️ More Tools ▾", command=self.toggle_more_tools, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=7, pady=3, cursor="hand2")
-        self.more_toggle_btn.pack(side="left", padx=2)
-
-        self.restore_gd_btn = tk.Button(row_main, text="🔄 Restore GD", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=8, pady=3, cursor="hand2")
+        self.restore_gd_btn = tk.Button(row_main, text="↩ Restore latest Geometry Dash", command=self.upgrade_clicked, font=("Segoe UI", 8), bg="#1e293b", fg="#f59e0b", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=9, pady=4, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
 
-        # Expandable "More Tools" Tray (Collapsed by default)
-        self.more_frame = tk.Frame(tools_card, bg="#111827", padx=10, pady=8, highlightbackground="#1f2937", highlightthickness=1)
-        # Not packed on startup
+        # The drawer is collapsed by default. A three-column grid stays usable
+        # at narrower window sizes and keeps every existing tool reachable.
+        self.more_frame = tk.Frame(tools_card, bg="#111827", padx=8, pady=8, highlightbackground="#1f2937", highlightthickness=1)
+        tool_grid = tk.Frame(self.more_frame, bg="#111827")
+        tool_grid.pack(fill="x")
+        for column in range(3):
+            tool_grid.columnconfigure(column, weight=1)
 
-        more_row = tk.Frame(self.more_frame, bg="#111827")
-        more_row.pack(fill="x")
+        def add_tool(label, command, *, color="#94a3b8", row, column, bold=False):
+            button = tk.Button(
+                tool_grid, text=label, command=command,
+                font=("Segoe UI", 8, "bold" if bold else "normal"),
+                bg="#1e293b", fg=color, activebackground="#334155",
+                activeforeground="#ffffff", relief="flat", padx=5, pady=4,
+                cursor="hand2",
+            )
+            button.grid(row=row, column=column, sticky="ew", padx=3, pady=3)
+            return button
 
-        tk.Label(more_row, text="Extra Tools:", font=("Segoe UI", 8, "bold"), fg="#64748b", bg="#111827").pack(side="left", padx=(0, 6))
-
-        save_doc_btn = tk.Button(more_row, text="💽 Save Doctor", command=self.run_save_doctor, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#a78bfa", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        save_doc_btn.pack(side="left", padx=2)
-
-        clean_cache_btn = tk.Button(more_row, text="🧹 Cache Cleaner", command=self.open_cache_cleaner, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#34d399", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        clean_cache_btn.pack(side="left", padx=2)
-
-        fps_unlock_btn = tk.Button(more_row, text="🎯 FPS Unlocker", command=self.open_fps_unlocker, font=("Segoe UI", 8, "bold"), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        fps_unlock_btn.pack(side="left", padx=2)
-
-        self.auto_backup_btn = tk.Button(more_row, text="☁️ Auto-Backup: ON", command=self.toggle_auto_backup, font=("Segoe UI", 8, "bold"), bg="#064e3b", fg="#34d399", activebackground="#065f46", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        self.auto_backup_btn.pack(side="left", padx=2)
-
-        mod_profiles_btn = tk.Button(more_row, text="🔄 Mod Profiles", command=self.open_mod_profiles, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        mod_profiles_btn.pack(side="left", padx=2)
-
-        open_mods_btn = tk.Button(more_row, text="📂 Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg="#1e293b", fg="#94a3b8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        open_mods_btn.pack(side="left", padx=2)
-
-        version_sel_btn = tk.Button(more_row, text="⚙️ Version Selector", command=self.open_version_selector, font=("Segoe UI", 8), bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=6, pady=2, cursor="hand2")
-        version_sel_btn.pack(side="right")
+        add_tool("💾 Backup saves", self.backup_saves, color="#38bdf8", row=0, column=0, bold=True)
+        add_tool("♻ Restore saves", self.restore_saves, color="#94a3b8", row=0, column=1)
+        add_tool("💽 Save Doctor", self.run_save_doctor, color="#a78bfa", row=0, column=2)
+        add_tool("🧹 Cache cleaner", self.open_cache_cleaner, color="#34d399", row=1, column=0)
+        add_tool("📂 Mods folder", self.open_mods_folder, row=1, column=1)
+        add_tool("⚙ Version selector", self.open_version_selector, color="#38bdf8", row=1, column=2)
+        add_tool("⚡ Click delay", self.fix_click_delay, color="#10b981", row=2, column=0)
+        add_tool("🩺 Crash Doctor", self.run_crash_doctor, color="#c084fc", row=2, column=1)
+        add_tool("📦 Essential mods", self.install_essential_mods, color="#eab308", row=2, column=2)
+        add_tool("🎯 FPS unlocker", self.open_fps_unlocker, color="#38bdf8", row=3, column=0)
+        self.auto_backup_btn = add_tool("☁ Auto-Backup: ON", self.toggle_auto_backup, color="#34d399", row=3, column=1, bold=True)
+        add_tool("🔄 Mod profiles", self.open_mod_profiles, row=3, column=2)
 
         # 4. ACTIVITY LOG
         log_card = tk.Frame(body, bg="#161e2e", padx=12, pady=6, highlightbackground="#2d3748", highlightthickness=1)
