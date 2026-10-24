@@ -45,3 +45,5 @@ python -m unittest discover -s tests -v
 ```
 
 See [macOS installation notes](README-macOS.txt), [Linux notes](README-Linux.txt), [release notes](release_notes.md), and [all releases](https://github.com/willmakesrandomshit/GeodeSync/releases).
+
+Security and trust details: [Security policy](SECURITY.md), [Privacy notes](PRIVACY.md), and [Build instructions](BUILDING.md).

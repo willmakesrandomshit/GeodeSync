@@ -201,6 +201,12 @@ jobs:
             test "$GITHUB_REF_NAME" = "release/v$APP_VERSION"
           fi
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Generate SHA-256 release checksums
+        run: |
+          shopt -s nullglob
+          assets=(GeodeSync.exe GeodeSync-v*-Windows.zip GeodeSync-macOS-*.zip GeodeSync-v*-Linux.tar.gz)
+          test "${#assets[@]}" -gt 0
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.app_version }}
@@ -212,4 +218,5 @@ jobs:
             GeodeSync-v*-Windows.zip
             GeodeSync-macOS-*.zip
             GeodeSync-v*-Linux.tar.gz
+            SHA256SUMS.txt
           fail_on_unmatched_files: true

@@ -29,11 +29,12 @@ import base64
 import hashlib
 import platform
 import posixpath
-import shlex
 import zipfile
 import zlib
 import struct
 import plistlib
+from pathlib import PurePosixPath
+from urllib.parse import urlparse
 from xml.parsers.expat import ExpatError
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -59,10 +60,33 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
+
+
+def decode_geometry_dash_save(raw: bytes) -> bytes:
+    """Decode Geometry Dash's save wrapper (XOR 0x0B, URL-safe Base64, zlib)."""
+    encoded = bytes(value ^ 0x0B for value in raw)
+    compressed = base64.urlsafe_b64decode(encoded)
+    return zlib.decompress(compressed, 15 + 32)
+
+
+def encode_geometry_dash_save(xml_data: bytes) -> bytes:
+    """Encode XML bytes using Geometry Dash's documented save-file wrapper."""
+    compressed = zlib.compress(xml_data)
+    encoded = base64.urlsafe_b64encode(compressed)
+    return bytes(value ^ 0x0B for value in encoded)
+
+
+def official_release_page(url=None):
+    """Accept only the canonical repository's GitHub releases page URL."""
+    expected = f"https://github.com/{GITHUB_REPO}/releases"
+    candidate = str(url or expected).rstrip("/")
+    if candidate == expected or candidate.startswith(expected + "/"):
+        return candidate
+    return expected
 
 
 class DiscordRPC:
@@ -408,31 +432,43 @@ def install_or_update_geode(gd_path, log_callback=None):
         raise ValueError(f"No compatible Geode asset found for {platform.system()} in release {tag}")
 
     download_url = target_asset["browser_download_url"]
+    parsed_url = urlparse(download_url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname != "github.com"
+        or not parsed_url.path.startswith("/geode-sdk/geode/releases/download/")
+    ):
+        raise ValueError("Geode's release metadata contains an unexpected download destination.")
+    asset_size = int(target_asset.get("size") or 0)
+    if asset_size <= 0 or asset_size > GEODE_PACKAGE_MAX_DOWNLOAD_BYTES:
+        raise ValueError("Geode's release metadata contains an invalid or excessive package size.")
     if log_callback:
-        log_callback(f"Downloading Geode {tag} package ({round(target_asset.get('size', 0) / (1024 * 1024), 1)} MB)...")
+        log_callback(f"Downloading Geode {tag} package ({round(asset_size / (1024 * 1024), 1)} MB)...")
 
     req = urllib.request.Request(download_url, headers={"User-Agent": "GeodeSync-Client"})
     with urllib.request.urlopen(req, timeout=30) as resp:
-        data = resp.read()
+        final_host = urlparse(resp.geturl()).hostname
+        if final_host not in {
+            "github.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        }:
+            raise ValueError("GitHub redirected the Geode package to an unexpected host.")
+        data = resp.read(GEODE_PACKAGE_MAX_DOWNLOAD_BYTES + 1)
+    if len(data) > GEODE_PACKAGE_MAX_DOWNLOAD_BYTES or len(data) != asset_size:
+        raise ValueError("The downloaded Geode package has an unexpected size.")
+    verify_release_asset_digest(target_asset, data, "Geode package")
 
     import io
-    zf = zipfile.ZipFile(io.BytesIO(data))
-    if IS_WIN:
-        for name in zf.namelist():
-            if name.endswith("/") or name in ("", ".", ".."):
-                continue
-            dest_file = os.path.join(gd_path, name)
-            with open(dest_file, "wb") as f:
-                f.write(zf.read(name))
-    elif IS_MAC:
-        fw_dir = os.path.join(gd_path, "Geometry Dash.app", "Contents", "Frameworks")
-        os.makedirs(fw_dir, exist_ok=True)
-        for name in zf.namelist():
-            if name.endswith("/") or name in ("", ".", ".."):
-                continue
-            dest_file = os.path.join(fw_dir, name)
-            with open(dest_file, "wb") as f:
-                f.write(zf.read(name))
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        if IS_WIN:
+            target_root = gd_path
+        elif IS_MAC:
+            target_root = os.path.join(gd_path, "Geometry Dash.app", "Contents", "Frameworks")
+        else:
+            target_root = os.path.join(gd_path, "geode")
+        os.makedirs(target_root, exist_ok=True)
+        extract_geode_package_safely(zf, target_root)
     return tag
 
 
@@ -471,6 +507,134 @@ SIZE_22081 = 10700288
 SIZE_2209 = 13178880
 EXPECTED_DEPOT_BYTES = 230000000 if IS_MAC else 204000000
 MACOS_UPDATE_MAX_BYTES = 300 * 1024 * 1024
+GEODE_PACKAGE_MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
+GEODE_PACKAGE_MAX_EXPANDED_BYTES = 500 * 1024 * 1024
+
+
+def safe_zip_member_target(root, info):
+    """Resolve a ZIP member below root, rejecting traversal and special files."""
+    name = info.filename
+    if not name or "\\" in name or "\x00" in name:
+        raise ValueError("The Geode package contains an invalid archive path.")
+    member = PurePosixPath(name)
+    if member.is_absolute() or any(part in ("", ".", "..") for part in member.parts):
+        raise ValueError("The Geode package contains an unsafe archive path.")
+    reserved_windows_names = {"CON", "PRN", "AUX", "NUL"} | {
+        f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)
+    }
+    if any(
+        ":" in part
+        or part.endswith((" ", "."))
+        or part.split(".", 1)[0].upper() in reserved_windows_names
+        for part in member.parts
+    ):
+        raise ValueError("The Geode package contains an unsafe destination filename.")
+    mode = (info.external_attr >> 16) & 0xFFFF
+    file_type = stat.S_IFMT(mode)
+    if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+        raise ValueError("The Geode package contains a link or special file.")
+    base = os.path.realpath(root)
+    target = os.path.abspath(os.path.join(base, *member.parts))
+    if os.path.commonpath((base, target)) != base:
+        raise ValueError("The Geode package path escapes the game folder.")
+    parent = os.path.dirname(target)
+    while parent != base and os.path.commonpath((base, parent)) == base:
+        if os.path.islink(parent):
+            raise ValueError("The Geode package targets a symbolic-link directory.")
+        parent = os.path.dirname(parent)
+    if os.path.islink(target):
+        raise ValueError("The Geode package would overwrite a symbolic link.")
+    if info.file_size < 0 or info.file_size > GEODE_PACKAGE_MAX_EXPANDED_BYTES:
+        raise ValueError("The Geode package contains an oversized file.")
+    return target
+
+
+def validate_geode_package_zip(archive, target_root):
+    """Validate every member before extraction and cap total expansion size."""
+    total_size = 0
+    files = []
+    seen_targets = set()
+    for info in archive.infolist():
+        target = safe_zip_member_target(target_root, info)
+        key = os.path.normcase(target)
+        if key in seen_targets:
+            raise ValueError("The Geode package contains duplicate destination paths.")
+        seen_targets.add(key)
+        total_size += info.file_size
+        if total_size > GEODE_PACKAGE_MAX_EXPANDED_BYTES:
+            raise ValueError("The Geode package expands beyond the allowed size.")
+        if not info.is_dir():
+            files.append((info, target))
+    if not files:
+        raise ValueError("The Geode package contains no installable files.")
+    return files
+
+
+def extract_geode_package_safely(archive, target_root):
+    """Safely stage regular files and roll back if any replacement fails."""
+    entries = validate_geode_package_zip(archive, target_root)
+    base = os.path.realpath(target_root)
+    stage = tempfile.mkdtemp(prefix=".geodesync-geode-stage-", dir=base)
+    incoming = os.path.join(stage, "incoming")
+    previous = os.path.join(stage, "previous")
+    installed = []
+    try:
+        for info, destination in entries:
+            relative = os.path.relpath(destination, base)
+            staged_file = os.path.join(incoming, relative)
+            os.makedirs(os.path.dirname(staged_file), exist_ok=True)
+            with archive.open(info, "r") as source, open(staged_file, "wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            mode = (info.external_attr >> 16) & 0o777
+            if mode:
+                os.chmod(staged_file, mode & 0o755)
+
+        for _info, destination in entries:
+            if os.path.lexists(destination) and not os.path.isfile(destination):
+                raise ValueError("The Geode package conflicts with a non-file in the game folder.")
+            relative = os.path.relpath(destination, base)
+            staged_file = os.path.join(incoming, relative)
+            backup_file = os.path.join(previous, relative)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            had_previous = os.path.isfile(destination)
+            if had_previous:
+                os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+                os.replace(destination, backup_file)
+            try:
+                os.replace(staged_file, destination)
+            except Exception:
+                if had_previous and os.path.exists(backup_file):
+                    os.replace(backup_file, destination)
+                raise
+            installed.append((destination, backup_file if had_previous else None))
+    except Exception:
+        for destination, backup_file in reversed(installed):
+            try:
+                if os.path.lexists(destination):
+                    os.remove(destination)
+                if backup_file and os.path.exists(backup_file):
+                    os.replace(backup_file, destination)
+            except OSError:
+                pass
+        raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def verify_release_asset_digest(asset, data, label):
+    digest = str(asset.get("digest") or "")
+    if not digest.startswith("sha256:") or len(digest) != 71:
+        raise ValueError(f"GitHub did not provide a usable SHA-256 digest for {label}.")
+    expected = digest[7:].lower()
+    if any(char not in "0123456789abcdef" for char in expected):
+        raise ValueError(f"GitHub provided an invalid SHA-256 digest for {label}.")
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError(f"The downloaded {label} failed its SHA-256 integrity check.")
+
+
+def is_safe_geode_mod_id(mod_id):
+    """Accept Geode's dotted author.mod identifiers, never filesystem paths."""
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", str(mod_id or "")))
 
 
 def select_macos_update_asset(release, architecture=None):
@@ -1564,10 +1728,7 @@ class GDManager:
         try:
             with open(gm_path, "rb") as f:
                 raw = f.read()
-            dec = zlib.decompress(
-                base64.b64decode(bytes(b ^ 11 for b in raw).replace(b"-", b"+").replace(b"_", b"/")),
-                15 + 32,
-            ).decode("utf-8", errors="ignore")
+            dec = decode_geometry_dash_save(raw).decode("utf-8", errors="ignore")
 
             name_m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
             player_name = name_m.group(1) if name_m else "Player"
@@ -1698,6 +1859,8 @@ class GDManager:
         """
         if not self.gd_path or not issue.get("download_url"):
             return False, "Invalid issue or missing download URL."
+        if not is_safe_geode_mod_id(issue.get("id")):
+            return False, "Invalid Geode mod identifier."
         try:
             req = urllib.request.Request(issue["download_url"], headers={"User-Agent": "GeodeSync-Client"})
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -1738,7 +1901,7 @@ class GDManager:
                             mid = meta.get("id")
                             mver = meta.get("version", "").lstrip("v")
                             mname = meta.get("name", mid)
-                            if mid and mver:
+                            if is_safe_geode_mod_id(mid) and mver:
                                 installed.append({
                                     "id": mid,
                                     "name": mname,
@@ -1766,6 +1929,14 @@ class GDManager:
 
         def query_mod(item):
             mid = item["id"]
+            if not is_safe_geode_mod_id(mid):
+                completed[0] += 1
+                if progress_callback:
+                    try:
+                        progress_callback(completed[0], total)
+                    except Exception:
+                        pass
+                return None
             url = f"https://api.geode-sdk.org/v1/mods/{mid}"
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "GeodeSync-Client"})
@@ -1820,6 +1991,8 @@ class GDManager:
         """
         if not self.gd_path or not item.get("download_url"):
             return False, "Missing download URL."
+        if not is_safe_geode_mod_id(item.get("id")):
+            return False, "Invalid Geode mod identifier."
         try:
             req = urllib.request.Request(item["download_url"], headers={"User-Agent": "GeodeSync-Client"})
             with urllib.request.urlopen(req, timeout=25) as resp:
@@ -1851,10 +2024,7 @@ class GDManager:
         try:
             with open(gm_path, "rb") as f:
                 raw = f.read()
-            dec = zlib.decompress(
-                base64.b64decode(bytes(b ^ 11 for b in raw).replace(b"-", b"+").replace(b"_", b"/")),
-                15 + 32,
-            ).decode("utf-8", errors="ignore")
+            dec = decode_geometry_dash_save(raw).decode("utf-8", errors="ignore")
 
             name_m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
             player_name = name_m.group(1) if name_m else "Player"
@@ -2493,7 +2663,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Install update", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="View release", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -4256,13 +4426,13 @@ class GeodeSyncApp(tk.Tk):
                 self.update_banner.pack(fill="x", side="top")
         except Exception:
             self.update_banner.pack(fill="x", side="top")
-        self.log(f"New update detected: v{new_ver}! Click 'Install update' to update automatically.", "SUCCESS")
+        self.log(f"New update detected: v{new_ver}. Open the official release page to review and download it.", "SUCCESS")
         if prompt:
             def ask():
                 try:
                     if messagebox.askyesno(
                         "GeodeSync Update Available",
-                        f"A new version of GeodeSync (v{new_ver}) is available!\n\nWould you like to install the update automatically now?",
+                        f"A new version of GeodeSync (v{new_ver}) is available.\n\nOpen the official GitHub release page to review the files and download manually?",
                         parent=self,
                     ):
                         self.start_self_update()
@@ -4288,7 +4458,7 @@ class GeodeSyncApp(tk.Tk):
         threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
-        url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases"
+        url = official_release_page(self.latest_release_url)
         webbrowser.open(url)
 
     # ==========================================
@@ -4310,9 +4480,7 @@ class GeodeSyncApp(tk.Tk):
             try:
                 with open(path, "rb") as f:
                     raw = f.read()
-                xored = bytes(b ^ 11 for b in raw)
-                decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
-                decomp = zlib.decompress(decoded, 15 + 32)
+                decomp = decode_geometry_dash_save(raw)
                 if b"<plist" in decomp:
                     return True, sz, "Healthy"
                 return False, sz, "Invalid XML structure"
@@ -4680,86 +4848,15 @@ class GeodeSyncApp(tk.Tk):
     # v1.1.2 PRO FEATURE: 1-CLICK IN-APP SELF-UPDATER
     # ==========================================
     def start_self_update(self):
-        if not self.latest_release_url:
-            messagebox.showinfo("Update Check", "GeodeSync is currently up to date!")
-            return
-
-        threading.Thread(target=self._run_self_update, daemon=True).start()
-
-    def _run_self_update(self):
-        if IS_MAC:
-            self._run_macos_self_update()
-            return
-
-        self.log("Downloading latest GeodeSync update from GitHub...", "INFO")
-        self._schedule_update_progress("Contacting GitHub for new release binary...", 20)
-
-        try:
-            data = fetch_latest_published_release(timeout=12)
-            tag = str(data.get("tag_name", "")).strip()
-            if not is_newer_app_version(tag, APP_VERSION):
-                raise ValueError("GitHub did not report a newer GeodeSync release.")
-            self.latest_release_url = data.get("html_url", self.latest_release_url)
-            asset_url = None
-            for asset in data.get("assets", []):
-                if asset.get("name") == "GeodeSync.exe":
-                    asset_url = asset.get("browser_download_url")
-                    break
-
-            if not asset_url:
-                raise Exception("GeodeSync.exe asset not found in release.")
-
-            my_exe = sys.executable if getattr(sys, 'frozen', False) else None
-            if not my_exe or not os.path.exists(my_exe):
-                webbrowser.open(self.latest_release_url)
-                self._schedule_update_progress("", hide=True)
-                return
-
-            exe_dir = os.path.dirname(my_exe)
-            temp_exe = os.path.join(exe_dir, "GeodeSync_update.exe")
-
-            self._schedule_update_progress("Downloading new GeodeSync executable...", 35)
-            req = urllib.request.Request(asset_url, headers={"User-Agent": "GeodeSync-Client"})
-            with urllib.request.urlopen(req) as resp, open(temp_exe, "wb") as out_file:
-                total_bytes = int(resp.headers.get("Content-Length", 0))
-                downloaded = 0
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk:
-                        break
-                    out_file.write(chunk)
-                    downloaded += len(chunk)
-                    if total_bytes > 0:
-                        pct = 35 + int((downloaded / total_bytes) * 55)
-                        mb = round(downloaded / (1024 * 1024), 1)
-                        total_mb = round(total_bytes / (1024 * 1024), 1)
-                        self._schedule_update_progress(f"Downloading update: {mb} / {total_mb} MB ({pct}%)", pct)
-
-            self._schedule_update_progress("Restarting into updated version...", 100)
-
-            bat_path = os.path.join(exe_dir, "_geodesync_swap.bat")
-            with open(bat_path, "w") as f:
-                f.write(
-                    f"@echo off\r\n"
-                    f"timeout /t 1 /nobreak >nul\r\n"
-                    f":retry\r\n"
-                    f"move /y \"{temp_exe}\" \"{my_exe}\" >nul 2>&1\r\n"
-                    f"if errorlevel 1 (\r\n"
-                    f"    timeout /t 1 /nobreak >nul\r\n"
-                    f"    goto retry\r\n"
-                    f")\r\n"
-                    f"powershell -NoProfile -Command \"Unblock-File -Path '{my_exe}' -ErrorAction SilentlyContinue\"\r\n"
-                    f"start \"\" \"{my_exe}\"\r\n"
-                    f"del \"%~f0\"\r\n"
-                )
-
-            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000)
-            self.after(200, lambda: (self.destroy(), sys.exit(0)))
-
-        except Exception as e:
-            self.log(f"Self-update error: {e}. Opening GitHub release...", "WARN")
-            self._schedule_update_progress("", hide=True)
-            webbrowser.open(self.latest_release_url)
+        """Open the official release page; installs remain an explicit user action."""
+        release_url = official_release_page(self.latest_release_url)
+        self.latest_release_url = release_url
+        self.log(
+            "Opening the official GitHub release page. Automatic installation is disabled "
+            "until releases can be independently signature-verified.",
+            "INFO",
+        )
+        webbrowser.open(release_url)
 
     def _schedule_update_progress(self, text, value=None, hide=False):
         def update_ui():
@@ -4779,179 +4876,6 @@ class GeodeSyncApp(tk.Tk):
             self.after(0, update_ui)
         except Exception:
             pass
-
-    def _run_macos_self_update(self):
-        """Download, verify and atomically replace this installed .app."""
-        workspace = None
-        release_url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases/latest"
-        try:
-            if not getattr(sys, "frozen", False):
-                self._schedule_update_progress("Open GitHub to install the packaged Mac app…", hide=True)
-                self.after(0, lambda: webbrowser.open(release_url))
-                return
-
-            self._schedule_update_progress("Checking the Mac update…", 5)
-            release = fetch_latest_published_release(timeout=15)
-
-            tag = str(release.get("tag_name", "")).strip()
-            release_url = release.get("html_url", release_url)
-            self.latest_release_url = release_url
-            version = tag.lstrip("v")
-            if not is_newer_app_version(version, APP_VERSION):
-                raise ValueError("GitHub did not report a newer GeodeSync release.")
-
-            asset = select_macos_update_asset(release)
-            asset_size = int(asset["size"])
-            workspace = tempfile.mkdtemp(prefix="geodesync-update-")
-            archive_path = os.path.join(workspace, asset["name"])
-            self._schedule_update_progress("Downloading the matching Mac app…", 15)
-            request = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "GeodeSync-Client"})
-            digest = hashlib.sha256()
-            received = 0
-            with urllib.request.urlopen(request, timeout=45) as response, open(archive_path, "wb") as output:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    received += len(chunk)
-                    if received > MACOS_UPDATE_MAX_BYTES:
-                        raise ValueError("The Mac update download exceeded the allowed size.")
-                    output.write(chunk)
-                    digest.update(chunk)
-                    progress = min(65, 15 + int(50 * received / max(asset_size, 1)))
-                    self._schedule_update_progress("Downloading the matching Mac app…", progress)
-
-            verify_macos_update_digest(asset.get("digest"), digest.hexdigest())
-
-            self._schedule_update_progress("Checking the app bundle…", 72)
-            with zipfile.ZipFile(archive_path) as archive:
-                validate_macos_update_zip(archive)
-            extracted = os.path.join(workspace, "extracted")
-            os.makedirs(extracted, exist_ok=True)
-            subprocess.run(
-                ["/usr/bin/ditto", "-x", "-k", "--sequesterRsrc", archive_path, extracted],
-                check=True,
-                timeout=180,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            staged_app = os.path.join(extracted, "GeodeSync.app")
-            new_executable = os.path.join(staged_app, "Contents", "MacOS", "GeodeSync")
-            new_plist = os.path.join(staged_app, "Contents", "Info.plist")
-            if not os.path.isfile(new_executable) or not os.path.isfile(new_plist):
-                raise ValueError("The downloaded ZIP does not contain a complete GeodeSync app.")
-            with open(new_plist, "rb") as plist_file:
-                new_metadata = plistlib.load(plist_file)
-            if new_metadata.get("CFBundleIdentifier") != "com.willmakesrandomshit.geodesync":
-                raise ValueError("The downloaded app has the wrong bundle identity.")
-            if str(new_metadata.get("CFBundleShortVersionString", "")) != version:
-                raise ValueError("The downloaded app version does not match its GitHub release tag.")
-            try:
-                subprocess.run(
-                    ["/usr/bin/codesign", "--verify", "--deep", "--strict", staged_app],
-                    check=True,
-                    timeout=60,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                )
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                pass
-
-            executable = os.path.abspath(sys.executable)
-            app_path = None
-            parent = os.path.dirname(executable)
-            while parent and parent != os.path.dirname(parent):
-                if parent.endswith(".app") and os.path.isdir(parent):
-                    app_path = parent
-                    break
-                parent = os.path.dirname(parent)
-            if not app_path:
-                app_path = os.path.dirname(os.path.dirname(os.path.dirname(executable)))
-            app_path = os.path.abspath(app_path)
-            if not app_path.endswith(".app") or not os.path.isdir(app_path):
-                raise ValueError("Could not locate the installed GeodeSync.app to update it.")
-            parent_dir = os.path.dirname(app_path)
-            if not os.access(parent_dir, os.W_OK):
-                raise PermissionError(
-                    "This app is installed in a protected folder. Move GeodeSync.app to your personal "
-                    "Applications folder, then use Update Now again."
-                )
-
-            app_parent = os.path.expanduser("~/Library/Application Support/GeodeSync")
-            os.makedirs(app_parent, exist_ok=True)
-            helper_path = os.path.join(app_parent, "apply-update.sh")
-            incoming_path = os.path.join(parent_dir, ".GeodeSync.app.update")
-            backup_path = os.path.join(parent_dir, ".GeodeSync.app.previous")
-            log_path = os.path.expanduser("~/Library/Logs/GeodeSync-updater.log")
-            app_path_q = shlex.quote(app_path)
-            incoming_q = shlex.quote(incoming_path)
-            backup_q = shlex.quote(backup_path)
-            staged_q = shlex.quote(staged_app)
-            workspace_q = shlex.quote(workspace)
-            helper_q = shlex.quote(helper_path)
-            log_q = shlex.quote(log_path)
-            helper = f"""#!/bin/sh
-set -u
-TARGET={app_path_q}
-INCOMING={incoming_q}
-BACKUP={backup_q}
-STAGED={staged_q}
-WORKSPACE={workspace_q}
-HELPER={helper_q}
-LOG={log_q}
-PID={os.getpid()}
-while /bin/kill -0 "$PID" 2>/dev/null; do /bin/sleep 0.25; done
-if ! /usr/bin/ditto "$STAGED" "$INCOMING" >>"$LOG" 2>&1; then
-  /bin/rm -rf "$INCOMING" "$WORKSPACE"
-  exit 1
-fi
-/bin/rm -rf "$BACKUP"
-if [ -e "$TARGET" ]; then /bin/mv "$TARGET" "$BACKUP"; fi
-if ! /bin/mv "$INCOMING" "$TARGET"; then
-  if [ -e "$BACKUP" ]; then /bin/mv "$BACKUP" "$TARGET"; fi
-  /bin/rm -rf "$INCOMING" "$WORKSPACE"
-  exit 1
-fi
-/usr/bin/xattr -cr "$TARGET" 2>/dev/null || true
-if ! /usr/bin/open "$TARGET" >>"$LOG" 2>&1; then
-  /bin/mv "$TARGET" "$INCOMING"
-  if [ -e "$BACKUP" ]; then /bin/mv "$BACKUP" "$TARGET"; fi
-  /bin/rm -rf "$INCOMING" "$WORKSPACE"
-  exit 1
-fi
-/bin/rm -rf "$BACKUP" "$WORKSPACE"
-/bin/rm -f "$HELPER"
-"""
-            with open(helper_path, "w", encoding="utf-8") as helper_file:
-                helper_file.write(helper)
-            os.chmod(helper_path, 0o700)
-            self._schedule_update_progress("Installing update and reopening GeodeSync…", 95)
-            subprocess.Popen(
-                ["/bin/sh", helper_path],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            self.after(0, self.destroy)
-        except Exception as exc:
-            if workspace:
-                shutil.rmtree(workspace, ignore_errors=True)
-            message = str(exc)
-            def report_failure():
-                try:
-                    self.progress_frame.pack_forget()
-                    messagebox.showerror(
-                        "Mac update not installed",
-                        f"{message}\n\nYour current app was left in place. Open GitHub Releases to download manually?",
-                    )
-                    webbrowser.open(release_url)
-                except Exception:
-                    pass
-            try:
-                self.after(0, report_failure)
-            except Exception:
-                pass
 
     def _remote_update_monitor_thread(self):
         while getattr(self, "_monitor_running", True):
@@ -5240,9 +5164,7 @@ fi
         try:
             with open(gm_path, "rb") as f:
                 raw = f.read()
-            xored = bytes(b ^ 11 for b in raw)
-            decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
-            decomp = zlib.decompress(decoded, 15 + 32).decode("utf-8", errors="ignore")
+            decomp = decode_geometry_dash_save(raw).decode("utf-8", errors="ignore")
             m = re.search(r"<k>customFPSTarget</k><[ri]>([0-9.]+)</[ri]>", decomp)
             if m:
                 current_fps = str(int(float(m.group(1))))
@@ -5306,18 +5228,14 @@ fi
                 with open(gm_path, "rb") as f:
                     raw = f.read()
                 shutil.copy2(gm_path, gm_path + ".fps_bak")
-                xored = bytes(b ^ 11 for b in raw)
-                decoded = base64.b64decode(xored.replace(b'-', b'+').replace(b'_', b'/'))
-                decomp = zlib.decompress(decoded, 15 + 32).decode("utf-8", errors="ignore")
+                decomp = decode_geometry_dash_save(raw).decode("utf-8", errors="ignore")
 
                 if "<k>customFPSTarget</k>" in decomp:
                     decomp = re.sub(r"<k>customFPSTarget</k><[ri]>[0-9.]+</[ri]>", f"<k>customFPSTarget</k><r>{target}</r>", decomp)
                 else:
                     decomp = decomp.replace("<dict>", f"<dict><k>customFPSTarget</k><r>{target}</r>", 1)
 
-                re_comp = zlib.compress(decomp.encode("utf-8"))
-                re_b64 = base64.b64encode(re_comp).replace(b'+', b'-').replace(b'/', b'_')
-                re_raw = bytes(b ^ 11 for b in re_b64)
+                re_raw = encode_geometry_dash_save(decomp.encode("utf-8"))
 
                 with open(gm_path, "wb") as f:
                     f.write(re_raw)

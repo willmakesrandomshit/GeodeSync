@@ -1,20 +1,20 @@
-# GeodeSync v2.3.0 — companion tools and safer setup
+# GeodeSync v2.3.1 — security and trust update
 
-GeodeSync v2.3.0 expands the Geometry Dash companion dashboard with tools for mod maintenance, save insight, customization, and troubleshooting.
+This release hardens GeodeSync’s install and update paths and documents what the app does with game files and network access.
 
-## New companion tools
+## Security and reliability
 
-- **Update Mods:** Check installed Geode mods against the Geode index and update selected mods or the available set. A compatibility guard filters a known-broken ImagePlus build for the supported game version.
-- **Demon Tracker:** Read local Geometry Dash progress and active level grinds, with an option to copy a shareable summary.
-- **Texture Packs:** Back up the original `Resources` folder before installing a selected pack, then restore the saved vanilla textures from the tool.
-- **Keybind Doctor:** Inspect readable Geode configuration files for overlapping mod shortcuts.
+- Validate Geode packages before installation; reject unsafe archive paths, links, special files, duplicate destinations, and oversized archives. Stage changes and roll them back if installation fails.
+- Verify the official Geode release destination, download size, and published asset digest before using a package.
+- Validate local mod IDs before using them in network requests or filesystem paths.
+- Replace repeated Geometry Dash save decoding with documented, tested encode/decode helpers.
+- Remove automatic executable self-replacement because the release does not yet have an independent publisher-signature verification setup. The update control now opens the official Releases page.
+- Stop stripping macOS extended attributes and stop running Windows `Unblock-File`; preserve operating-system security markings.
+- Generate a SHA-256 checksum list for release downloads.
+- Add security, privacy, build, release-verification, and user recovery documentation.
 
-## Dashboard and reliability
+## Compatibility and limits
 
-- Keep the player card, game and Geode status, Steam update lock, and primary setup action together on the dashboard.
-- Search installed mods and enable or disable them from the mod manager.
-- Keep version switching staged, validated, and recoverable, with detected save backups before file changes.
-- Complete dashboard startup when Geode is installed but its version cannot be read; show an installed/unknown status instead of treating it as missing.
-- Export a local diagnostic report for support. Review the report before sharing it.
+GeodeSync remains a companion for Steam installations of Geometry Dash. Review confirmations before changing game files and back up important saves. Release builds are produced by GitHub Actions for Windows, macOS (Apple silicon and Intel), and Linux. A build target does not prove compatibility on every operating-system version or device.
 
-Features depend on the platform and the installed GeodeSync build. Back up important saves and review confirmation prompts before changing game, mod, or texture files. Check the [user guide](USER_GUIDE.md) for setup and recovery instructions.
+This release is not Authenticode-signed or macOS-notarized unless the required publisher credentials are configured in the release workflow. Check the asset checksums and read [SECURITY.md](SECURITY.md) for verification details.

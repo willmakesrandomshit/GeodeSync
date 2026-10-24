@@ -110,11 +110,8 @@ def main() -> None:
     with info_plist.open("wb") as stream:
         plistlib.dump(metadata, stream, sort_keys=False)
 
-    # Remove ordinary Finder metadata from the bundle. Some newer macOS
-    # versions attach a system-managed provenance attribute that xattr cannot
-    # actually remove; signing is therefore handled only by the release job
-    # when Developer ID credentials are configured.
-    subprocess.run(["xattr", "-cr", str(app)], check=True)
+    # Preserve extended attributes. In particular, do not strip quarantine or
+    # provenance metadata: macOS must remain in control of Gatekeeper checks.
     print(f"Built self-contained {arch} app: {app}")
 
 
