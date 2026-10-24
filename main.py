@@ -2124,6 +2124,7 @@ class GeodeSyncApp(tk.Tk):
             self.lock_badge.config(text="Unlocked (Normal)", fg=UI["amber"], bg=UI["panel_alt"])
 
         geode_ver = self.mgr.get_installed_geode_version()
+        has_geode = bool(geode_ver or self.mgr.has_geode())
         if hasattr(self, "discord_rpc"):
             g_tag = geode_ver or "v5.x"
             status_desc = f"Geode {g_tag} · Mods Protected 🛡️" if is_locked else f"Geode {g_tag} · Ready"
