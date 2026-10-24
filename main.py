@@ -59,7 +59,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1668,7 +1668,7 @@ class GeodeSyncApp(tk.Tk):
             self.mgr.gd_path = os.path.abspath(stored_game_path)
             self.mgr.manifest_path = self.mgr.get_manifest_path()
         self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
-        self.sounds_enabled = bool(self.settings.get("sounds_enabled", True))
+        self.sounds_enabled = bool(self.settings.get("sounds_enabled", False))
         self.discord_rpc_enabled = bool(self.settings.get("discord_rpc_enabled", True))
         self.run_in_bg_enabled = bool(self.settings.get("run_in_bg_enabled", True))
         self.discord_rpc = DiscordRPC(enabled=self.discord_rpc_enabled)
@@ -2029,7 +2029,9 @@ class GeodeSyncApp(tk.Tk):
         add_tool("📌 Desktop shortcut", self.create_desktop_shortcut, color=UI["lime"], row=3, column=2)
         add_tool("🔄 Check updates", self.manual_check_updates, color=UI["lime"], row=4, column=0, bold=True)
         add_tool("📋 Export report", self.export_support_report, color=UI["amber"], row=4, column=1)
-        self.sounds_btn = add_tool("🔊 GD Sounds: ON", self.toggle_sounds, color=UI["lime"], row=4, column=2)
+        sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
+        sounds_color = UI["lime"] if self.sounds_enabled else UI["muted"]
+        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=4, column=2)
         self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=5, column=0)
         add_tool("📢 Share GeodeSync", self.share_geodesync, color=UI["lime"], row=5, column=1, bold=True)
         add_tool("⭐ Star on GitHub", lambda: open_url_or_path(f"https://github.com/{GITHUB_REPO}"), color=UI["amber"], row=5, column=2)
@@ -2108,7 +2110,7 @@ class GeodeSyncApp(tk.Tk):
             pass
 
     def play_ding(self):
-        if not getattr(self, "sounds_enabled", True):
+        if not getattr(self, "sounds_enabled", False):
             return
         if IS_WIN and winsound:
             def _play():
@@ -4102,7 +4104,7 @@ fi
             messagebox.showerror("Error", f"Could not change Steam update lock:\n{e}")
 
     def toggle_sounds(self):
-        self.sounds_enabled = not getattr(self, "sounds_enabled", True)
+        self.sounds_enabled = not getattr(self, "sounds_enabled", False)
         if self.sounds_enabled:
             self.sounds_btn.config(text="🔊 GD Sounds: ON", fg=UI["lime"])
             self.play_ding()
