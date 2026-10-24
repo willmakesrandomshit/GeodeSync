@@ -1439,7 +1439,7 @@ class GeodeSyncApp(tk.Tk):
                 "The recovery files have been kept in the Geometry Dash folder. Export a support report before trying another switch.",
             )
 
-        threading.Thread(target=self.check_remote_updates, daemon=True).start()
+        threading.Thread(target=self._remote_update_monitor_thread, daemon=True).start()
         threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
 
     @staticmethod
@@ -3638,6 +3638,14 @@ fi
                 self.after(0, report_failure)
             except Exception:
                 pass
+
+    def _remote_update_monitor_thread(self):
+        while getattr(self, "_monitor_running", True):
+            try:
+                self.check_remote_updates()
+            except Exception:
+                pass
+            time.sleep(120)
 
     # ==========================================
     # v1.1.3 PRO FEATURE: AUTO-BACKUP ON GD EXIT
