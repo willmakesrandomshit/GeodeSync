@@ -21,14 +21,14 @@ CHECK_INTERVAL_SECONDS = 180  # check every 3 minutes
 DISCORD_WEBHOOK_URL = os.environ.get("GEODESYNC_DISCORD_WEBHOOK", "")
 
 
-def send_discord_alert(title, description, color=0x8b5cf6, ping=True):
+def send_discord_alert(title, description, color=0x8b5cf6, ping=False):
     if not DISCORD_WEBHOOK_URL:
         print(f"[Watchdog Alert] {title}\n{description}")
         return
 
-    content = "@everyone" if ping else ""
     payload = {
-        "content": content,
+        "content": "",
+        "allowed_mentions": {"parse": []},
         "embeds": [
             {
                 "title": f"⚡ {title}",

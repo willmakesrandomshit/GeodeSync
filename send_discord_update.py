@@ -31,7 +31,7 @@ def get_webhook_url():
     return None
 
 
-def send_update(version="2.2.1", title=None, notes=None, ping=True):
+def send_update(version="2.2.1", title=None, notes=None, ping=False):
     webhook_url = get_webhook_url()
     if not webhook_url:
         print(f"[!] No Discord webhook URL configured for channel {CHANNEL_ID}.")
@@ -44,7 +44,8 @@ def send_update(version="2.2.1", title=None, notes=None, ping=True):
     desc = notes or "A new update for GeodeSync is now available with automatic fixes and improvements."
 
     payload = {
-        "content": "@everyone\n⚡ **New GeodeSync Update Released!**" if ping else "⚡ **New GeodeSync Update Released!**",
+        "content": "⚡ **New GeodeSync Update Released!**",
+        "allowed_mentions": {"parse": []},
         "embeds": [
             {
                 "title": f"🚀 {display_title}",

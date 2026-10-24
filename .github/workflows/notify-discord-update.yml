@@ -35,7 +35,8 @@ jobs:
               body = body[:1800] + "... [Read full release on GitHub]"
 
           payload = {
-              "content": "@everyone\n⚡ **New GeodeSync Update Released!**",
+              "content": "⚡ **New GeodeSync Update Released!**",
+              "allowed_mentions": {"parse": []},
               "embeds": [
                   {
                       "title": f"🚀 {title}",
