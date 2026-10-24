@@ -31,7 +31,7 @@ def get_webhook_url():
     return None
 
 
-def send_update(version="2.2.1", title=None, notes=None, ping=False):
+def send_update(version="2.3.0", title=None, notes=None, ping=False):
     webhook_url = get_webhook_url()
     if not webhook_url:
         print(f"[!] No Discord webhook URL configured for channel {CHANNEL_ID}.")
@@ -88,10 +88,10 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Read latest release notes
-    notes_file = os.path.join(os.path.dirname(__file__), "release_notes_v221.md")
+    notes_file = os.path.join(os.path.dirname(__file__), "release_notes_v230.md")
     notes = None
     if os.path.exists(notes_file):
         with open(notes_file, "r", encoding="utf-8") as f:
             notes = f.read()
 
-    send_update(version="2.2.1", title="GeodeSync v2.2.1 • Entry Point Crash Auto-Repair", notes=notes)
+    send_update(version="2.3.0", title="GeodeSync v2.3.0 • Power Tools & Demon Tracker", notes=notes)

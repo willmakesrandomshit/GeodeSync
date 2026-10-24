@@ -59,7 +59,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1716,6 +1716,465 @@ class GDManager:
         except Exception as e:
             return False, str(e)
 
+    def check_outdated_mods(self, progress_callback=None):
+        """
+        Scans all installed .geode mods and checks for updates against the Geode SDK Index API
+        (api.geode-sdk.org) using concurrent requests. Skips known broken versions (e.g. prevter.imageplus v1.1.1).
+        """
+        if not self.gd_path:
+            return []
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        if not os.path.isdir(mods_dir):
+            return []
+
+        installed = []
+        for f in os.listdir(mods_dir):
+            if f.endswith(".geode"):
+                fp = os.path.join(mods_dir, f)
+                try:
+                    with zipfile.ZipFile(fp, "r") as zf:
+                        if "mod.json" in zf.namelist():
+                            meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                            mid = meta.get("id")
+                            mver = meta.get("version", "").lstrip("v")
+                            mname = meta.get("name", mid)
+                            if mid and mver:
+                                installed.append({
+                                    "id": mid,
+                                    "name": mname,
+                                    "current_version": mver,
+                                    "file_path": fp
+                                })
+                except Exception:
+                    pass
+
+        if not installed:
+            return []
+
+        def parse_v(v_str):
+            nums = []
+            for part in str(v_str).lstrip("v").split("."):
+                m = re.match(r"^(\d+)", part)
+                nums.append(int(m.group(1)) if m else 0)
+            while len(nums) < 3:
+                nums.append(0)
+            return tuple(nums[:3])
+
+        outdated = []
+        total = len(installed)
+        completed = [0]
+
+        def query_mod(item):
+            mid = item["id"]
+            url = f"https://api.geode-sdk.org/v1/mods/{mid}"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "GeodeSync-Client"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                payload = data.get("payload", {})
+                versions = payload.get("versions", [])
+                if versions:
+                    for v_entry in versions:
+                        v_str = str(v_entry.get("version", "")).lstrip("v")
+                        # CRITICAL SAFEGUARD: Avoid imageplus 1.1.1 crash on GD 2.2081
+                        if mid == "prevter.imageplus" and v_str == "1.1.1":
+                            continue
+                        cur_tuple = parse_v(item["current_version"])
+                        latest_tuple = parse_v(v_str)
+                        if latest_tuple > cur_tuple:
+                            dl_url = v_entry.get("download", {}).get("url") or f"https://api.geode-sdk.org/v1/mods/{mid}/versions/{v_str}/download"
+                            return {
+                                "id": mid,
+                                "name": item["name"],
+                                "current_version": item["current_version"],
+                                "latest_version": v_str,
+                                "download_url": dl_url,
+                                "file_path": item["file_path"],
+                                "summary": payload.get("about", "") or payload.get("description", "")
+                            }
+                        break
+            except Exception:
+                pass
+            finally:
+                completed[0] += 1
+                if progress_callback:
+                    try:
+                        progress_callback(completed[0], total)
+                    except Exception:
+                        pass
+            return None
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            results = ex.map(query_mod, installed)
+            for r in results:
+                if r:
+                    outdated.append(r)
+
+        return outdated
+
+    def update_single_mod(self, item):
+        """
+        Downloads the updated .geode file for a mod, writes it to geode/mods/,
+        and purges its stale unzipped cache.
+        """
+        if not self.gd_path or not item.get("download_url"):
+            return False, "Missing download URL."
+        try:
+            req = urllib.request.Request(item["download_url"], headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = resp.read()
+
+            file_path = item["file_path"]
+            with open(file_path, "wb") as f:
+                f.write(data)
+
+            unzipped_dir = os.path.join(self.gd_path, "geode", "unzipped", item["id"])
+            if os.path.exists(unzipped_dir):
+                shutil.rmtree(unzipped_dir, ignore_errors=True)
+
+            return True, f"Updated {item['name']} to v{item['latest_version']}!"
+        except Exception as e:
+            return False, str(e)
+
+    def get_demon_and_grind_data(self):
+        """
+        Parses CCGameManager.dat to extract full progression stats, completed demons,
+        and active hard grinds (levels with normal progress between 10% and 99%).
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return None
+        gm_path = os.path.join(save_dir, "CCGameManager.dat")
+        if not os.path.exists(gm_path):
+            return None
+        try:
+            with open(gm_path, "rb") as f:
+                raw = f.read()
+            dec = zlib.decompress(
+                base64.b64decode(bytes(b ^ 11 for b in raw).replace(b"-", b"+").replace(b"_", b"/")),
+                15 + 32,
+            ).decode("utf-8", errors="ignore")
+
+            name_m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
+            player_name = name_m.group(1) if name_m else "Player"
+
+            stats = {}
+            gs_idx = dec.find("GS_value")
+            if gs_idx != -1:
+                chunk = dec[gs_idx : gs_idx + 4000]
+                for m in re.finditer(r"<k>([0-9]+)</k><s>([0-9]+)</s>", chunk):
+                    stats[int(m.group(1))] = int(m.group(2))
+
+            grinds = []
+            demons_completed = []
+
+            k2_indices = [m.start() for m in re.finditer(r"<k>k2</k><s>", dec)]
+            seen_names = set()
+
+            for idx in k2_indices:
+                sub = dec[idx : idx + 1200]
+                dict_end = sub.find("</dict>")
+                if dict_end != -1:
+                    sub = sub[:dict_end]
+
+                name_match = re.search(r"<k>k2</k><s>([^<]+)</s>", sub)
+                if not name_match:
+                    continue
+                lvl_name = name_match.group(1).strip()
+                if not lvl_name or lvl_name in seen_names:
+                    continue
+                seen_names.add(lvl_name)
+
+                pct_match = re.search(r"<k>k19</k><i>([0-9]+)</i>", sub)
+                if not pct_match:
+                    continue
+                percent = int(pct_match.group(1))
+
+                auth_match = re.search(r"<k>k5</k><s>([^<]+)</s>", sub)
+                author = auth_match.group(1).strip() if auth_match else "Unknown"
+
+                prac_match = re.search(r"<k>k21</k><i>([0-9]+)</i>", sub)
+                practice = int(prac_match.group(1)) if prac_match else 0
+
+                att_match = re.search(r"<k>k18</k><i>([0-9]+)</i>", sub)
+                attempts = int(att_match.group(1)) if att_match else 0
+
+                is_demon = ("<k>k25</k><t/>" in sub) or ("<k>k25</k><t />" in sub)
+                stars_match = re.search(r"<k>k26</k><i>([0-9]+)</i>", sub)
+                stars = int(stars_match.group(1)) if stars_match else (10 if is_demon else 0)
+
+                lvl_info = {
+                    "name": lvl_name,
+                    "author": author,
+                    "percent": percent,
+                    "practice": practice,
+                    "attempts": attempts,
+                    "is_demon": is_demon,
+                    "stars": stars
+                }
+
+                if percent == 100:
+                    if is_demon or stars >= 10:
+                        demons_completed.append(lvl_info)
+                elif percent >= 15:
+                    grinds.append(lvl_info)
+
+            grinds.sort(key=lambda x: (x["percent"], x["practice"]), reverse=True)
+            demons_completed.sort(key=lambda x: x["name"].lower())
+
+            return {
+                "player_name": player_name,
+                "stars": stats.get(6, 0),
+                "demons": stats.get(5, len(demons_completed)),
+                "diamonds": stats.get(13, 0),
+                "coins": stats.get(8, 0),
+                "user_coins": stats.get(12, 0),
+                "orbs": stats.get(14, 0),
+                "moons": stats.get(28, 0),
+                "attempts": stats.get(2, 0),
+                "jumps": stats.get(1, 0),
+                "grinds": grinds[:30],
+                "completed_demons": demons_completed[:50]
+            }
+        except Exception:
+            return None
+
+    def get_keybind_map(self, custom_search_dirs=None):
+        """
+        Inspects all Geode mod configs and local appdata saved settings to extract
+        assigned hotkeys, detecting any potential keybind collisions.
+        """
+        GLFW_KEYS = {
+            32: "Space", 39: "'", 44: ",", 45: "-", 46: ".", 47: "/",
+            48: "0", 49: "1", 50: "2", 51: "3", 52: "4", 53: "5", 54: "6", 55: "7", 56: "8", 57: "9",
+            59: ";", 61: "=", 65: "A", 66: "B", 67: "C", 68: "D", 69: "E", 70: "F", 71: "G",
+            72: "H", 73: "I", 74: "J", 75: "K", 76: "L", 77: "M", 78: "N", 79: "O", 80: "P",
+            81: "Q", 82: "R", 83: "S", 84: "T", 85: "U", 86: "V", 87: "W", 88: "X", 89: "Y", 90: "Z",
+            256: "Escape", 257: "Enter", 258: "Tab", 259: "Backspace", 260: "Insert", 261: "Delete",
+            262: "Right", 263: "Left", 264: "Down", 265: "Up", 290: "F1", 291: "F2", 292: "F3",
+            293: "F4", 294: "F5", 295: "F6", 296: "F7", 297: "F8", 298: "F9", 299: "F10", 300: "F11", 301: "F12"
+        }
+
+        key_map = {}
+        search_dirs = []
+
+        if custom_search_dirs is not None:
+            search_dirs = list(custom_search_dirs)
+        else:
+            local_gd = os.path.expandvars("%LOCALAPPDATA%\\GeometryDash\\geode\\mods") if IS_WIN else None
+            if local_gd and os.path.isdir(local_gd):
+                search_dirs.append(local_gd)
+
+            if self.gd_path:
+                g_cfg = os.path.join(self.gd_path, "geode", "config")
+                if os.path.isdir(g_cfg):
+                    search_dirs.append(g_cfg)
+
+        for base_dir in search_dirs:
+            for root, dirs, files in os.walk(base_dir):
+                for f in files:
+                    if f in ("settings.json", "saved.json", "config.json"):
+                        p = os.path.join(root, f)
+                        mod_id = os.path.basename(os.path.dirname(p))
+                        try:
+                            with open(p, "r", encoding="utf-8", errors="ignore") as fp:
+                                data = json.load(fp)
+
+                            def extract(obj, prefix=""):
+                                if isinstance(obj, dict):
+                                    if "key" in obj and isinstance(obj["key"], int) and obj["key"] > 0:
+                                        k_code = obj["key"]
+                                        k_name = GLFW_KEYS.get(k_code, f"Key {k_code}")
+                                        mods = obj.get("modifiers", 0)
+                                        mod_suffix = ""
+                                        if mods & 1: mod_suffix += "+Shift"
+                                        if mods & 2: mod_suffix += "+Ctrl"
+                                        if mods & 4: mod_suffix += "+Alt"
+                                        full_k = k_name + mod_suffix
+                                        key_map.setdefault(full_k, []).append({"mod": mod_id, "action": prefix})
+                                    else:
+                                        for k, v in obj.items():
+                                            extract(v, f"{prefix}.{k}" if prefix else k)
+                                elif isinstance(obj, list):
+                                    for item in obj:
+                                        extract(item, prefix)
+
+                            extract(data)
+                        except Exception:
+                            pass
+
+        conflicts = {}
+        normal = {}
+        for k, v in key_map.items():
+            distinct_mods = {item["mod"] for item in v}
+            if len(distinct_mods) > 1:
+                conflicts[k] = v
+            else:
+                normal[k] = v
+
+        return {"conflicts": conflicts, "all_keys": key_map}
+
+    def get_texture_pack_status(self):
+        """
+        Returns info about current texture pack and vanilla backup state.
+        """
+        if not self.gd_path:
+            return {"active_pack": "Unknown", "has_backup": False, "vanilla_files": 0}
+        bak_dir = os.path.join(self.gd_path, "Resources_Vanilla_Backup")
+        has_bak = os.path.isdir(bak_dir)
+        bak_count = len(os.listdir(bak_dir)) if has_bak else 0
+
+        info_file = os.path.join(self.gd_path, "geode", "active_texture_pack.json")
+        active_pack = "Vanilla (Default)"
+        if os.path.exists(info_file):
+            try:
+                with open(info_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    active_pack = data.get("name", "Custom Pack")
+            except Exception:
+                pass
+
+        return {
+            "active_pack": active_pack,
+            "has_backup": has_bak,
+            "vanilla_files": bak_count
+        }
+
+    def backup_vanilla_textures(self, progress_callback=None):
+        """
+        Creates a pristine copy of Resources/ into Resources_Vanilla_Backup/ if not already present.
+        """
+        if not self.gd_path:
+            return False, "Geometry Dash path not set."
+        res_dir = os.path.join(self.gd_path, "Resources")
+        if not os.path.isdir(res_dir):
+            return False, "Resources directory not found."
+        bak_dir = os.path.join(self.gd_path, "Resources_Vanilla_Backup")
+        if os.path.isdir(bak_dir) and os.listdir(bak_dir):
+            return True, "Vanilla backup is already safe and up to date."
+
+        try:
+            os.makedirs(bak_dir, exist_ok=True)
+            files = [f for f in os.listdir(res_dir) if os.path.isfile(os.path.join(res_dir, f))]
+            total = len(files)
+            for i, f in enumerate(files):
+                shutil.copy2(os.path.join(res_dir, f), os.path.join(bak_dir, f))
+                if progress_callback and i % 50 == 0:
+                    try:
+                        progress_callback(i + 1, total)
+                    except Exception:
+                        pass
+            if progress_callback:
+                try:
+                    progress_callback(total, total)
+                except Exception:
+                    pass
+            return True, f"Successfully backed up {total} vanilla assets!"
+        except Exception as e:
+            return False, str(e)
+
+    def install_texture_pack(self, source_path, pack_name=None, progress_callback=None):
+        """
+        Installs a custom texture pack (from a .zip or folder), ensuring vanilla textures
+        are securely backed up first.
+        """
+        if not self.gd_path:
+            return False, "Geometry Dash path not set."
+        if not os.path.exists(source_path):
+            return False, "Texture pack source not found."
+
+        ok, msg = self.backup_vanilla_textures(progress_callback=None)
+        if not ok:
+            return False, f"Failed to protect vanilla textures: {msg}"
+
+        res_dir = os.path.join(self.gd_path, "Resources")
+        display_name = pack_name or os.path.splitext(os.path.basename(source_path))[0]
+        installed_count = 0
+
+        try:
+            if zipfile.is_zipfile(source_path):
+                with zipfile.ZipFile(source_path, "r") as zf:
+                    entries = zf.namelist()
+                    valid_exts = (".png", ".plist", ".fnt", ".ogg", ".mp3", ".wav")
+                    asset_entries = [e for e in entries if e.lower().endswith(valid_exts)]
+                    total = len(asset_entries)
+                    for i, entry in enumerate(asset_entries):
+                        filename = os.path.basename(entry)
+                        if not filename:
+                            continue
+                        data = zf.read(entry)
+                        dest_path = os.path.join(res_dir, filename)
+                        with open(dest_path, "wb") as out:
+                            out.write(data)
+                        installed_count += 1
+                        if progress_callback and i % 25 == 0:
+                            try:
+                                progress_callback(i + 1, total)
+                            except Exception:
+                                pass
+            elif os.path.isdir(source_path):
+                valid_exts = (".png", ".plist", ".fnt", ".ogg", ".mp3", ".wav")
+                matched = []
+                for root, dirs, files in os.walk(source_path):
+                    for f in files:
+                        if f.lower().endswith(valid_exts):
+                            matched.append((os.path.join(root, f), f))
+                total = len(matched)
+                for i, (src, fname) in enumerate(matched):
+                    shutil.copy2(src, os.path.join(res_dir, fname))
+                    installed_count += 1
+                    if progress_callback and i % 25 == 0:
+                        try:
+                            progress_callback(i + 1, total)
+                        except Exception:
+                            pass
+            else:
+                return False, "Invalid texture pack format (must be .zip or directory)."
+
+            meta_dir = os.path.join(self.gd_path, "geode")
+            os.makedirs(meta_dir, exist_ok=True)
+            with open(os.path.join(meta_dir, "active_texture_pack.json"), "w", encoding="utf-8") as f:
+                json.dump({"name": display_name, "files": installed_count, "installed_at": time.time()}, f, indent=2)
+
+            return True, f"Successfully applied texture pack '{display_name}' ({installed_count} textures updated)!"
+        except Exception as e:
+            return False, str(e)
+
+    def restore_vanilla_textures(self, progress_callback=None):
+        """
+        Restores 100% vanilla textures from Resources_Vanilla_Backup into Resources.
+        """
+        if not self.gd_path:
+            return False, "Geometry Dash path not set."
+        bak_dir = os.path.join(self.gd_path, "Resources_Vanilla_Backup")
+        if not os.path.isdir(bak_dir) or not os.listdir(bak_dir):
+            return False, "Vanilla backup does not exist yet. Launch with vanilla textures to create one."
+        res_dir = os.path.join(self.gd_path, "Resources")
+
+        try:
+            files = [f for f in os.listdir(bak_dir) if os.path.isfile(os.path.join(bak_dir, f))]
+            total = len(files)
+            for i, f in enumerate(files):
+                shutil.copy2(os.path.join(bak_dir, f), os.path.join(res_dir, f))
+                if progress_callback and i % 50 == 0:
+                    try:
+                        progress_callback(i + 1, total)
+                    except Exception:
+                        pass
+
+            info_file = os.path.join(self.gd_path, "geode", "active_texture_pack.json")
+            if os.path.exists(info_file):
+                try:
+                    os.remove(info_file)
+                except Exception:
+                    pass
+
+            return True, f"Successfully restored {total} vanilla textures!"
+        except Exception as e:
+            return False, str(e)
+
+
 
 class ModernButton(tk.Canvas):
     def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
@@ -1795,9 +2254,9 @@ class GeodeSyncApp(tk.Tk):
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         w = min(840, max(740, screen_w - 40))
-        h = min(680, max(580, screen_h - 80))
+        h = min(740, max(620, screen_h - 80))
         self.geometry(f"{w}x{h}")
-        self.minsize(720, 560)
+        self.minsize(760, 600)
         self.configure(bg=UI["background"])
 
         if IS_WIN:
@@ -2157,14 +2616,14 @@ class GeodeSyncApp(tk.Tk):
         )
         self.primary_btn.pack(fill="x")
 
-        # 2. QUICK COMPANION TOOLS (Clean 4x4 Grid)
+        # 2. QUICK COMPANION TOOLS (Clean 5x4 Grid • 20 Power Tools)
         tools_card = tk.Frame(body, bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         tools_card.pack(fill="both", expand=True, pady=(0, 8))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
         tools_head.pack(fill="x", pady=(0, 6))
 
-        tk.Label(tools_head, text="COMPANION TOOLS & MODS", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="COMPANION TOOLS & POWER MODS (20 TOOLS)", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
 
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
         tool_grid.pack(fill="both", expand=True)
@@ -2184,29 +2643,35 @@ class GeodeSyncApp(tk.Tk):
 
         # Row 0: Essential Mods & Game Controls
         add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
-        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=1)
-        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=2)
-        add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=0, column=3)
+        add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
+        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=2)
+        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=3)
 
-        # Row 1: Content & Tweaks
-        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=0)
-        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=1, bold=True)
-        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=1, column=2)
-        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=1, column=3)
+        # Row 1: Progression, Tweaks & Content
+        add_tool("📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=1, column=0, bold=True)
+        add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=1, column=1)
+        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=2)
+        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=3, bold=True)
 
-        # Row 2: Profiles, Toggles & Settings
-        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=2, column=0)
-        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=2, column=1, bold=True)
-        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=2, column=2)
+        # Row 2: Customization & System Doctors
+        add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=2, column=0)
+        add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=2, column=1)
+        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=2)
+        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=3)
+
+        # Row 3: Profiles, Toggles & Settings
+        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
+        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
+        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=2)
         sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
         sounds_color = UI["lime"] if self.sounds_enabled else UI["muted"]
-        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=2, column=3)
+        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
 
-        # Row 3: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Run in BG: ON", self.toggle_bg_mode, color=UI["lime"], row=3, column=0)
-        add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=3, column=1)
-        add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=3, column=2)
-        add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=3, column=3)
+        # Row 4: App, Steam & Desktop
+        self.bg_mode_btn = add_tool("🌙 Run in BG: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
+        add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
+        add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
+        add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
 
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
@@ -5121,6 +5586,435 @@ fi
             "Downloads community must-haves (CBF, Globed multiplayer, Click Sound, NONGD, BetterEdit) straight from the official Geode Index API."
         )
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
+
+    def open_mod_updater_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("🔄 GeodeSync • 1-Click Mod Updater Hub")
+        dialog.geometry("640x520")
+        dialog.minsize(560, 420)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=16)
+        head.pack(fill="x")
+        tk.Label(head, text="🔄 1-Click Mod Updater Hub", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Scans your installed mods against Geode SDK Index & auto-updates safely.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content_frame = tk.Frame(dialog, bg=UI["background"], padx=20, pady=16)
+        content_frame.pack(fill="both", expand=True)
+
+        status_lbl = tk.Label(content_frame, text="🔍 Scanning installed Geode mods for updates...", font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["background"])
+        status_lbl.pack(pady=12)
+
+        pbar = ttk.Progressbar(content_frame, style="Cyber.Horizontal.TProgressbar", orient="horizontal", mode="indeterminate", length=400)
+        pbar.pack(pady=(0, 16))
+        pbar.start(10)
+
+        list_container = tk.Frame(content_frame, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+
+        def run_scan():
+            outdated = self.mgr.check_outdated_mods()
+            self.after(0, lambda: render_results(outdated))
+
+        def render_results(outdated):
+            pbar.stop()
+            pbar.pack_forget()
+
+            if not outdated:
+                status_lbl.config(text="🎉 All Installed Mods are Up-to-Date!", fg=UI["lime"])
+                tk.Label(
+                    content_frame,
+                    text="Every mod in your Geode installation matches the latest compatible release on the Geode SDK Index.\n(Unstable versions like ImagePlus v1.1.1 are kept guarded).",
+                    font=("Segoe UI", 9), fg=UI["muted"], bg=UI["background"], justify="center"
+                ).pack(pady=8)
+
+                ModernButton(content_frame, text="Close", command=dialog.destroy, bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["text"], height=38, width=160).pack(pady=16)
+                return
+
+            status_lbl.config(text=f"⚡ Found {len(outdated)} Mod Update{'s' if len(outdated) > 1 else ''} Available!", fg=UI["amber"])
+
+            act_bar = tk.Frame(content_frame, bg=UI["background"])
+            act_bar.pack(fill="x", pady=(0, 10))
+
+            btn_update_all = tk.Button(
+                act_bar,
+                text=f"⚡ Update All ({len(outdated)} Mods)",
+                font=("Segoe UI", 9, "bold"),
+                bg=UI["lime"], fg=UI["background"],
+                activebackground=UI["lime_hover"],
+                relief="flat", padx=14, pady=7, cursor="hand2"
+            )
+            btn_update_all.pack(side="left")
+
+            prog_lbl = tk.Label(act_bar, text="", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["background"])
+            prog_lbl.pack(side="left", padx=12)
+
+            list_container.pack(fill="both", expand=True)
+
+            canvas = tk.Canvas(list_container, bg=UI["panel"], highlightthickness=0)
+            scrollbar = tk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+            scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+            scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.create_window((0, 0), window=scrollable, anchor="nw", width=580)
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            canvas.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+            scrollbar.pack(side="right", fill="y")
+
+            def update_single(item, btn_widget, row_lbl):
+                btn_widget.config(text="Updating...", state="disabled", bg=UI["panel_alt"])
+                self.log(f"Updating mod {item['name']} to v{item['latest_version']}...", "INFO")
+                
+                def _do():
+                    ok, msg = self.mgr.update_single_mod(item)
+                    def _done():
+                        if ok:
+                            btn_widget.config(text="✅ Updated", bg=UI["panel_alt"], fg=UI["lime"])
+                            row_lbl.config(text=f"v{item['latest_version']} (Latest)", fg=UI["lime"])
+                            self.play_ding()
+                            self.log(msg, "SUCCESS")
+                        else:
+                            btn_widget.config(text="Failed", bg=UI["panel_alt"], fg="#ff6b6b", state="normal")
+                            self.log(f"Failed to update {item['name']}: {msg}", "ERROR")
+                    self.after(0, _done)
+                threading.Thread(target=_do, daemon=True).start()
+
+            for item in outdated:
+                row = tk.Frame(scrollable, bg=UI["panel_alt"], padx=10, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", pady=3)
+
+                info_box = tk.Frame(row, bg=UI["panel_alt"])
+                info_box.pack(side="left", fill="x", expand=True)
+
+                tk.Label(info_box, text=item["name"], font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(anchor="w")
+                v_lbl = tk.Label(info_box, text=f"v{item['current_version']}  ➔  v{item['latest_version']}", font=("Segoe UI", 8), fg=UI["amber"], bg=UI["panel_alt"])
+                v_lbl.pack(anchor="w")
+
+                btn_u = tk.Button(
+                    row, text="Update", font=("Segoe UI", 8, "bold"),
+                    bg=UI["panel"], fg=UI["lime"], activebackground=UI["border"],
+                    relief="flat", padx=10, pady=4, cursor="hand2"
+                )
+                btn_u.pack(side="right")
+                btn_u.config(command=lambda it=item, b=btn_u, vl=v_lbl: update_single(it, b, vl))
+
+            def do_update_all():
+                btn_update_all.config(state="disabled", text="Updating...")
+                def _worker():
+                    successes = 0
+                    for i, it in enumerate(outdated):
+                        self.after(0, lambda n=it['name'], cur=i+1, tot=len(outdated): prog_lbl.config(text=f"Updating {cur}/{tot}: {n}..."))
+                        ok, _ = self.mgr.update_single_mod(it)
+                        if ok:
+                            successes += 1
+                    def _fin():
+                        prog_lbl.config(text=f"✅ Finished! Updated {successes}/{len(outdated)} mods.", fg=UI["lime"])
+                        btn_update_all.config(text="🎉 All Done!", bg=UI["panel_alt"], fg=UI["lime"])
+                        self.play_ding()
+                        self.refresh_status()
+                    self.after(0, _fin)
+                threading.Thread(target=_worker, daemon=True).start()
+
+            btn_update_all.config(command=do_update_all)
+
+        threading.Thread(target=run_scan, daemon=True).start()
+
+    def open_demon_tracker(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("📈 Demon & Grind Progress Tracker")
+        dialog.geometry("660x540")
+        dialog.minsize(580, 440)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="📈 Demon & Grind Progress Tracker", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Live progress extracted directly from your decrypted Geometry Dash save data.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=12)
+        content.pack(fill="both", expand=True)
+
+        data = self.mgr.get_demon_and_grind_data()
+        if not data:
+            tk.Label(content, text="⚠️ Could not decrypt CCGameManager.dat.\nMake sure Geometry Dash has been run at least once.", font=("Segoe UI", 10), fg=UI["amber"], bg=UI["background"]).pack(pady=40)
+            return
+
+        stats_bar = tk.Frame(content, bg=UI["panel"], padx=12, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+        stats_bar.pack(fill="x", pady=(0, 10))
+
+        tk.Label(stats_bar, text=f"🎮 {data['player_name']}", font=("Segoe UI", 11, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left", padx=(0, 16))
+
+        for icon, val, lbl, col in [
+            ("⭐", data["stars"], "Stars", UI["amber"]),
+            ("👿", data["demons"], "Demons", UI["lilac"]),
+            ("💎", data["diamonds"], "Diamonds", "#00e5ff"),
+            ("🪙", data["coins"], "Coins", UI["amber"]),
+            ("🔮", data["orbs"], "Orbs", "#e056fd"),
+        ]:
+            c_frame = tk.Frame(stats_bar, bg=UI["panel_alt"], padx=6, pady=2, highlightbackground=UI["border"], highlightthickness=1)
+            c_frame.pack(side="left", padx=3)
+            tk.Label(c_frame, text=icon, font=("Segoe UI", 8), fg=col, bg=UI["panel_alt"]).pack(side="left", padx=(0, 2))
+            tk.Label(c_frame, text=f"{val:,} {lbl}", font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+
+        def copy_discord_format():
+            grinds_str = "\n".join([f"• **{g['name']}** by {g['author']} — **{g['percent']}%** (Practice: {g['practice']}%)" for g in data["grinds"][:8]])
+            discord_text = (
+                f"🏆 **{data['player_name']}'s Geometry Dash Progression**\n"
+                f"⭐ Stars: {data['stars']:,} | 👿 Demons: {data['demons']:,} | 💎 Diamonds: {data['diamonds']:,}\n\n"
+                f"🔥 **Current Hard Grinds:**\n{grinds_str or '• None currently recorded.'}\n\n"
+                f"🛡️ *Tracked live via GeodeSync v{APP_VERSION}*"
+            )
+            self.clipboard_clear()
+            self.clipboard_append(discord_text)
+            self.play_ding()
+            btn_copy.config(text="✅ Copied Discord Format to Clipboard!", fg=UI["lime"])
+            self.log("Copied Demon & Grind progression card to clipboard.", "SUCCESS")
+
+        btn_copy = tk.Button(
+            content, text="📋 Copy Discord Progression Card", command=copy_discord_format,
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"],
+            activebackground=UI["border"], relief="flat", padx=12, pady=6, cursor="hand2"
+        )
+        btn_copy.pack(fill="x", pady=(0, 10))
+
+        notebook = ttk.Notebook(content)
+        notebook.pack(fill="both", expand=True)
+
+        tab_grinds = tk.Frame(notebook, bg=UI["panel"], padx=8, pady=8)
+        notebook.add(tab_grinds, text=f"🔥 Active Grinds ({len(data['grinds'])})")
+
+        canvas_g = tk.Canvas(tab_grinds, bg=UI["panel"], highlightthickness=0)
+        scroll_g = tk.Scrollbar(tab_grinds, orient="vertical", command=canvas_g.yview)
+        scroll_content_g = tk.Frame(canvas_g, bg=UI["panel"])
+
+        scroll_content_g.bind("<Configure>", lambda e: canvas_g.configure(scrollregion=canvas_g.bbox("all")))
+        canvas_g.create_window((0, 0), window=scroll_content_g, anchor="nw", width=600)
+        canvas_g.configure(yscrollcommand=scroll_g.set)
+
+        canvas_g.pack(side="left", fill="both", expand=True)
+        scroll_g.pack(side="right", fill="y")
+
+        if not data["grinds"]:
+            tk.Label(scroll_content_g, text="No active grinds recorded (15%-99%).", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"]).pack(pady=20)
+        else:
+            for g in data["grinds"]:
+                row = tk.Frame(scroll_content_g, bg=UI["panel_alt"], padx=8, pady=6, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", pady=2)
+
+                left = tk.Frame(row, bg=UI["panel_alt"])
+                left.pack(side="left", fill="x", expand=True)
+
+                tk.Label(left, text=g["name"], font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(anchor="w")
+                tk.Label(left, text=f"by {g['author']} • Practice: {g['practice']}% • Attempts: {g['attempts']:,}", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel_alt"]).pack(anchor="w")
+
+                pct_color = UI["lime"] if g["percent"] >= 80 else (UI["amber"] if g["percent"] >= 50 else UI["lilac"])
+                tk.Label(row, text=f"{g['percent']}%", font=("Segoe UI", 12, "bold"), fg=pct_color, bg=UI["panel_alt"]).pack(side="right", padx=6)
+
+        tab_demons = tk.Frame(notebook, bg=UI["panel"], padx=8, pady=8)
+        notebook.add(tab_demons, text=f"👿 Beaten Demons ({len(data['completed_demons'])})")
+
+        canvas_d = tk.Canvas(tab_demons, bg=UI["panel"], highlightthickness=0)
+        scroll_d = tk.Scrollbar(tab_demons, orient="vertical", command=canvas_d.yview)
+        scroll_content_d = tk.Frame(canvas_d, bg=UI["panel"])
+
+        scroll_content_d.bind("<Configure>", lambda e: canvas_d.configure(scrollregion=canvas_d.bbox("all")))
+        canvas_d.create_window((0, 0), window=scroll_content_d, anchor="nw", width=600)
+        canvas_d.configure(yscrollcommand=scroll_d.set)
+
+        canvas_d.pack(side="left", fill="both", expand=True)
+        scroll_d.pack(side="right", fill="y")
+
+        if not data["completed_demons"]:
+            tk.Label(scroll_content_d, text=f"Total demons beaten: {data['demons']}. Detailed list empty in local cache.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"]).pack(pady=20)
+        else:
+            for d in data["completed_demons"]:
+                row = tk.Frame(scroll_content_d, bg=UI["panel_alt"], padx=8, pady=6, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", pady=2)
+                tk.Label(row, text=f"👿 {d['name']}", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+                tk.Label(row, text=f"by {d['author']} • 100% Complete", font=("Segoe UI", 8), fg=UI["lime"], bg=UI["panel_alt"]).pack(side="right")
+
+    def open_texture_pack_hub(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("🎨 Texture Pack Hub")
+        dialog.geometry("580x460")
+        dialog.minsize(520, 380)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🎨 Texture Pack Hub", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Safely install custom texture packs with automated vanilla backup & 1-click restore.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=20, pady=16)
+        content.pack(fill="both", expand=True)
+
+        status = self.mgr.get_texture_pack_status()
+
+        card = tk.Frame(content, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        card.pack(fill="x", pady=(0, 14))
+
+        tk.Label(card, text="CURRENT TEXTURE STATE", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w")
+        pack_lbl = tk.Label(card, text=f"Active Pack: {status['active_pack']}", font=("Segoe UI", 11, "bold"), fg=UI["text"], bg=UI["panel"])
+        pack_lbl.pack(anchor="w", pady=(4, 2))
+
+        bak_text = f"🛡️ Vanilla Textures Protected ({status['vanilla_files']} assets safely archived)" if status["has_backup"] else "⚠️ No Vanilla Backup Yet (Will auto-generate on first install)"
+        bak_color = UI["lime"] if status["has_backup"] else UI["amber"]
+        bak_lbl = tk.Label(card, text=bak_text, font=("Segoe UI", 8), fg=bak_color, bg=UI["panel"])
+        bak_lbl.pack(anchor="w")
+
+        prog_lbl = tk.Label(content, text="", font=("Segoe UI", 9), fg=UI["lime"], bg=UI["background"])
+        prog_lbl.pack(pady=(0, 8))
+
+        def on_install_pack():
+            path = filedialog.askopenfilename(
+                title="Select Texture Pack (.zip)",
+                filetypes=[("Texture Pack Archive", "*.zip"), ("All Files", "*.*")]
+            )
+            if not path:
+                return
+
+            prog_lbl.config(text="Protecting vanilla files & installing pack...", fg=UI["lime"])
+            self.log(f"Installing texture pack from {path}...", "INFO")
+
+            def _worker():
+                ok, msg = self.mgr.install_texture_pack(path)
+                def _done():
+                    if ok:
+                        self.play_ding()
+                        self.log(msg, "SUCCESS")
+                        prog_lbl.config(text="✅ " + msg, fg=UI["lime"])
+                        st = self.mgr.get_texture_pack_status()
+                        pack_lbl.config(text=f"Active Pack: {st['active_pack']}")
+                        bak_lbl.config(text=f"🛡️ Vanilla Textures Protected ({st['vanilla_files']} assets)", fg=UI["lime"])
+                        messagebox.showinfo("Texture Pack Applied", f"🎉 {msg}\n\nLaunch Geometry Dash to see your new textures!")
+                    else:
+                        self.log(f"Failed to apply texture pack: {msg}", "ERROR")
+                        prog_lbl.config(text="❌ " + msg, fg="#ff6b6b")
+                        messagebox.showerror("Error", f"Failed to install texture pack:\n{msg}")
+                self.after(0, _done)
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def on_restore_vanilla():
+            st = self.mgr.get_texture_pack_status()
+            if not st["has_backup"]:
+                messagebox.showinfo("Vanilla Textures", "Your installation is already using vanilla textures (or no backup exists yet).")
+                return
+
+            res = messagebox.askyesno("Restore Vanilla Textures", "Are you sure you want to restore 100% original vanilla Geometry Dash textures?")
+            if not res:
+                return
+
+            prog_lbl.config(text="Restoring original textures...", fg=UI["lime"])
+            def _worker():
+                ok, msg = self.mgr.restore_vanilla_textures()
+                def _done():
+                    if ok:
+                        self.play_ding()
+                        self.log(msg, "SUCCESS")
+                        prog_lbl.config(text="✅ " + msg, fg=UI["lime"])
+                        pack_lbl.config(text="Active Pack: Vanilla (Default)")
+                        messagebox.showinfo("Textures Restored", f"🎉 {msg}")
+                    else:
+                        prog_lbl.config(text="❌ " + msg, fg="#ff6b6b")
+                        messagebox.showerror("Error", msg)
+                self.after(0, _done)
+            threading.Thread(target=_worker, daemon=True).start()
+
+        btn_install = tk.Button(
+            content, text="📁 Select & Install Texture Pack (.zip)", command=on_install_pack,
+            font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"],
+            activebackground=UI["lime_hover"], relief="flat", padx=14, pady=8, cursor="hand2"
+        )
+        btn_install.pack(fill="x", pady=4)
+
+        btn_restore = tk.Button(
+            content, text="🔄 Restore 100% Vanilla Textures", command=on_restore_vanilla,
+            font=("Segoe UI", 9), bg=UI["panel_alt"], fg=UI["amber"],
+            activebackground=UI["border"], relief="flat", padx=14, pady=8, cursor="hand2"
+        )
+        btn_restore.pack(fill="x", pady=4)
+
+        tk.Label(
+            content,
+            text="Tip: GeodeSync safely keeps an untouched snapshot of your original Resources folder in Resources_Vanilla_Backup, so you can test any custom texture pack risk-free.",
+            font=("Segoe UI", 8), fg=UI["muted"], bg=UI["background"], wraplength=520, justify="left"
+        ).pack(anchor="w", pady=(16, 0))
+
+    def open_keybind_doctor(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("⌨️ Keybind Conflict Doctor")
+        dialog.geometry("640x500")
+        dialog.minsize(560, 400)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="⌨️ Keybind Conflict Doctor", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Scans all installed Geode mods to detect overlapping hotkeys before launch.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=12)
+        content.pack(fill="both", expand=True)
+
+        res = self.mgr.get_keybind_map()
+        conflicts = res.get("conflicts", {})
+        all_keys = res.get("all_keys", {})
+
+        status_card = tk.Frame(content, bg=UI["panel"], padx=12, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+        status_card.pack(fill="x", pady=(0, 10))
+
+        if conflicts:
+            tk.Label(status_card, text=f"⚠️ {len(conflicts)} Keybind Collision{'s' if len(conflicts)>1 else ''} Detected!", font=("Segoe UI", 11, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w")
+            tk.Label(status_card, text="Multiple mods are assigned to the same key without unique modifiers. Pressing it in-game will trigger both actions simultaneously.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=580, justify="left").pack(anchor="w", pady=(2, 0))
+        else:
+            tk.Label(status_card, text="✅ All Hotkeys Clean & Conflict-Free!", font=("Segoe UI", 11, "bold"), fg=UI["lime"], bg=UI["panel"]).pack(anchor="w")
+            tk.Label(status_card, text=f"Found {len(all_keys)} registered mod keybind{'s' if len(all_keys)!=1 else ''}. No overlapping keys detected.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 0))
+
+        list_container = tk.Frame(content, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(list_container, bg=UI["panel"], highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable, anchor="nw", width=580)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        scrollbar.pack(side="right", fill="y")
+
+        if conflicts:
+            tk.Label(scrollable, text="🚨 CONFLICTING KEYS", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w", padx=6, pady=(6, 2))
+            for k, items in conflicts.items():
+                row = tk.Frame(scrollable, bg=UI["panel_alt"], padx=10, pady=6, highlightbackground=UI["amber"], highlightthickness=1)
+                row.pack(fill="x", pady=2, padx=4)
+
+                tk.Label(row, text=f"[{k}]", font=("Segoe UI", 10, "bold"), fg=UI["amber"], bg=UI["panel_alt"]).pack(side="left", padx=(0, 10))
+                desc = " & ".join([f"{item['mod']} ({item['action']})" for item in items])
+                tk.Label(row, text=desc, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel_alt"], wraplength=460, justify="left").pack(side="left")
+
+        tk.Label(scrollable, text="📋 ALL REGISTERED MOD KEYBINDS", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w", padx=6, pady=(10, 2))
+
+        if not all_keys:
+            tk.Label(scrollable, text="No custom keybinds detected in mod configurations.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", padx=6, pady=4)
+        else:
+            for k, items in sorted(all_keys.items()):
+                row = tk.Frame(scrollable, bg=UI["panel_alt"], padx=10, pady=5, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", pady=2, padx=4)
+
+                k_color = UI["amber"] if k in conflicts else UI["lime"]
+                tk.Label(row, text=f"[{k}]", font=("Segoe UI", 9, "bold"), fg=k_color, bg=UI["panel_alt"], width=8, anchor="w").pack(side="left")
+                desc = ", ".join([f"{item['mod']} ({item['action']})" for item in items])
+                tk.Label(row, text=desc, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+
 
 
 if __name__ == "__main__":

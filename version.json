@@ -1,9 +1,9 @@
 {
-  "app_version": "2.2.1",
+  "app_version": "2.3.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.2.1: Auto-detection and 1-click repair for fatal Windows DLL Entry Point crashes (ImagePlus v1.1.1 missing loadRootSubDictFromCompressedFile fix)."
+  "announcement": "GeodeSync v2.3.0: 1-Click Mod Auto-Updater Hub, Demon & Grind Tracker, Safe Texture Pack Hub, and Keybind Conflict Doctor."
 }
