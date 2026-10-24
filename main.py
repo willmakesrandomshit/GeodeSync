@@ -1530,6 +1530,7 @@ class GeodeSyncApp(tk.Tk):
         add_tool("🔄 Mod profiles", self.open_mod_profiles, row=3, column=2)
         add_tool("Game profiles", self.open_game_profiles, color=UI["lilac"], row=4, column=0, bold=True)
         add_tool("Export support report", self.export_support_report, color=UI["amber"], row=4, column=1)
+        add_tool("⚡ Check updates", self.manual_check_updates, color=UI["lime"], row=4, column=2, bold=True)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
 
@@ -2633,13 +2634,38 @@ class GeodeSyncApp(tk.Tk):
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                self.show_update_banner(tag)
+                self.after(0, lambda: self.show_update_banner(tag, prompt=True))
         except Exception:
             pass
 
-    def show_update_banner(self, new_ver: str):
+    def show_update_banner(self, new_ver: str, prompt=False):
         self.update_label.config(text=f"🎉 Update available: v{new_ver}! (Current: v{APP_VERSION})")
         self.update_banner.pack(fill="x", before=self.children[list(self.children.keys())[0]])
+        self.log(f"New update detected: v{new_ver}! Click 'Install update' to update automatically.", "SUCCESS")
+        if prompt:
+            def ask():
+                if messagebox.askyesno(
+                    "GeodeSync Update Available",
+                    f"A new version of GeodeSync (v{new_ver}) is available!\n\nWould you like to install the update automatically now?",
+                ):
+                    self.start_self_update()
+            self.after(600, ask)
+
+    def manual_check_updates(self):
+        self.log("Checking for GeodeSync updates...", "INFO")
+        def _check():
+            try:
+                rel = fetch_latest_published_release(timeout=8)
+                tag = str(rel.get("tag_name", "")).lstrip("v")
+                if is_newer_app_version(tag, APP_VERSION):
+                    self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                    self.after(0, lambda: self.show_update_banner(tag, prompt=True))
+                else:
+                    self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION})."))
+                    self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{e}"))
+        threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
         url = self.latest_release_url or f"https://github.com/{GITHUB_REPO}/releases"
@@ -3046,9 +3072,7 @@ class GeodeSyncApp(tk.Tk):
             return
 
         self.log("Downloading latest GeodeSync update from GitHub...", "INFO")
-        self.progress_frame.pack(fill="x", pady=(0, 8), before=self.primary_btn)
-        self.progress_bar["value"] = 25
-        self.progress_lbl.config(text="Contacting GitHub for new release binary...")
+        self._schedule_update_progress("Contacting GitHub for new release binary...", 20)
 
         try:
             data = fetch_latest_published_release(timeout=12)
@@ -3068,36 +3092,53 @@ class GeodeSyncApp(tk.Tk):
             my_exe = sys.executable if getattr(sys, 'frozen', False) else None
             if not my_exe or not os.path.exists(my_exe):
                 webbrowser.open(self.latest_release_url)
-                self.progress_frame.pack_forget()
+                self._schedule_update_progress("", hide=True)
                 return
 
             exe_dir = os.path.dirname(my_exe)
             temp_exe = os.path.join(exe_dir, "GeodeSync_update.exe")
 
-            self.progress_bar["value"] = 60
-            self.progress_lbl.config(text="Downloading new GeodeSync executable...")
-            urllib.request.urlretrieve(asset_url, temp_exe)
+            self._schedule_update_progress("Downloading new GeodeSync executable...", 35)
+            req = urllib.request.Request(asset_url, headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req) as resp, open(temp_exe, "wb") as out_file:
+                total_bytes = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    out_file.write(chunk)
+                    downloaded += len(chunk)
+                    if total_bytes > 0:
+                        pct = 35 + int((downloaded / total_bytes) * 55)
+                        mb = round(downloaded / (1024 * 1024), 1)
+                        total_mb = round(total_bytes / (1024 * 1024), 1)
+                        self._schedule_update_progress(f"Downloading update: {mb} / {total_mb} MB ({pct}%)", pct)
 
-            self.progress_bar["value"] = 100
-            self.progress_lbl.config(text="Restarting into updated version...")
+            self._schedule_update_progress("Restarting into updated version...", 100)
 
             bat_path = os.path.join(exe_dir, "_geodesync_swap.bat")
             with open(bat_path, "w") as f:
                 f.write(
                     f"@echo off\r\n"
                     f"timeout /t 1 /nobreak >nul\r\n"
-                    f"move /y \"{temp_exe}\" \"{my_exe}\" >nul\r\n"
+                    f":retry\r\n"
+                    f"move /y \"{temp_exe}\" \"{my_exe}\" >nul 2>&1\r\n"
+                    f"if errorlevel 1 (\r\n"
+                    f"    timeout /t 1 /nobreak >nul\r\n"
+                    f"    goto retry\r\n"
+                    f")\r\n"
+                    f"powershell -NoProfile -Command \"Unblock-File -Path '{my_exe}' -ErrorAction SilentlyContinue\"\r\n"
                     f"start \"\" \"{my_exe}\"\r\n"
                     f"del \"%~f0\"\r\n"
                 )
 
             subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000)
-            self.destroy()
-            sys.exit(0)
+            self.after(200, lambda: (self.destroy(), sys.exit(0)))
 
         except Exception as e:
             self.log(f"Self-update error: {e}. Opening GitHub release...", "WARN")
-            self.progress_frame.pack_forget()
+            self._schedule_update_progress("", hide=True)
             webbrowser.open(self.latest_release_url)
 
     def _schedule_update_progress(self, text, value=None, hide=False):
