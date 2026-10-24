@@ -1,9 +1,9 @@
 {
-  "app_version": "2.0.2",
+  "app_version": "2.0.3",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.0.2 is live! Supercharged Discord Rich Presence with [Get GeodeSync] viral profile button, auto-reconnect, and in-app sharing."
+  "announcement": "GeodeSync v2.0.3: Official GeodeSync Discord Rich Presence with pristine emblem, dynamic in-game live status, dual viral buttons, and instant updates!"
 }

@@ -44,7 +44,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -179,12 +179,12 @@ class DiscordRPC:
                             "state": self._current_state,
                             "timestamps": {"start": self._start_time},
                             "assets": {
-                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/thumbnail_square.png",
-                                "large_text": f"GeodeSync v{APP_VERSION}"
+                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon.png",
+                                "large_text": f"GeodeSync v{APP_VERSION} · Mod Protector"
                             },
                             "buttons": [
-                                {"label": "Get GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"},
-                                {"label": "Geode SDK", "url": "https://geode-sdk.org"}
+                                {"label": "⬇️ Download GeodeSync", "url": f"https://github.com/{GITHUB_REPO}"},
+                                {"label": "🛡️ Fix Broken Mods", "url": f"https://github.com/{GITHUB_REPO}#readme"}
                             ]
                         }
                     },
@@ -3732,7 +3732,14 @@ fi
         while getattr(self, "_monitor_running", True):
             try:
                 is_running = self.mgr.is_gd_process_running()
-                if was_running and not is_running:
+                if is_running and not was_running:
+                    ver_text, _ = self.mgr.get_gd_version_info()
+                    if hasattr(self, "discord_rpc"):
+                        self.discord_rpc.update_presence("Playing Geometry Dash", f"GD {ver_text} · Mods Protected 🛡️")
+                elif was_running and not is_running:
+                    ver_text, _ = self.mgr.get_gd_version_info()
+                    if hasattr(self, "discord_rpc"):
+                        self.discord_rpc.update_presence("Geometry Dash Companion", f"GD {ver_text} · Synced & Ready")
                     if getattr(self, "auto_backup_enabled", True):
                         copied = self.mgr.perform_silent_backup()
                         if copied:
