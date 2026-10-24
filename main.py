@@ -1531,21 +1531,18 @@ class GeodeSyncApp(tk.Tk):
             button.grid(row=row, column=column, sticky="ew", padx=3, pady=3)
             return button
 
-        add_tool("Backup saves", self.backup_saves, color=UI["lime"], row=0, column=0, bold=True)
-        add_tool("♻ Restore saves", self.restore_saves, color=UI["muted"], row=0, column=1)
-        add_tool("Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=2)
-        add_tool("Cache cleaner", self.open_cache_cleaner, color=UI["lime"], row=1, column=0)
-        add_tool("Mods folder", self.open_mods_folder, row=1, column=1)
-        add_tool("Version selector", self.open_version_selector, color=UI["lilac"], row=1, column=2)
-        add_tool("Fix click delay", self.fix_click_delay, color=UI["lime"], row=2, column=0)
-        add_tool("Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=1)
-        add_tool("Essential mods", self.install_essential_mods, color=UI["amber"], row=2, column=2)
-        add_tool("FPS unlocker", self.open_fps_unlocker, color=UI["lime"], row=3, column=0)
+        add_tool("💾 Backup saves", self.backup_saves, color=UI["lime"], row=0, column=0, bold=True)
+        add_tool("♻️ Save Manager", self.restore_saves, color=UI["lime"], row=0, column=1)
+        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=2)
+        add_tool("📦 Essential mods", self.install_essential_mods, color=UI["amber"], row=1, column=0, bold=True)
+        add_tool("📁 Mods folder", self.open_mods_folder, row=1, column=1)
+        add_tool("🎯 Mod profiles", self.open_mod_profiles, row=1, column=2)
+        add_tool("⚡ FPS unlocker", self.open_fps_unlocker, color=UI["lime"], row=2, column=0)
+        add_tool("🧹 Cache cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=1)
+        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=2)
+        add_tool("🎮 Game profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
         self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
-        add_tool("🔄 Mod profiles", self.open_mod_profiles, row=3, column=2)
-        add_tool("Game profiles", self.open_game_profiles, color=UI["lilac"], row=4, column=0, bold=True)
-        add_tool("Export support report", self.export_support_report, color=UI["amber"], row=4, column=1)
-        add_tool("⚡ Check updates", self.manual_check_updates, color=UI["lime"], row=4, column=2, bold=True)
+        add_tool("🔄 Check updates", self.manual_check_updates, color=UI["lime"], row=3, column=2, bold=True)
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
 
@@ -1679,17 +1676,16 @@ class GeodeSyncApp(tk.Tk):
             return
 
         if not is_22081:
-            self.guide_card.config(highlightbackground=UI["lilac"])
-            self.guide_badge.config(text="MOD COMPATIBILITY", fg=UI["lilac"], bg=UI["lilac_dark"])
-            self.guide_title.config(text="Switch to the Geode-compatible game version")
+            self.guide_card.config(highlightbackground=UI["lime"])
+            self.guide_badge.config(text="1-CLICK FIX", fg=UI["lime"], bg=UI["lime_dark"])
+            self.guide_title.config(text="Fix Geode Mods • Downgrade to 2.2081")
             self.guide_desc.config(
-                text=f"Your installed game version is not the selected Geode-compatible version. "
-                     f"GeodeSync will download {self.mgr.target_gd_version} from Steam, verify the files, and protect it from automatic updates."
+                text="Geometry Dash 2.209 broke your mods. Click below to install 2.2081 and lock Steam updates."
             )
             self.primary_btn.set_config(
-                text=f"Install game version {self.mgr.target_gd_version}",
-                bg=UI["lilac"],
-                hover_bg="#ae7ed5",
+                text=f"⚡ Fix Geode Mods (Install GD {self.mgr.target_gd_version})",
+                bg=UI["lime"],
+                hover_bg=UI["lime_hover"],
                 fg=UI["background"],
                 command=self.start_automated_downgrade
             )
@@ -1697,12 +1693,12 @@ class GeodeSyncApp(tk.Tk):
 
         self.guide_card.config(highlightbackground=UI["lime"])
         self.guide_badge.config(text="READY TO PLAY", fg=UI["lime"], bg=UI["lime_dark"])
-        self.guide_title.config(text="You’re all set")
+        self.guide_title.config(text="✨ Geometry Dash 2.2081 is Active")
         self.guide_desc.config(
-            text=f"Geometry Dash {self.mgr.target_gd_version} is installed, Geode is active, and Steam updates are locked."
+            text=f"Geode mods are fully compatible and Steam updates are safely locked. You're ready to play!"
         )
         self.primary_btn.set_config(
-            text="Launch Geometry Dash",
+            text="▶️ Launch Geometry Dash",
             bg=UI["lime"],
             hover_bg=UI["lime_hover"],
             fg=UI["background"],
