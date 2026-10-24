@@ -44,7 +44,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -179,7 +179,7 @@ class DiscordRPC:
                             "state": self._current_state,
                             "timestamps": {"start": self._start_time},
                             "assets": {
-                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon.png",
+                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon_v2.png",
                                 "large_text": f"GeodeSync v{APP_VERSION} · Geometry Dash Mod Manager",
                                 "small_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/real_geode_logo.png",
                                 "small_text": "Geode Mod Loader Active"
@@ -187,7 +187,13 @@ class DiscordRPC:
                             "buttons": [
                                 {"label": "View GitHub Repo", "url": f"https://github.com/{GITHUB_REPO}"},
                                 {"label": "Join Discord Server", "url": "https://discord.gg/tyQG5xNGCx"}
-                            ]
+                            ],
+                            "metadata": {
+                                "button_urls": [
+                                    f"https://github.com/{GITHUB_REPO}",
+                                    "https://discord.gg/tyQG5xNGCx"
+                                ]
+                            }
                         }
                     },
                     "nonce": str(time.time())
@@ -1565,13 +1571,7 @@ class GeodeSyncApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
-        if getattr(self, "run_in_bg_enabled", True):
-            self.withdraw()
-            if not getattr(self, "_bg_notified", False):
-                self._bg_notified = True
-                self.log("GeodeSync running in background with Discord Presence active. Click 'Quit GeodeSync' or launch app to restore.", "INFO")
-        else:
-            self.quit_app()
+        self.quit_app()
 
     def quit_app(self):
         try:
@@ -4433,48 +4433,23 @@ fi
         messagebox.showinfo("GeodeSync Guide & FAQ", msg)
 
 
-SINGLE_INSTANCE_PORT = 43928
-
-
-def check_single_instance():
+def ensure_clean_launch():
+    if not IS_WIN:
+        return
+    current_pid = os.getpid()
     try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.6)
-        s.connect(("127.0.0.1", SINGLE_INSTANCE_PORT))
-        s.sendall(b"SHOW\n")
-        s.close()
-        return True
+        cmd = f"Get-Process GeodeSync -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {current_pid} }} | Stop-Process -Force"
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000 if IS_WIN else 0
+        )
     except Exception:
-        return False
-
-
-def start_instance_listener(app):
-    def _listen():
-        try:
-            import socket
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
-            srv.listen(5)
-            while True:
-                client, _ = srv.accept()
-                try:
-                    data = client.recv(1024)
-                    if b"SHOW" in data:
-                        app.after(0, app.restore_from_background)
-                except Exception:
-                    pass
-                finally:
-                    client.close()
-        except Exception:
-            pass
-    threading.Thread(target=_listen, daemon=True).start()
+        pass
 
 
 if __name__ == "__main__":
-    if check_single_instance():
-        sys.exit(0)
+    ensure_clean_launch()
     app = GeodeSyncApp()
-    start_instance_listener(app)
     app.mainloop()
