@@ -1198,8 +1198,12 @@ class GeodeSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"GeodeSync v{APP_VERSION} • Geometry Dash companion")
-        self.geometry("860x820")
-        self.minsize(760, 720)
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        w = min(860, max(720, screen_w - 40))
+        h = min(820, max(600, screen_h - 80))
+        self.geometry(f"{w}x{h}")
+        self.minsize(680, 580)
         self.configure(bg=UI["background"])
 
         if IS_WIN:
@@ -2526,30 +2530,109 @@ class GeodeSyncApp(tk.Tk):
             return
 
         backup_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
-        if not os.path.exists(backup_root) or not os.listdir(backup_root):
-            messagebox.showinfo("No Backups Found", "No GeodeSync save backups were found yet. Click 'Backup GD Saves' first!")
-            return
+        os.makedirs(backup_root, exist_ok=True)
 
-        folders = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, d))]
-        folders.sort(key=os.path.getmtime, reverse=True)
-        latest_backup = folders[0]
+        dialog = tk.Toplevel(self)
+        dialog.title("Save Backup Manager")
+        dialog.geometry("640x460")
+        dialog.configure(bg=UI["header"])
+        dialog.transient(self)
+        dialog.grab_set()
 
-        res = messagebox.askyesno(
-            "Restore Save Files",
-            f"Restore save files from latest backup?\n\nFolder: {os.path.basename(latest_backup)}\n\nThis will overwrite current save files with this backup."
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=16)
+        head.pack(fill="x")
+        tk.Label(head, text="♻️ Save Backup Manager", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Choose a snapshot to restore, or manage your saved checkpoints:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content_frame = tk.Frame(dialog, bg=UI["header"], padx=20)
+        content_frame.pack(fill="both", expand=True)
+
+        list_card = tk.Frame(content_frame, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_card.pack(fill="both", expand=True)
+
+        scroll = tk.Scrollbar(list_card, orient="vertical")
+        listbox = tk.Listbox(
+            list_card,
+            bg=UI["inset"],
+            fg=UI["text"],
+            selectbackground=UI["lime_dark"],
+            selectforeground=UI["lime"],
+            font=("Consolas", 10),
+            relief="flat",
+            yscrollcommand=scroll.set,
+            highlightthickness=0,
+            activestyle="none"
         )
-        if not res:
-            return
+        scroll.config(command=listbox.yview)
+        scroll.pack(side="right", fill="y")
+        listbox.pack(side="left", fill="both", expand=True, padx=4, pady=4)
 
-        restored = 0
-        for f in os.listdir(latest_backup):
-            if f.endswith(".dat") or f.endswith(".dat.bak"):
-                safe_copy_item(os.path.join(latest_backup, f), os.path.join(save_dir, f))
-                restored += 1
+        folders_map = []
 
-        self.play_ding()
-        self.log(f"Restored {restored} save files from: {os.path.basename(latest_backup)}", "SUCCESS")
-        messagebox.showinfo("Saves Restored", f"Restored {restored} save files successfully!")
+        def refresh_list():
+            listbox.delete(0, tk.END)
+            folders_map.clear()
+            if not os.path.exists(backup_root):
+                return
+            dirs = [os.path.join(backup_root, d) for d in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, d))]
+            dirs.sort(key=os.path.getmtime, reverse=True)
+            for d in dirs:
+                name = os.path.basename(d)
+                mtime = os.path.getmtime(d)
+                date_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                files = [f for f in os.listdir(d) if f.endswith((".dat", ".dat.bak"))]
+                total_kb = round(sum(os.path.getsize(os.path.join(d, f)) for f in files) / 1024, 1)
+                tag = "PRE-SWITCH" if name.startswith("BeforeSwitch") else ("AUTO" if name.startswith("Auto") else "MANUAL")
+                display = f"[{tag:^10}]  {date_str}   •   {len(files)} files ({total_kb} KB)"
+                listbox.insert(tk.END, display)
+                folders_map.append(d)
+            if folders_map:
+                listbox.selection_set(0)
+
+        refresh_list()
+
+        def do_restore():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("Select Backup", "Please select a backup snapshot from the list first.")
+                return
+            chosen = folders_map[sel[0]]
+            name = os.path.basename(chosen)
+            if not messagebox.askyesno(
+                "Restore Save Files",
+                f"Restore save files from:\n\n{name}\n\nGeodeSync will create a safety snapshot of your current files first.",
+            ):
+                return
+            self.mgr.perform_silent_backup(prefix="SafetyBeforeRestore")
+            restored = 0
+            for f in os.listdir(chosen):
+                if f.endswith((".dat", ".dat.bak")):
+                    safe_copy_item(os.path.join(chosen, f), os.path.join(save_dir, f))
+                    restored += 1
+            self.play_ding()
+            self.log(f"Restored {restored} save files from {name}", "SUCCESS")
+            self.refresh_status()
+            messagebox.showinfo("Saves Restored", f"Successfully restored {restored} save files from:\n{name}")
+            dialog.destroy()
+
+        def do_delete():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            chosen = folders_map[sel[0]]
+            if messagebox.askyesno("Delete Backup", f"Are you sure you want to delete this backup snapshot?\n\n{os.path.basename(chosen)}"):
+                shutil.rmtree(chosen, ignore_errors=True)
+                refresh_list()
+
+        btn_box = tk.Frame(dialog, bg=UI["header"], padx=20, pady=16)
+        btn_box.pack(fill="x", side="bottom")
+
+        tk.Button(btn_box, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(btn_box, text="📂 Open Folder", command=lambda: open_url_or_path(backup_root), font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(8, 0))
+        tk.Button(btn_box, text="🗑️ Delete", command=do_delete, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["red"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(8, 0))
+
+        tk.Button(btn_box, text="♻️ Restore Selected Backup", command=do_restore, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=14, pady=5, cursor="hand2").pack(side="right")
+        tk.Button(btn_box, text="➕ Backup Now", command=lambda: (self.backup_saves(), refresh_list()), font=("Segoe UI", 9, "bold"), bg=UI["lilac"], fg=UI["background"], activebackground=UI["lilac_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="right", padx=(0, 8))
 
     def get_mods_dir(self):
         if IS_MAC:
@@ -3661,20 +3744,22 @@ fi
 
         dialog = tk.Toplevel(self)
         dialog.title("Essential Geode Mod Pack")
-        dialog.geometry("520x400")
+        dialog.geometry("540x440")
         dialog.configure(bg=UI["header"])
         dialog.transient(self)
         dialog.grab_set()
 
         tk.Label(dialog, text="📦 1-Click Essential Geode Mod Pack", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(16, 4))
-        tk.Label(dialog, text="Select community-recommended mods to download and install:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 10))
+        tk.Label(dialog, text="Select community-recommended mods to download and install directly into Geode:", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", padx=20, pady=(0, 10))
 
         pack_mods = [
-            ("fleym.nongd", "Jukebox (In-game NONG Custom Song Downloader • Recommended)"),
-            ("syzzi.click_between_frames", "Click Between Frames (CBF • Input & Physics Precision)"),
+            ("fleym.nongd", "Jukebox (In-game NONG Custom Song Downloader)"),
+            ("syzzi.click_between_frames", "Click Between Frames (CBF • Physics Precision)"),
             ("dankmeme.globed2", "Globed (Real-time Online Multiplayer)"),
             ("beat.click-sound", "Click Sound (Custom clicks & mechanical audio)"),
-            ("alphalaneous.betteredit", "BetterEdit (Creator Level Editor overhaul)")
+            ("alphalaneous.betteredit", "BetterEdit (Creator Level Editor overhaul)"),
+            ("camila314.nodepreview", "Node Preview (Hitboxes & Object Inspector)"),
+            ("prevter.geode-discord-rich-presence", "Discord Rich Presence (Show live GD status)"),
         ]
 
         var_dict = {}
@@ -3685,7 +3770,7 @@ fi
             is_installed = os.path.exists(os.path.join(mods_dir, f"{mod_id}.geode"))
             v = tk.BooleanVar(value=not is_installed)
             var_dict[mod_id] = v
-            label_text = f"{title}" + (" [Already Installed]" if is_installed else "")
+            label_text = f"{title}" + (" [Installed]" if is_installed else "")
             col = UI["muted"] if is_installed else UI["text"]
             cb = tk.Checkbutton(card, text=label_text, variable=v, font=("Segoe UI", 9), fg=col, bg=UI["panel"], selectcolor=UI["inset"], activebackground=UI["panel"], activeforeground=UI["lilac"])
             cb.pack(anchor="w", pady=3)
@@ -3705,7 +3790,7 @@ fi
         cancel_btn = tk.Button(btn_box, text="Cancel", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
         cancel_btn.pack(side="left")
 
-        apply_btn = tk.Button(btn_box, text="⚡ Download & Install Selected", command=do_install, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["text"], activebackground=UI["lime_hover"], relief="flat", padx=14, pady=4, cursor="hand2")
+        apply_btn = tk.Button(btn_box, text="⚡ Download & Install Selected", command=do_install, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=14, pady=4, cursor="hand2")
         apply_btn.pack(side="right")
 
     def _run_modpack_install(self, mod_ids):
@@ -3721,8 +3806,8 @@ fi
             self.progress_bar["value"] = int((i / len(mod_ids)) * 100)
             try:
                 api_url = f"https://api.geode-sdk.org/v1/mods/{mid}"
-                req = urllib.request.Request(api_url, headers={"User-Agent": "GeodeSync"})
-                with urllib.request.urlopen(req, timeout=6) as r:
+                req = urllib.request.Request(api_url, headers={"User-Agent": "GeodeSync-Client"})
+                with urllib.request.urlopen(req, timeout=8) as r:
                     data = json.loads(r.read().decode())
                 versions = data.get("payload", {}).get("versions", [])
                 if versions:
@@ -3730,7 +3815,9 @@ fi
                     if dl_url:
                         self.progress_lbl.config(text=f"Downloading {mid}...")
                         dest = os.path.join(mods_dir, f"{mid}.geode")
-                        urllib.request.urlretrieve(dl_url, dest)
+                        dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "GeodeSync-Client"})
+                        with urllib.request.urlopen(dl_req, timeout=20) as dl_resp, open(dest, "wb") as f_out:
+                            shutil.copyfileobj(dl_resp, f_out)
                         if self.mgr.gd_path:
                             gd_mods = os.path.join(self.mgr.gd_path, "geode", "mods")
                             if os.path.exists(gd_mods) and os.path.abspath(gd_mods) != os.path.abspath(mods_dir):
