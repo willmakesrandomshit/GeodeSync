@@ -1,5 +1,20 @@
 import os
 import sys
+import traceback
+
+def _global_excepthook(exc_type, exc_value, exc_traceback):
+    try:
+        app_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "GeodeSync")
+        os.makedirs(app_dir, exist_ok=True)
+        import time
+        with open(os.path.join(app_dir, "crash.log"), "a", encoding="utf-8") as f:
+            f.write(f"\n--- CRASH AT {time.ctime()} ---\n")
+            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+    except Exception:
+        pass
+
+sys.excepthook = _global_excepthook
+
 import re
 import json
 import shutil
@@ -4599,5 +4614,17 @@ fi
 
 
 if __name__ == "__main__":
-    app = GeodeSyncApp()
-    app.mainloop()
+    try:
+        app = GeodeSyncApp()
+        app.mainloop()
+    except Exception:
+        import traceback, time
+        try:
+            app_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "GeodeSync")
+            os.makedirs(app_dir, exist_ok=True)
+            with open(os.path.join(app_dir, "crash.log"), "a", encoding="utf-8") as f:
+                f.write(f"\n--- MAINLOOP CRASH AT {time.ctime()} ---\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
+        raise
