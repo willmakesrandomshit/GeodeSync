@@ -149,12 +149,11 @@ jobs:
           chmod +x dist/GeodeSync-Linux/GeodeSync
           cp README.md dist/GeodeSync-Linux/README.md
           cp USER_GUIDE.md dist/GeodeSync-Linux/USER_GUIDE.md
-          cat << 'EOF' > dist/GeodeSync-Linux/run.sh
-#!/bin/bash
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-chmod +x "$DIR/GeodeSync"
-"$DIR/GeodeSync" "$@"
-EOF
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+            'chmod +x "$DIR/GeodeSync"' \
+            '"$DIR/GeodeSync" "$@"' > dist/GeodeSync-Linux/run.sh
           chmod +x dist/GeodeSync-Linux/run.sh
           VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['app_version'])")
           tar -czvf "GeodeSync-v${VERSION}-Linux.tar.gz" -C dist/GeodeSync-Linux .
