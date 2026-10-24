@@ -1,9 +1,9 @@
 {
-  "app_version": "2.1.0",
+  "app_version": "2.2.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.1.0: Real-time Player Card with live stars & demons, interactive Geode Mod Manager, and High-Priority Boosted Game Launcher!"
+  "announcement": "GeodeSync v2.2.0: Full UI overhaul — streamlined hero dashboard, 16-tool modern companion grid, boosted low-latency launcher, and live status ticker!"
 }
