@@ -220,9 +220,33 @@ class DiscordRPC:
         if self._connected:
             threading.Thread(target=self._send_activity, daemon=True).start()
 
+    def clear_presence(self):
+        if not self._connected or not self._sock:
+            return
+        with self._lock:
+            try:
+                frame = {
+                    "cmd": "SET_ACTIVITY",
+                    "args": {
+                        "pid": os.getpid(),
+                        "activity": None
+                    },
+                    "nonce": str(time.time())
+                }
+                data = json.dumps(frame).encode("utf-8")
+                header = struct.pack("<II", 1, len(data))
+                payload = header + data
+                if hasattr(self._sock, "write"):
+                    self._sock.write(payload)
+                elif hasattr(self._sock, "sendall"):
+                    self._sock.sendall(payload)
+            except Exception:
+                pass
+            self._close_socket()
+
     def close(self):
         self._running = False
-        self._close_socket()
+        self.clear_presence()
 
 
 UI = {
@@ -1468,6 +1492,21 @@ class GeodeSyncApp(tk.Tk):
 
         threading.Thread(target=self._remote_update_monitor_thread, daemon=True).start()
         threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def on_close(self):
+        try:
+            self._monitor_running = False
+            if hasattr(self, "discord_rpc"):
+                self.discord_rpc.clear_presence()
+                self.discord_rpc.close()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     @staticmethod
     def _is_valid_game_path(path):
