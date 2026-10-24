@@ -1,9 +1,9 @@
 {
-  "app_version": "2.0.7",
+  "app_version": "2.0.8",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.0.7: Live Geode version detection in Discord Presence & UI, automated 1-click Geode updates from GitHub, and brand-new 3D crystal emblem."
+  "announcement": "GeodeSync v2.0.8: Fixed harsh hardware beeper noise with smooth modern Windows chime sound effects."
 }

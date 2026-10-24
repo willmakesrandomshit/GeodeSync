@@ -59,7 +59,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.8"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -2113,12 +2113,10 @@ class GeodeSyncApp(tk.Tk):
         if IS_WIN and winsound:
             def _play():
                 try:
-                    notes = [(523, 70), (659, 70), (784, 90), (1046, 200)]
-                    for freq, dur in notes:
-                        winsound.Beep(freq, dur)
+                    winsound.PlaySound("SystemNotification", winsound.SND_ALIAS | winsound.SND_ASYNC)
                 except Exception:
                     try:
-                        winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                        winsound.MessageBeep(winsound.MB_OK)
                     except Exception:
                         pass
             threading.Thread(target=_play, daemon=True).start()
