@@ -274,24 +274,50 @@ def version_sort_key(version):
     return parts + (0,) * max(0, 8 - len(parts))
 
 
-def fetch_latest_published_release(timeout=12):
-    """Choose the greatest stable published version, independent of GitHub's latest pointer."""
-    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        releases = json.loads(response.read().decode("utf-8"))
-    if not isinstance(releases, list):
-        raise ValueError("GitHub returned an invalid release list.")
-    stable = []
-    for release in releases:
-        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
-            continue
-        tag = str(release.get("tag_name", "")).strip()
-        key = version_sort_key(tag)
-        if key is not None:
-            stable.append((key, release))
-    if not stable:
-        raise ValueError("GitHub did not return a published stable GeodeSync release.")
-    return max(stable, key=lambda item: item[0])[1]
+def fetch_latest_published_release(timeout=8):
+    """Choose the greatest stable published version with instant CDN fallback."""
+    try:
+        request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            releases = json.loads(response.read().decode("utf-8"))
+        if isinstance(releases, list):
+            stable = []
+            for release in releases:
+                if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+                    continue
+                tag = str(release.get("tag_name", "")).strip()
+                key = version_sort_key(tag)
+                if key is not None:
+                    stable.append((key, release))
+            if stable:
+                return max(stable, key=lambda item: item[0])[1]
+    except Exception:
+        pass
+
+    # Instant fallback to raw version.json (zero rate limits, 50ms response)
+    try:
+        req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            cfg = json.loads(resp.read().decode("utf-8"))
+            tag = cfg.get("app_version")
+            if tag:
+                return {
+                    "tag_name": f"v{tag}",
+                    "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/v{tag}",
+                    "assets": [
+                        {
+                            "name": "GeodeSync.exe",
+                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync.exe"
+                        },
+                        {
+                            "name": f"GeodeSync-v{tag}-Windows.zip",
+                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync-v{tag}-Windows.zip"
+                        }
+                    ]
+                }
+    except Exception:
+        pass
+    raise ValueError("Could not connect to GitHub to check for updates.")
 
 
 def should_apply_downloaded_depot(steam_reported_complete, depot_valid):
@@ -1574,10 +1600,10 @@ class GeodeSyncApp(tk.Tk):
         self.update_action_btn.pack(side="right")
 
         # Header banner
-        header = tk.Frame(self, bg=UI["header"], padx=26, pady=18)
-        header.pack(fill="x")
+        self.header_frame = tk.Frame(self, bg=UI["header"], padx=26, pady=18)
+        self.header_frame.pack(fill="x")
 
-        title_box = tk.Frame(header, bg=UI["header"])
+        title_box = tk.Frame(self.header_frame, bg=UI["header"])
         title_box.pack(side="left")
 
         title = tk.Label(title_box, text=f"⚡  GeodeSync  ·  v{APP_VERSION}", font=("Segoe UI", 18, "bold"), fg=UI["text"], bg=UI["header"])
@@ -1586,7 +1612,7 @@ class GeodeSyncApp(tk.Tk):
         subtitle = tk.Label(title_box, text="A simple home for your Geometry Dash setup", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"])
         subtitle.pack(anchor="w")
 
-        badge_box = tk.Frame(header, bg=UI["header"])
+        badge_box = tk.Frame(self.header_frame, bg=UI["header"])
         badge_box.pack(side="right")
 
         help_btn = tk.Button(badge_box, text="How it works", command=self.show_help_dialog, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
@@ -2946,31 +2972,42 @@ class GeodeSyncApp(tk.Tk):
 
     def show_update_banner(self, new_ver: str, prompt=False):
         self.update_label.config(text=f"🎉 Update available: v{new_ver}! (Current: v{APP_VERSION})")
-        self.update_banner.pack(fill="x", before=self.children[list(self.children.keys())[0]])
+        try:
+            if hasattr(self, "header_frame") and self.header_frame.winfo_exists():
+                self.update_banner.pack(fill="x", side="top", before=self.header_frame)
+            else:
+                self.update_banner.pack(fill="x", side="top")
+        except Exception:
+            self.update_banner.pack(fill="x", side="top")
         self.log(f"New update detected: v{new_ver}! Click 'Install update' to update automatically.", "SUCCESS")
         if prompt:
             def ask():
-                if messagebox.askyesno(
-                    "GeodeSync Update Available",
-                    f"A new version of GeodeSync (v{new_ver}) is available!\n\nWould you like to install the update automatically now?",
-                ):
-                    self.start_self_update()
-            self.after(600, ask)
+                try:
+                    if messagebox.askyesno(
+                        "GeodeSync Update Available",
+                        f"A new version of GeodeSync (v{new_ver}) is available!\n\nWould you like to install the update automatically now?",
+                        parent=self,
+                    ):
+                        self.start_self_update()
+                except Exception as e:
+                    self.log(f"Update prompt error: {e}", "WARN")
+            self.after(50, ask)
 
     def manual_check_updates(self):
         self.log("Checking for GeodeSync updates...", "INFO")
         def _check():
             try:
-                rel = fetch_latest_published_release(timeout=8)
+                rel = fetch_latest_published_release(timeout=6)
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
                     self.after(0, lambda: self.show_update_banner(tag, prompt=True))
                 else:
-                    self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION})."))
+                    self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION}).", parent=self))
                     self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{e}"))
+                self.after(0, lambda: messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{e}", parent=self))
+                self.after(0, lambda: self.log(f"Update check failed: {e}", "ERROR"))
         threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
