@@ -8,7 +8,7 @@ GeodeSync helps manage Geometry Dash versions installed through Steam. It can sw
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.1-green.svg)
 
 ## Start here
 

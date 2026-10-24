@@ -43,7 +43,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -434,12 +434,15 @@ def atomic_write_json(path, value):
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(value, stream, indent=2)
             stream.flush()
-            os.fsync(stream.fileno())
+            try:
+                os.fsync(stream.fileno())
+            except OSError:
+                pass
         os.replace(temporary, path)
     finally:
         try:
             os.unlink(temporary)
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             pass
 
 

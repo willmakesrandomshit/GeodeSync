@@ -10,6 +10,11 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --manifest app.manifest --add-data 'icon.ico;.' main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to build GeodeSync.exe.' }
 
+$cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cert) {
+    Set-AuthenticodeSignature -FilePath 'dist\GeodeSync.exe' -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -ErrorAction SilentlyContinue | Out-Null
+}
+
 $packageDir = Join-Path $repoRoot "dist\GeodeSync-v$version-Windows"
 if (Test-Path $packageDir) { Remove-Item $packageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $packageDir | Out-Null
