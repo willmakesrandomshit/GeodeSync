@@ -8,3 +8,5 @@ __pycache__/
 *.zip
 .vscode/
 .idea/
+discord_webhook.json
+.env
