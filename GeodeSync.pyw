@@ -51,7 +51,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10
 
 
 class DiscordRPC:
-    CLIENT_ID = "1178492879627366472"
+    CLIENT_ID = "1563607447384367195"
 
     def __init__(self, enabled=True):
         self._enabled = enabled
@@ -179,7 +179,7 @@ class DiscordRPC:
                             "state": self._current_state,
                             "timestamps": {"start": self._start_time},
                             "assets": {
-                                "large_image": "gd_large",
+                                "large_image": "logo",
                                 "large_text": f"GeodeSync v{APP_VERSION}"
                             },
                             "buttons": [
