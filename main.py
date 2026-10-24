@@ -59,7 +59,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1655,6 +1655,67 @@ class GDManager:
         except Exception as e:
             return False, str(e)
 
+    def check_incompatible_mods(self):
+        """
+        Scans for known incompatible or broken mods that cause Windows DLL Loader
+        'Entry Point Not Found' crashes (e.g. prevter.imageplus v1.1.1 calling
+        loadRootSubDictFromCompressedFile which is missing in GD 2.2081).
+        """
+        if not self.gd_path:
+            return []
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        if not os.path.isdir(mods_dir):
+            return []
+
+        issues = []
+        ip_path = os.path.join(mods_dir, "prevter.imageplus.geode")
+        if os.path.exists(ip_path):
+            try:
+                with zipfile.ZipFile(ip_path, "r") as zf:
+                    if "mod.json" in zf.namelist():
+                        meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                        ver = str(meta.get("version", "")).lstrip("v")
+                        # 1.1.1 calls loadRootSubDictFromCompressedFile which crashes GD 2.2081
+                        if ver == "1.1.1":
+                            issues.append({
+                                "id": "prevter.imageplus",
+                                "name": "ImagePlus",
+                                "version": "v" + ver,
+                                "issue": "Missing DLL Entry Point (?loadRootSubDictFromCompressedFile@DS_Dictionary@@QEAA_NPEBD@Z)",
+                                "recommended_version": "v1.1.0",
+                                "download_url": "https://api.geode-sdk.org/v1/mods/prevter.imageplus/versions/1.1.0/download",
+                                "file_path": ip_path
+                            })
+            except Exception:
+                pass
+
+        return issues
+
+    def fix_incompatible_mod(self, issue):
+        """
+        Downloads the recommended stable release of a mod, replaces the broken .geode file,
+        and purges the stale unzipped cache.
+        """
+        if not self.gd_path or not issue.get("download_url"):
+            return False, "Invalid issue or missing download URL."
+        try:
+            req = urllib.request.Request(issue["download_url"], headers={"User-Agent": "GeodeSync-Client"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read()
+
+            file_path = issue["file_path"]
+            with open(file_path, "wb") as f:
+                f.write(data)
+
+            # Purge unzipped cached DLL to ensure Windows loads the fresh binary
+            unzipped_dir = os.path.join(self.gd_path, "geode", "unzipped", issue["id"])
+            if os.path.exists(unzipped_dir):
+                shutil.rmtree(unzipped_dir, ignore_errors=True)
+
+            return True, f"Successfully installed tested {issue['recommended_version']} for {issue['name']}!"
+        except Exception as e:
+            return False, str(e)
+
 
 class ModernButton(tk.Canvas):
     def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
@@ -2837,6 +2898,29 @@ class GeodeSyncApp(tk.Tk):
     # v1.1.2 FEATURE: CRASH DOCTOR (DIAGNOSE BROKEN MODS)
     # ==========================================
     def run_crash_doctor(self):
+        # 1. Scan for Windows DLL Loader 'Entry Point Not Found' crashers (these crash before crash logs exist)
+        incompat = self.mgr.check_incompatible_mods()
+        if incompat:
+            item = incompat[0]
+            res = messagebox.askyesno(
+                "🩺 Crash Doctor: Entry Point Crash Detected!",
+                f"⚠️ Fatal Incompatible Mod Found:\n👉 {item['name']} ({item['id']} {item['version']})\n\n"
+                f"Issue:\n{item['issue']}\n\n"
+                f"Symptom:\nWindows pops up 'GeometryDash.exe - Entry Point Not Found' on launch.\n\n"
+                f"Would you like Crash Doctor to automatically install the tested, compatible {item['recommended_version']} release now?"
+            )
+            if res:
+                self.log(f"Repairing {item['name']}...", "INFO")
+                ok, msg = self.mgr.fix_incompatible_mod(item)
+                if ok:
+                    self.log(msg, "SUCCESS")
+                    messagebox.showinfo("🩺 Crash Doctor: Repaired!", f"🎉 {msg}\n\nGeometry Dash can now launch cleanly!")
+                    return
+                else:
+                    self.log(f"Repair failed: {msg}", "ERROR")
+                    messagebox.showerror("Repair Failed", f"Could not repair mod:\n{msg}")
+                    return
+
         crash_dir = self.mgr.get_crashlogs_dir()
         if not crash_dir or not os.path.exists(crash_dir):
             messagebox.showinfo("🩺 Crash Doctor", "No crash logs folder found! Your Geometry Dash installation looks clean.")
@@ -3377,6 +3461,17 @@ class GeodeSyncApp(tk.Tk):
         if self.mgr.is_gd_process_running():
             messagebox.showinfo("Already Running", "Geometry Dash is already running!")
             return
+
+        # Auto-heal known incompatible mods that cause Windows DLL Entry Point crashes
+        incompat = self.mgr.check_incompatible_mods()
+        if incompat:
+            for item in incompat:
+                self.log(f"Auto-repairing incompatible mod {item['name']} ({item['version']})...", "INFO")
+                ok, msg = self.mgr.fix_incompatible_mod(item)
+                if ok:
+                    self.log(f"Auto-repaired {item['name']}: {msg}", "SUCCESS")
+                else:
+                    self.log(f"Auto-repair error: {msg}", "WARN")
         exe_path = os.path.join(self.mgr.gd_path, "GeometryDash.exe") if IS_WIN else None
         if IS_WIN and exe_path and os.path.exists(exe_path):
             try:
@@ -3605,6 +3700,17 @@ class GeodeSyncApp(tk.Tk):
         if self.mgr.is_gd_process_running():
             messagebox.showinfo("Already Running", "Geometry Dash is already running!")
             return
+
+        # Auto-heal known incompatible mods that cause Windows DLL Entry Point crashes
+        incompat = self.mgr.check_incompatible_mods()
+        if incompat:
+            for item in incompat:
+                self.log(f"Auto-repairing incompatible mod {item['name']} ({item['version']})...", "INFO")
+                ok, msg = self.mgr.fix_incompatible_mod(item)
+                if ok:
+                    self.log(f"Auto-repaired {item['name']}: {msg}", "SUCCESS")
+                else:
+                    self.log(f"Auto-repair error: {msg}", "WARN")
 
         self.log("Launching Geometry Dash (High Priority Boost)...", "INFO")
         if hasattr(self, "discord_rpc"):
