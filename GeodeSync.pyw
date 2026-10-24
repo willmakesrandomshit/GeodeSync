@@ -2818,7 +2818,11 @@ class GeodeSyncApp(tk.Tk):
             self.lock_badge.config(text="Unlocked (Normal)", fg=UI["amber"], bg=UI["panel_alt"])
 
         geode_ver = self.mgr.get_installed_geode_version()
-        has_geode = bool(geode_ver or self.mgr.has_geode())
+        # A detected installation can lack a readable version log. Use the
+        # existing filesystem detector as a fallback instead of calling a
+        # nonexistent has_geode() method (which prevented the dashboard from
+        # finishing its first refresh on every launch).
+        has_geode = bool(geode_ver or self.mgr.is_geode_installed())
         stats = self.mgr.get_player_stats()
         player_tag = f"{stats['stars']} ⭐ · {stats['demons']} 👿" if stats else None
         if hasattr(self, "discord_rpc"):
@@ -2831,6 +2835,8 @@ class GeodeSyncApp(tk.Tk):
 
         if geode_ver:
             self.geode_badge.config(text=f"Geode {geode_ver}", fg=UI["lilac"], bg=UI["lilac_dark"])
+        elif has_geode:
+            self.geode_badge.config(text="Installed · version unknown", fg=UI["amber"], bg=UI["panel_alt"])
         else:
             self.geode_badge.config(text="Not installed", fg=UI["red"], bg=UI["red_dark"])
 

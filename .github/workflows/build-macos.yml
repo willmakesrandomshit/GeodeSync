@@ -111,7 +111,8 @@ jobs:
           Copy-Item dist/GeodeSync.exe ./GeodeSync.exe
           New-Item -ItemType Directory -Force -Path ./GeodeSync-Windows | Out-Null
           Copy-Item dist/GeodeSync.exe ./GeodeSync-Windows/GeodeSync.exe
-          Copy-Item README.md ./GeodeSync-Windows/README.txt
+          Copy-Item README.md ./GeodeSync-Windows/README.md
+          Copy-Item USER_GUIDE.md ./GeodeSync-Windows/USER_GUIDE.md
           $version = (Get-Content version.json -Raw | ConvertFrom-Json).app_version
           Compress-Archive -Path ./GeodeSync-Windows/* -DestinationPath "./GeodeSync-v$version-Windows.zip" -Force
       - uses: actions/upload-artifact@v4
@@ -146,6 +147,7 @@ jobs:
           cp dist/GeodeSync dist/GeodeSync-Linux/GeodeSync
           chmod +x dist/GeodeSync-Linux/GeodeSync
           cp README.md dist/GeodeSync-Linux/README.md
+          cp USER_GUIDE.md dist/GeodeSync-Linux/USER_GUIDE.md
           cat << 'EOF' > dist/GeodeSync-Linux/run.sh
 #!/bin/bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

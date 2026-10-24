@@ -2,7 +2,7 @@
 
 GeodeSync helps manage a Steam copy of Geometry Dash: it can switch to a supported game version, protect that version from Steam auto-updates, manage saves and mods, and collect diagnostics when something goes wrong. It does not replace Steam or Geode.
 
-This guide describes the v2.0.0 interface. Button names can vary slightly between older releases; update from the official [GeodeSync GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases) if a control mentioned here is missing.
+This guide follows the current v2.3.0 source. The latest published package can be older, so a feature or button may not appear until that version is released. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases) for published downloads.
 
 ## Before you start
 
@@ -34,13 +34,17 @@ The packaged Mac builds target macOS 11 or newer on Apple silicon and macOS 10.1
 
 ### Linux / Steam Deck
 
-The repository contains a legacy Linux runner, but the current main release and this guide focus on Windows and macOS packages. Linux/Steam Deck behavior depends on the runner, Python/Tk installation, Steam/Proton setup, and current release assets. Do not use the Windows or Mac package on Linux.
+1. Download the Linux `.tar.gz` package if the release provides one.
+2. Extract it to a writable folder.
+3. Run the included `run.sh` from a terminal or your desktop environment.
+
+The Linux package is built separately from Windows and macOS. Steam/Proton layouts and desktop environments vary; Linux and Steam Deck support has less platform-specific validation. Do not use the Windows or Mac package on Linux.
 
 ## First launch and setup
 
 1. Start Steam and make sure Geometry Dash appears in your Library.
-2. Open GeodeSync. It checks for Steam, the game folder, the installed game version, Geode, saves, and the Steam update lock. These status labels are detection results; if a path is wrong, use **Browse GD Folder** in the footer (or the equivalent folder control in your build) and select the Steam Geometry Dash folder. On Mac, you may select the folder containing `Geometry Dash.app` or the app bundle itself.
-3. Follow the large **Next step** card. It recommends one action based on the detected setup:
+2. Open GeodeSync. The dashboard shows detected Steam, Geometry Dash, Geode, saves, and update-lock status. These are detection results; if a path is wrong, use **Browse GD Folder** in the footer and select the Steam Geometry Dash folder. On Mac, you may select the folder containing `Geometry Dash.app` or the app bundle itself.
+3. Follow the primary setup card. It recommends one action based on the detected setup:
    - **Install Geode**: opens the official Geode installer. Complete that installer, return to GeodeSync, and refresh/reopen if the status has not updated.
    - **Install game version 2.2081**: starts the safe version switch described below.
    - **Launch Geometry Dash**: asks Steam to launch the game. On macOS, GeodeSync checks the app bundle first and then asks Steam to launch it; an accepted request does not guarantee the game process started.
@@ -48,10 +52,10 @@ The repository contains a legacy Linux runner, but the current main release and 
 
 ## Switch to the Geode-compatible game version
 
-The default recommended target in v2.0.0 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
+The default recommended target in v2.3.0 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
 
 1. Make sure Geometry Dash is closed. If prompted, allow GeodeSync to close it or close it yourself.
-2. Click **Backup saves** under **More tools** first if you want a manual backup. The version-switch flow also backs up detected save files and asks before proceeding if it cannot find any.
+2. Click **Backup Saves** in the dashboard tools first if you want a manual backup. The version-switch flow also backs up detected save files and asks before proceeding if it cannot find any.
 3. Click the main **Install game version 2.2081** button and review the confirmation.
 4. Leave Steam open and let its download finish. GeodeSync stages and validates the downloaded files before replacing the installed game. Do not quit GeodeSync or Steam, launch the game, or click the switch button repeatedly while it is working.
 5. Wait for the completion message and check the activity log. A Steam “download complete” message by itself is not proof that the depot is valid or installed.
@@ -61,7 +65,7 @@ After a successful switch, GeodeSync protects the selected version by locking St
 
 ### Choose a different supported version
 
-Open **More tools → Version selector**, choose one of the versions offered for your platform, and select **Set as Target Version**. The Mac build may offer fewer versions than Windows. Selecting a target only changes the chosen version; it does not download it. Follow the main Next step card to install it. Avoid choosing a version unless it is compatible with your Geode build and mods.
+Open **More tools**, choose **Version selector**, select a version offered for your platform, and choose **Set as Target Version**. The Mac build may offer fewer versions than Windows. Selecting a target only changes the chosen version; it does not download it. Follow the primary setup card to install it. Avoid choosing a version unless it is compatible with your Geode build and mods.
 
 ### Restore the current/latest Steam version
 
@@ -75,17 +79,17 @@ Restoring the current game changes game files through Steam; it does not delete 
 
 ### Back up saves
 
-Choose **More tools → Backup saves**. GeodeSync copies detected `.dat` and `.dat.bak` save files into a timestamped `GeodeSync_Save_Backups` folder under the Geometry Dash save-data folder and shows the destination. Keep another copy outside that folder if the saves are important.
+Choose **Backup Saves** in the dashboard tools. GeodeSync copies detected `.dat` and `.dat.bak` save files into a timestamped `GeodeSync_Save_Backups` folder under the Geometry Dash save-data folder and shows the destination. Keep another copy outside that folder if the saves are important.
 
 **Auto-Backup: ON/OFF** controls whether GeodeSync snapshots detected saves after it observes Geometry Dash close. It is a convenience, not a substitute for a separate backup. Check the activity log for a successful backup entry.
 
 ### Restore a save backup
 
-Choose **More tools → Restore saves**. It offers the newest GeodeSync backup and warns that restoring overwrites matching current save files. Close Geometry Dash first. If possible, make a fresh backup of the current files before restoring.
+Choose **Restore saves** under **More tools**. It offers the newest GeodeSync backup and warns that restoring overwrites matching current save files. Close Geometry Dash first. If possible, make a fresh backup of the current files before restoring.
 
 ### Check or repair saves
 
-Choose **More tools → Save Doctor** to check the main save files and look for a usable alternate or GeodeSync backup. Read its proposed repair carefully. If it offers a repair, it preserves the replaced file with a `.corrupted_bak` suffix before copying the selected fallback. If it cannot find a known-good backup, it cannot reconstruct lost progress; check Steam Cloud or another backup before writing over files.
+Choose **Save Doctor** in the dashboard tools to check the main save files and look for a usable alternate or GeodeSync backup. Read its proposed repair carefully. If it offers a repair, it preserves the replaced file with a `.corrupted_bak` suffix before copying the selected fallback. If it cannot find a known-good backup, it cannot reconstruct lost progress; check Steam Cloud or another backup before writing over files.
 
 ### Game profiles and mod profiles
 
@@ -94,12 +98,18 @@ Choose **More tools → Save Doctor** to check the main save files and look for 
 
 ## Other tools
 
-Open **More tools** to find the additional utilities. Use only the tools you need and read each confirmation:
+The dashboard's **Companion Tools** grid contains the main utilities; **More tools** expands the additional controls. Use only the tools you need and read each confirmation:
 
+- **Mod Manager** shows installed Geode mods and lets you search and enable or disable them. **Update Mods** checks installed mods against the Geode index and offers updates. Review the proposed versions; third-party mods can still have compatibility issues.
+- **Demon Tracker** reads local Geometry Dash save data to summarize progress and active grinds. It is a local feature; only share the generated summary if you choose to copy it.
+- **Texture Packs** makes a vanilla texture backup before installing a selected pack and offers a restore option. Keep Geometry Dash closed while files are changed.
+- **Keybind Doctor** inspects available mod keybind configuration and reports detected collisions. It can only see mappings present in files it can read.
+- **Game Profiles** stores supported game version and active mod selections locally. Applying one can change game files and mods; check the confirmation before continuing.
+- **Discord RPC** controls whether GeodeSync advertises its activity through Discord Rich Presence. **Run in BG** controls whether the app stays open in the background. Both can be toggled from the dashboard.
 - **Mods folder** opens the detected Geode mods folder.
 - **Cache cleaner** can remove selected crash/log files and downloaded song/audio cache. Selected cached songs may need to download again. Review the selection before confirming.
 - **Crash Doctor** inspects recent Geode crash logs and may offer to temporarily disable a suspected mod. A suspected mod is a clue, not proof; re-enable it if disabling it does not resolve the crash.
-- **Fix click delay**, **FPS unlocker**, **Essential mods**, and other game utilities change files, settings, or install community content. Back up first, review prompts, and check each tool's result in the activity log. Mod availability and compatibility can change over time.
+- **Fix click delay**, **FPS unlocker**, **NONG Songs**, **Essential Mods**, and other game utilities change files, settings, or install community content. Back up first, review prompts, and check each tool's result in the activity log. Mod availability and compatibility can change over time.
 - **Clear** clears the visible activity panel; it is not a repair action. Prefer exporting a support report before clearing useful troubleshooting history.
 
 ## Updates to GeodeSync
@@ -140,7 +150,7 @@ Make sure Steam is installed and Geometry Dash is installed through Steam. Use t
 
 If something fails, the report is more useful than a photo of only the error dialog:
 
-1. In GeodeSync, open **More tools → Export support report**.
+1. In GeodeSync, choose **Export support report** in **More tools**.
 2. Save the `.txt` file somewhere easy to find, such as the Desktop.
 3. Open it and review it before sharing. The report includes GeodeSync/platform/game status and recent activity. The app redacts common home-folder paths and email addresses and does not include save-file contents or mod files, but you should still review the whole report.
 4. Attach that text file to your support message. Include what button you clicked, what you expected, what happened, the exact error, whether Steam can launch Geometry Dash by itself, your GeodeSync version, macOS/Windows version, and Mac processor type if applicable.

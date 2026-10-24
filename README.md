@@ -2,32 +2,46 @@
   <img src="assets/banner.png" alt="GeodeSync" width="100%">
 </p>
 
-# GeodeSync
+<p align="center">
+  <b>A Geometry Dash and Geode companion for Steam.</b><br>
+  Switch supported game versions, protect saves, manage mods, and troubleshoot from one desktop app.
+</p>
 
-GeodeSync helps manage Geometry Dash versions installed through Steam. It can switch between supported game depots, protect a selected version from automatic updates, and provide save and mod utilities.
+<p align="center">
+  <a href="https://github.com/willmakesrandomshit/GeodeSync/releases/latest"><img src="https://img.shields.io/github/v/release/willmakesrandomshit/GeodeSync?display_name=tag&style=for-the-badge" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-7b6b9e?style=for-the-badge" alt="Windows, macOS, and Linux">
+</p>
 
-![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)
-![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.0-green.svg)
+## Download and get started
 
-## Start here
+Download the latest published build from [GitHub Releases](https://github.com/willmakesrandomshit/GeodeSync/releases/latest). Choose the package for your system, then follow the [complete user guide](USER_GUIDE.md).
 
-1. Download the package for your computer from [GitHub Releases](https://github.com/willmakesrandomshit/GeodeSync/releases).
-2. Open GeodeSync and follow the **Next step** card for your detected setup.
-3. Before switching game versions, close Geometry Dash and review the confirmation. GeodeSync stages and validates the depot before changing installed files, backs up detected saves, and keeps a recovery journal so a switch interrupted by an app exit or crash can be rolled back on the next launch.
-4. Use **Game profiles** to save a supported game version and active mod selection together. Profiles are stored locally in your app data folder.
-5. Use **Export support report** to create a shareable diagnostic file with recent activity and system status. It excludes save contents and mod files; review the report before sharing it.
-6. Open **More tools** for backups and the other utilities.
+- **Windows:** Extract the ZIP and open `GeodeSync.exe`.
+- **macOS Apple silicon:** Use `GeodeSync-macOS-arm64.zip`.
+- **macOS Intel:** Use `GeodeSync-macOS-x86_64.zip`.
+- **Linux / Steam Deck:** Use the Linux archive if it is attached to the release. Linux and Proton setups have less platform-specific validation than Windows and macOS.
 
-GeodeSync does not replace Steam or Geode. Keep save backups before changing game files, and use Steam's **Verify integrity** if the game itself is damaged. Game switching remains dependent on Steam completing and exposing a valid depot; the app will leave installed files unchanged when depot validation fails.
+GeodeSync manages Geometry Dash installations provided by Steam; it does not replace Steam or Geode. Before switching versions, close the game and review the confirmation. The switch flow backs up detected saves, validates staged game files, and keeps recovery data if a swap is interrupted. If validation fails, the existing installation should be left in place.
 
-## Downloads
+## What it can do
 
-- **Windows:** Download the Windows ZIP, extract it, and open `GeodeSync.exe`.
-- **macOS:** Download the ZIP matching Apple silicon (`arm64`) or Intel (`x86_64`), extract `GeodeSync.app`, then open it. If macOS blocks an unsigned community build, Control-click the app and choose **Open**.
+- Switch between supported Geometry Dash versions and manage Steam's update lock.
+- Back up and restore saves, recover interrupted switches, and export a local support report.
+- Save game and mod profiles; inspect, enable, disable, and update Geode mods.
+- Inspect Geometry Dash progress and troubleshoot mod crashes and keybind conflicts.
+- Install and restore texture packs with a vanilla texture backup.
+- Use companion tools such as the cache cleaner, FPS unlocker, click-delay fix, and essential-mod installer.
 
-## Build
+Some tools and supported game versions vary by platform. Read each confirmation before changing game files, mods, save files, or Steam settings. Support reports contain diagnostic details; review the exported file before sharing it.
 
-Windows builds use `package_windows.ps1`. macOS builds use `build_macos.py --arch arm64` or `build_macos.py --arch x86_64`. The GitHub Actions workflow builds both Windows and macOS packages and runs the repository's regression suite.
+## Build and verify
 
-See the [complete user guide](https://github.com/willmakesrandomshit/GeodeSync/blob/main/USER_GUIDE.md), [Mac installation notes](README-macOS.txt), and [release notes](release_notes.md).
+The repository's GitHub Actions workflow builds Windows, macOS, and Linux packages for releases. macOS packages are built separately for Apple silicon and Intel. The Mac minimum-version values are build targets; they are not a claim that every OS version, processor, or Steam installation has been tested.
+
+Run the regression suite with:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+See [macOS installation notes](README-macOS.txt), [Linux notes](README-Linux.txt), [release notes](release_notes.md), and [all releases](https://github.com/willmakesrandomshit/GeodeSync/releases).

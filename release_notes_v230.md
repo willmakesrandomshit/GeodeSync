@@ -1,33 +1,20 @@
-### 🚀 What's New in GeodeSync v2.3.0
+# GeodeSync v2.3.0 — companion tools and safer setup
 
-GeodeSync v2.3.0 expands the dashboard into a full **20-Tool Power Hub** for Geometry Dash and Geode modding, bringing 4 highly requested desktop features:
+GeodeSync v2.3.0 expands the Geometry Dash companion dashboard with tools for mod maintenance, save insight, customization, and troubleshooting.
 
----
+## New companion tools
 
-### 🔄 1. 1-Click "Update All Mods" Hub
-- **Concurrent Index Scanning:** Scans all 40+ installed Geode mods in parallel against the official Geode SDK Index API in seconds.
-- **1-Click Batch Updating:** Update all outdated mods simultaneously or one-by-one.
-- **Entry Point Crash Guard:** Automatically protects against broken upstream builds (such as `ImagePlus v1.1.1` missing DLL entry point on GD 2.2081) so your game never crashes.
+- **Update Mods:** Check installed Geode mods against the Geode index and update selected mods or the available set. A compatibility guard filters a known-broken ImagePlus build for the supported game version.
+- **Demon Tracker:** Read local Geometry Dash progress and active level grinds, with an option to copy a shareable summary.
+- **Texture Packs:** Back up the original `Resources` folder before installing a selected pack, then restore the saved vanilla textures from the tool.
+- **Keybind Doctor:** Inspect readable Geode configuration files for overlapping mod shortcuts.
 
-### 📈 2. Demon & Grind Progress Tracker
-- **Native Decryption:** Directly decrypts your `CCGameManager.dat` save data to surface your real in-game stats, 100% completed demons, and active hard grinds (15%–99%).
-- **Grind Analytics:** Shows exact normal mode %, practice mode %, and attempt counts for levels like *Dead Device*, *Platinum Adventure*, and *Thinking Space II*.
-- **1-Click Discord Markdown Card:** Formats your progress into a clean Discord embed/status ready to copy and share in community channels.
+## Dashboard and reliability
 
-### 🎨 3. Safe Texture Pack Hub
-- **Automated Vanilla Backup:** Securely preserves an untouched snapshot of your original game textures into `Resources_Vanilla_Backup` before installing any custom pack.
-- **1-Click Install & Swap:** Apply any custom texture pack archive (`.zip` or directory) seamlessly.
-- **1-Click Restore:** Instantly restore 100% original vanilla textures with zero risk of file corruption or having to re-verify game integrity in Steam.
+- Keep the player card, game and Geode status, Steam update lock, and primary setup action together on the dashboard.
+- Search installed mods and enable or disable them from the mod manager.
+- Keep version switching staged, validated, and recoverable, with detected save backups before file changes.
+- Complete dashboard startup when Geode is installed but its version cannot be read; show an installed/unknown status instead of treating it as missing.
+- Export a local diagnostic report for support. Review the report before sharing it.
 
-### ⌨️ 4. Keybind Conflict Doctor
-- **Deep Config Audit:** Scans all installed Geode mod settings, local appdata, and keybind configurations.
-- **Collision Detection:** Flags whenever two or more mods are mapped to the same hotkey without unique modifiers, avoiding simultaneous menu and action triggers.
-- **Hotkey Directory:** Provides a complete reference table of all active shortcuts registered across your mods.
-
----
-
-### 📦 Direct Downloads
-- **Windows Standalone (.exe):** [Download GeodeSync.exe](https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.3.0/GeodeSync.exe)
-- **Windows Portable (.zip):** [Download GeodeSync-v2.3.0-Windows.zip](https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.3.0/GeodeSync-v2.3.0-Windows.zip)
-- **Linux Tarball (.tar.gz):** [Download GeodeSync-v2.3.0-Linux.tar.gz](https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.3.0/GeodeSync-v2.3.0-Linux.tar.gz)
-- **macOS Universal (.zip):** [Download GeodeSync-macOS-arm64.zip](https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.3.0/GeodeSync-macOS-arm64.zip) / [GeodeSync-macOS-x86_64.zip](https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.3.0/GeodeSync-macOS-x86_64.zip)
+Features depend on the platform and the installed GeodeSync build. Back up important saves and review confirmation prompts before changing game, mod, or texture files. Check the [user guide](USER_GUIDE.md) for setup and recovery instructions. Published downloads are listed on the [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases).
