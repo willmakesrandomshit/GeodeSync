@@ -9,7 +9,17 @@ class TestAppInit(unittest.TestCase):
         try:
             self.assertIsNotNone(app.mgr)
             self.assertIsNotNone(app.geode_badge)
+            self.assertIsNotNone(app.player_card)
+            self.assertIsNotNone(app.launch_btn)
             app.refresh_status()
+            stats = app.mgr.get_player_stats()
+            # If user has GD saves, verify dict structure
+            if stats:
+                self.assertIn("name", stats)
+                self.assertIn("stars", stats)
+                self.assertIn("demons", stats)
+            mods = app.mgr.get_installed_mods()
+            self.assertIsInstance(mods, list)
         finally:
             app.destroy()
 

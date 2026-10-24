@@ -59,7 +59,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.0.9"
+APP_VERSION = "2.1.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1554,6 +1554,107 @@ class GDManager:
             return "v5.x"
         return None
 
+    def get_player_stats(self):
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return None
+        gm_path = os.path.join(save_dir, "CCGameManager.dat")
+        if not os.path.exists(gm_path):
+            return None
+        try:
+            with open(gm_path, "rb") as f:
+                raw = f.read()
+            dec = zlib.decompress(
+                base64.b64decode(bytes(b ^ 11 for b in raw).replace(b"-", b"+").replace(b"_", b"/")),
+                15 + 32,
+            ).decode("utf-8", errors="ignore")
+
+            name_m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
+            player_name = name_m.group(1) if name_m else "Player"
+
+            gs_idx = dec.find("GS_value")
+            stats = {}
+            if gs_idx != -1:
+                chunk = dec[gs_idx : gs_idx + 4000]
+                for m in re.finditer(r"<k>([0-9]+)</k><s>([0-9]+)</s>", chunk):
+                    stats[int(m.group(1))] = int(m.group(2))
+
+            return {
+                "name": player_name,
+                "jumps": stats.get(1, 0),
+                "attempts": stats.get(2, 0),
+                "demons": stats.get(5, 0),
+                "stars": stats.get(6, 0),
+                "coins": stats.get(8, 0),
+                "user_coins": stats.get(12, 0),
+                "diamonds": stats.get(13, 0),
+                "orbs": stats.get(14, 0),
+                "moons": stats.get(28, 0),
+            }
+        except Exception:
+            return None
+
+    def get_installed_mods(self):
+        if not self.gd_path:
+            return []
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        if not os.path.isdir(mods_dir):
+            return []
+        results = []
+        try:
+            for item in sorted(os.listdir(mods_dir)):
+                if item.endswith((".geode", ".disabled")):
+                    is_enabled = item.endswith(".geode")
+                    full = os.path.join(mods_dir, item)
+                    name = item
+                    version = "v1.0"
+                    developer = "Unknown"
+                    mod_id = item.replace(".geode.disabled", "").replace(".geode", "")
+                    try:
+                        with zipfile.ZipFile(full, "r") as zf:
+                            if "mod.json" in zf.namelist():
+                                meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                                name = meta.get("name", meta.get("id", mod_id))
+                                version = meta.get("version", "v1.0")
+                                dev = meta.get("developer") or meta.get("developers")
+                                if isinstance(dev, list):
+                                    developer = ", ".join(dev)
+                                elif isinstance(dev, str):
+                                    developer = str(dev)
+                    except Exception:
+                        pass
+                    results.append({
+                        "filename": item,
+                        "mod_id": mod_id,
+                        "name": name,
+                        "version": version,
+                        "developer": developer,
+                        "enabled": is_enabled,
+                        "path": full,
+                    })
+        except Exception:
+            pass
+        return results
+
+    def toggle_mod(self, filename, enable=None):
+        if not self.gd_path:
+            return False, "GD path not found"
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        src = os.path.join(mods_dir, filename)
+        if not os.path.exists(src):
+            return False, "Mod file not found"
+        if filename.endswith(".geode") and enable in (False, None):
+            dst = os.path.join(mods_dir, filename + ".disabled")
+        elif filename.endswith(".disabled") and enable in (True, None):
+            dst = os.path.join(mods_dir, filename[:-9])
+        else:
+            return False, "Invalid state"
+        try:
+            os.replace(src, dst)
+            return True, os.path.basename(dst)
+        except Exception as e:
+            return False, str(e)
+
 
 class ModernButton(tk.Canvas):
     def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
@@ -1982,6 +2083,39 @@ class GeodeSyncApp(tk.Tk):
         self.saves_badge = tk.Label(f_saves, text="Checking…", font=("Segoe UI", 9, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=8, pady=4)
         self.saves_badge.pack(anchor="w", pady=(2, 0))
 
+        # PLAYER STATS CARD
+        self.player_card = tk.Frame(body, bg=UI["panel"], padx=18, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+        self.player_card.pack(fill="x", pady=(0, 12))
+
+        player_top = tk.Frame(self.player_card, bg=UI["panel"])
+        player_top.pack(fill="x")
+
+        tk.Label(player_top, text="GD PLAYER STATS", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
+        self.player_name_lbl = tk.Label(player_top, text="Reading save...", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"])
+        self.player_name_lbl.pack(side="left", padx=(10, 0))
+
+        self.refresh_stats_btn = tk.Label(player_top, text="🔄 Refresh", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel"], cursor="hand2")
+        self.refresh_stats_btn.pack(side="right")
+        self.refresh_stats_btn.bind("<Button-1>", lambda e: self.update_player_stats_ui())
+
+        self.stats_chips_frame = tk.Frame(self.player_card, bg=UI["panel"])
+        self.stats_chips_frame.pack(fill="x", pady=(6, 0))
+
+        def _make_stat_chip(parent, icon, label_text, color):
+            f = tk.Frame(parent, bg=UI["panel_alt"], padx=7, pady=3, highlightbackground=UI["border"], highlightthickness=1)
+            f.pack(side="left", padx=3)
+            tk.Label(f, text=icon, font=("Segoe UI", 9), fg=color, bg=UI["panel_alt"]).pack(side="left", padx=(0, 4))
+            lbl = tk.Label(f, text=label_text, font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel_alt"])
+            lbl.pack(side="left")
+            return lbl
+
+        self.stat_stars_lbl = _make_stat_chip(self.stats_chips_frame, "⭐", "0 Stars", UI["amber"])
+        self.stat_demons_lbl = _make_stat_chip(self.stats_chips_frame, "👿", "0 Demons", UI["lilac"])
+        self.stat_moons_lbl = _make_stat_chip(self.stats_chips_frame, "🌙", "0 Moons", "#66b3ff")
+        self.stat_diamonds_lbl = _make_stat_chip(self.stats_chips_frame, "💎", "0 Diamonds", "#00e5ff")
+        self.stat_coins_lbl = _make_stat_chip(self.stats_chips_frame, "🪙", "0 Coins", UI["amber"])
+        self.stat_orbs_lbl = _make_stat_chip(self.stats_chips_frame, "🔮", "0 Orbs", "#e056fd")
+
         # 3. Keep the first screen focused on the recommended action. Utilities
         # stay available in a compact drawer instead of competing with it.
         tools_card = tk.Frame(body, bg=UI["header"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
@@ -1992,6 +2126,9 @@ class GeodeSyncApp(tk.Tk):
 
         self.more_toggle_btn = tk.Button(row_main, text="More tools  +", command=self.toggle_more_tools, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
         self.more_toggle_btn.pack(side="left")
+
+        self.launch_btn = tk.Button(row_main, text="▶ Launch GD (Boosted)", command=self.launch_boosted_game, font=("Segoe UI", 9, "bold"), bg=UI["lime_dark"], fg=UI["lime"], activebackground=UI["lime"], activeforeground=UI["background"], relief="flat", padx=12, pady=7, cursor="hand2")
+        self.launch_btn.pack(side="left", padx=(10, 0))
 
         self.restore_gd_btn = tk.Button(row_main, text="Restore current game", command=self.upgrade_clicked, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["amber"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=7, cursor="hand2")
         self.restore_gd_btn.pack(side="right")
@@ -2019,7 +2156,7 @@ class GeodeSyncApp(tk.Tk):
         add_tool("♻️ Save Manager", self.restore_saves, color=UI["lime"], row=0, column=1)
         add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=2)
         add_tool("📦 Essential mods", self.install_essential_mods, color=UI["amber"], row=1, column=0, bold=True)
-        add_tool("📁 Mods folder", self.open_mods_folder, row=1, column=1)
+        add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=1, column=1, bold=True)
         add_tool("🎯 Mod profiles", self.open_mod_profiles, row=1, column=2)
         add_tool("⚡ FPS unlocker", self.open_fps_unlocker, color=UI["lime"], row=2, column=0)
         add_tool("🧹 Cache cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=1)
@@ -2140,9 +2277,14 @@ class GeodeSyncApp(tk.Tk):
 
         geode_ver = self.mgr.get_installed_geode_version()
         has_geode = bool(geode_ver or self.mgr.has_geode())
+        stats = self.mgr.get_player_stats()
+        player_tag = f"{stats['stars']} ⭐ · {stats['demons']} 👿" if stats else None
         if hasattr(self, "discord_rpc"):
             g_tag = geode_ver or "v5.x"
-            status_desc = f"Geode {g_tag} · Mods Protected 🛡️" if is_locked else f"Geode {g_tag} · Ready"
+            if player_tag:
+                status_desc = f"{player_tag} · Geode {g_tag} 🛡️" if is_locked else f"{player_tag} · Ready"
+            else:
+                status_desc = f"Geode {g_tag} · Mods Protected 🛡️" if is_locked else f"Geode {g_tag} · Ready"
             self.discord_rpc.update_presence(f"GD {ver_text}", status_desc, geode_ver=g_tag)
 
         if geode_ver:
@@ -2172,6 +2314,7 @@ class GeodeSyncApp(tk.Tk):
             bg=UI["lime_dark"] if save_files else UI["panel_alt"],
         )
 
+        self.update_player_stats_ui()
         if not self.is_downloading_depot:
             self.update_smart_guide(has_geode, is_locked)
 
@@ -3183,6 +3326,221 @@ class GeodeSyncApp(tk.Tk):
         else:
             messagebox.showerror("Error", "Geometry Dash mods folder not found.")
 
+    def update_player_stats_ui(self):
+        try:
+            stats = self.mgr.get_player_stats()
+            if not stats:
+                if hasattr(self, "player_name_lbl"):
+                    self.player_name_lbl.config(text="No save data found yet", fg=UI["muted"])
+                return
+            if hasattr(self, "player_name_lbl"):
+                att_str = f"({stats.get('attempts', 0):,} att)" if stats.get('attempts') else ""
+                self.player_name_lbl.config(text=f"{stats.get('name', 'Player')}  {att_str}".strip(), fg=UI["lime"])
+            if hasattr(self, "stat_stars_lbl"):
+                self.stat_stars_lbl.config(text=f"{stats.get('stars', 0):,} Stars")
+            if hasattr(self, "stat_demons_lbl"):
+                self.stat_demons_lbl.config(text=f"{stats.get('demons', 0):,} Demons")
+            if hasattr(self, "stat_moons_lbl"):
+                self.stat_moons_lbl.config(text=f"{stats.get('moons', 0):,} Moons")
+            if hasattr(self, "stat_diamonds_lbl"):
+                self.stat_diamonds_lbl.config(text=f"{stats.get('diamonds', 0):,} Diamonds")
+            coins_total = stats.get('coins', 0) + stats.get('user_coins', 0)
+            if hasattr(self, "stat_coins_lbl"):
+                self.stat_coins_lbl.config(text=f"{coins_total:,} Coins")
+            orbs = stats.get('orbs', 0)
+            orbs_str = f"{round(orbs / 1000, 1)}K" if orbs >= 10000 else f"{orbs:,}"
+            if hasattr(self, "stat_orbs_lbl"):
+                self.stat_orbs_lbl.config(text=f"{orbs_str} Orbs")
+        except Exception:
+            pass
+
+    def launch_boosted_game(self):
+        if not self.mgr.gd_path:
+            messagebox.showerror("Error", "Could not locate Geometry Dash folder.")
+            return
+        if self.mgr.is_gd_process_running():
+            messagebox.showinfo("Already Running", "Geometry Dash is already running!")
+            return
+        exe_path = os.path.join(self.mgr.gd_path, "GeometryDash.exe") if IS_WIN else None
+        if IS_WIN and exe_path and os.path.exists(exe_path):
+            try:
+                flags = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080)
+                subprocess.Popen([exe_path], cwd=self.mgr.gd_path, creationflags=flags)
+                self.log("🚀 Launched Geometry Dash with HIGH CPU Priority (Ultra-Low Latency)!", "SUCCESS")
+                return
+            except Exception as e:
+                self.log(f"Direct launch error ({e}), falling back to steam://", "WARN")
+        open_url_or_path("steam://rungameid/322170")
+        self.log("Launched Geometry Dash via Steam.", "SUCCESS")
+
+    def open_mod_manager(self):
+        if not self.mgr.gd_path:
+            messagebox.showerror("Error", "Could not locate Geometry Dash folder.")
+            return
+
+        mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+        if not os.path.exists(mods_dir):
+            messagebox.showerror("Error", "Geode mods directory not found.")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Geode Mod Manager")
+        dialog.geometry("640x540")
+        dialog.minsize(580, 440)
+        dialog.configure(bg=UI["header"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        top_frame = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        top_frame.pack(fill="x")
+
+        tk.Label(top_frame, text="🧩 Geode Mod Manager", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        count_lbl = tk.Label(top_frame, text="Loading mods...", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"])
+        count_lbl.pack(anchor="w", pady=(2, 8))
+
+        search_frame = tk.Frame(top_frame, bg=UI["header"])
+        search_frame.pack(fill="x")
+
+        search_var = tk.StringVar()
+        tk.Label(search_frame, text="🔍", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["header"]).pack(side="left", padx=(0, 6))
+        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        search_entry.pack(side="left", fill="x", expand=True, ipady=4)
+
+        open_folder_btn = tk.Button(search_frame, text="📁 Open Folder", command=self.open_mods_folder, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=4, cursor="hand2")
+        open_folder_btn.pack(side="right", padx=(8, 0))
+
+        list_container = tk.Frame(dialog, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_container.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+
+        canvas = tk.Canvas(list_container, bg=UI["panel"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(xscrollcommand=None, yscrollcommand=scrollbar.set)
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _cleanup():
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        def refresh_list():
+            for widget in scrollable_frame.winfo_children():
+                widget.destroy()
+
+            mods = self.mgr.get_installed_mods()
+            q = search_var.get().strip().lower()
+            if q:
+                mods = [m for m in mods if q in m["name"].lower() or q in m["developer"].lower() or q in m["mod_id"].lower()]
+
+            active_count = sum(1 for m in self.mgr.get_installed_mods() if m["enabled"])
+            total_count = len(self.mgr.get_installed_mods())
+            count_lbl.config(text=f"{total_count} mods installed ({active_count} active, {total_count - active_count} disabled)")
+
+            if not mods:
+                empty_lbl = tk.Label(scrollable_frame, text="No mods found matching search." if q else "No Geode mods installed.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["panel"], pady=30)
+                empty_lbl.pack(fill="x")
+                return
+
+            for mod in mods:
+                item_frame = tk.Frame(scrollable_frame, bg=UI["panel_alt"], padx=12, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+                item_frame.pack(fill="x", padx=8, pady=4)
+
+                left = tk.Frame(item_frame, bg=UI["panel_alt"])
+                left.pack(side="left", fill="x", expand=True)
+
+                title_row = tk.Frame(left, bg=UI["panel_alt"])
+                title_row.pack(fill="x")
+
+                tk.Label(title_row, text=mod["name"], font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+                tk.Label(title_row, text=f" {mod['version']}", font=("Segoe UI", 8), fg=UI["lilac"], bg=UI["panel_alt"]).pack(side="left")
+
+                tk.Label(left, text=f"by {mod['developer']} · {mod['mod_id']}", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel_alt"]).pack(anchor="w")
+
+                right = tk.Frame(item_frame, bg=UI["panel_alt"])
+                right.pack(side="right")
+
+                is_active = mod["enabled"]
+                status_chip = tk.Label(
+                    right,
+                    text="ACTIVE" if is_active else "DISABLED",
+                    font=("Segoe UI", 7, "bold"),
+                    fg=UI["lime"] if is_active else UI["muted"],
+                    bg=UI["lime_dark"] if is_active else UI["inset"],
+                    padx=6, pady=2
+                )
+                status_chip.pack(side="left", padx=(0, 8))
+
+                def _make_toggle(target_fn, current_state):
+                    def _t():
+                        ok, res = self.mgr.toggle_mod(target_fn, enable=not current_state)
+                        if ok:
+                            self.log(f"{'Enabled' if not current_state else 'Disabled'} mod: {target_fn}", "INFO")
+                            refresh_list()
+                        else:
+                            messagebox.showerror("Toggle Error", f"Could not toggle mod:\n{res}", parent=dialog)
+                    return _t
+
+                btn_text = "Disable" if is_active else "Enable"
+                btn_color = UI["amber"] if is_active else UI["lime"]
+                toggle_btn = tk.Button(
+                    right,
+                    text=btn_text,
+                    command=_make_toggle(mod["filename"], is_active),
+                    font=("Segoe UI", 8, "bold"),
+                    bg=UI["panel"],
+                    fg=btn_color,
+                    activebackground=UI["border"],
+                    activeforeground=UI["text"],
+                    relief="flat",
+                    padx=10,
+                    pady=3,
+                    cursor="hand2"
+                )
+                toggle_btn.pack(side="left")
+
+        search_var.trace_add("write", lambda *args: refresh_list())
+        refresh_list()
+
+        bottom_frame = tk.Frame(dialog, bg=UI["header"], padx=20, pady=10)
+        bottom_frame.pack(fill="x")
+
+        def _enable_all():
+            mods = self.mgr.get_installed_mods()
+            for m in mods:
+                if not m["enabled"]:
+                    self.mgr.toggle_mod(m["filename"], enable=True)
+            self.log("Enabled all Geode mods.", "SUCCESS")
+            refresh_list()
+
+        def _disable_all():
+            mods = self.mgr.get_installed_mods()
+            for m in mods:
+                if m["enabled"]:
+                    self.mgr.toggle_mod(m["filename"], enable=False)
+            self.log("Disabled all Geode mods.", "WARN")
+            refresh_list()
+
+        tk.Button(bottom_frame, text="✅ Enable All", command=_enable_all, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        tk.Button(bottom_frame, text="⛔ Disable All", command=_disable_all, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(bottom_frame, text="Close", command=_cleanup, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=14, pady=5, cursor="hand2").pack(side="right")
+
     def browse_gd_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Folder")
         if selected:
@@ -4045,17 +4403,26 @@ fi
                 ver_text, _ = self.mgr.get_gd_version_info()
                 is_locked = self.mgr.is_manifest_locked()
                 geode_ver = self.mgr.get_installed_geode_version() or "v5.x"
+                stats = self.mgr.get_player_stats()
+                player_tag = f"{stats['stars']} ⭐ · {stats['demons']} 👿" if stats else None
 
                 if is_running:
-                    status_desc = f"GD {ver_text} · Geode {geode_ver} 🛡️" if is_locked else f"GD {ver_text} · In Game"
+                    if player_tag:
+                        status_desc = f"{player_tag} · Geode {geode_ver} 🛡️" if is_locked else f"{player_tag} · Playing GD"
+                    else:
+                        status_desc = f"GD {ver_text} · Geode {geode_ver} 🛡️" if is_locked else f"GD {ver_text} · In Game"
                     if hasattr(self, "discord_rpc"):
                         self.discord_rpc.update_presence("Playing Geometry Dash", status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
                 else:
-                    idle_desc = f"GD {ver_text} · Geode {geode_ver} (Ready)" if is_locked else f"GD {ver_text} · Ready to Play"
+                    if player_tag:
+                        idle_desc = f"{stats['name']} ({player_tag})"
+                    else:
+                        idle_desc = f"GD {ver_text} · Geode {geode_ver} (Ready)" if is_locked else f"GD {ver_text} · Ready to Play"
                     if hasattr(self, "discord_rpc"):
                         self.discord_rpc.update_presence("Geometry Dash Companion", idle_desc, reset_timer=(was_running is True), geode_ver=geode_ver)
 
                 if was_running is True and not is_running:
+                    self.after(0, self.update_player_stats_ui)
                     if getattr(self, "auto_backup_enabled", True):
                         copied = self.mgr.perform_silent_backup()
                         if copied:
