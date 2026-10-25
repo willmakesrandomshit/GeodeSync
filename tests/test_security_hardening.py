@@ -68,6 +68,28 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertNotIn("urlopen", update_action)
         self.assertNotIn("subprocess", update_action)
 
+    def test_windows_release_uses_portable_onedir_package(self):
+        package_script = (ROOT / "package_windows.ps1").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
+        self.assertIn("--onedir", package_script)
+        self.assertNotIn("--onefile", package_script)
+        self.assertIn("GeodeSync-Windows.zip", workflow)
+        self.assertNotIn("            GeodeSync.exe\n", workflow)
+        self.assertIn("Run regression suite on Windows", workflow)
+
+    def test_discord_release_helper_uses_current_version_and_assets(self):
+        source = (ROOT / "send_discord_update.py").read_text(encoding="utf-8")
+        self.assertIn('version = version or current_version()', source)
+        self.assertIn('"release_notes.md"', source)
+        self.assertIn("GeodeSync-Windows.zip", source)
+        self.assertNotIn("GeodeSync.exe]", source)
+
+    def test_python_gui_entry_points_stay_in_sync(self):
+        self.assertEqual(
+            (ROOT / "main.py").read_bytes(),
+            (ROOT / "GeodeSync.pyw").read_bytes(),
+        )
+
     def test_geode_archive_rejects_traversal_before_writing_anything(self):
         with pathlib.Path(__file__).resolve().parents[1].joinpath(".test-sentinel").open("w") as marker:
             marker.write("unchanged")

@@ -16,7 +16,7 @@
 
 Download the latest published build from [GitHub Releases](https://github.com/willmakesrandomshit/GeodeSync/releases/latest). Choose the package for your system, then follow the [complete user guide](USER_GUIDE.md).
 
-- **Windows:** Extract the ZIP and open `GeodeSync.exe`.
+- **Windows:** Extract the entire ZIP to a normal folder and open `GeodeSync.exe` or `Run-GeodeSync.bat`. Keep the `_internal` folder beside the executable; do not move the executable by itself.
 - **macOS Apple silicon:** Use `GeodeSync-macOS-arm64.zip`.
 - **macOS Intel:** Use `GeodeSync-macOS-x86_64.zip`.
 - **Linux / Steam Deck:** Use the Linux archive if it is attached to the release. Linux and Proton setups have less platform-specific validation than Windows and macOS.

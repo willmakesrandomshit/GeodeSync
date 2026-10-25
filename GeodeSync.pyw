@@ -60,7 +60,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.3.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -387,10 +387,6 @@ def fetch_latest_published_release(timeout=8):
                     "tag_name": f"v{tag}",
                     "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/v{tag}",
                     "assets": [
-                        {
-                            "name": "GeodeSync.exe",
-                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync.exe"
-                        },
                         {
                             "name": f"GeodeSync-v{tag}-Windows.zip",
                             "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync-v{tag}-Windows.zip"

@@ -117,3 +117,28 @@ See [PRIVACY.md](PRIVACY.md) for the current endpoint inventory.
 The project is safer and more auditable after these changes, but it is not ready
 to claim independently verified releases until signing, provenance, SBOM, and
 Windows validation gaps are closed.
+
+## 2026-10-25 release audit addendum
+
+The v2.3.2 release work addresses a reported Windows launch failure showing
+PyInstaller unable to load `python314.dll` from a `_MEI...` temporary folder.
+That error is consistent with a failed one-file extraction/runtime load, but the
+screenshot does not identify the cause conclusively. The Windows build has been
+changed from PyInstaller `--onefile` to `--onedir`, so the interpreter runtime
+ships alongside the executable and is not extracted into a per-run `_MEI...`
+directory. This reduces exposure to that failure mode; validation on Windows CI
+and the affected PC is still needed before claiming the user's issue is fixed.
+
+The release now packages Windows as a ZIP containing the app folder and `_internal`
+runtime directory, and publishes stable `GeodeSync-Windows.zip` and
+`GeodeSync-Linux.tar.gz` names for download links. Windows CI runs the regression
+suite before packaging. The Discord release helper derives the version from
+`version.json` and uses the current release notes and asset names.
+
+Verification in this checkout: `python3 -m unittest discover -s tests -v` — 57
+tests passed; `python3 -m py_compile main.py GeodeSync.pyw build_macos.py
+steam_watchdog.py send_discord_update.py` — passed. `git diff --check` passes when
+CRLF is treated as the repository's line ending (`core.whitespace=cr-at-eol`).
+This Mac cannot run the PowerShell Windows packager or
+exercise Windows Defender, SmartScreen, Steam, or the affected user's machine.
+No antivirus scan or live game launch was performed.

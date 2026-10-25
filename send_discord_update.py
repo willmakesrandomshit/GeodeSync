@@ -31,7 +31,13 @@ def get_webhook_url():
     return None
 
 
-def send_update(version="2.3.0", title=None, notes=None, ping=False):
+def current_version():
+    with open(os.path.join(os.path.dirname(__file__), "version.json"), encoding="utf-8") as f:
+        return json.load(f)["app_version"]
+
+
+def send_update(version=None, title=None, notes=None, ping=False):
+    version = version or current_version()
     webhook_url = get_webhook_url()
     if not webhook_url:
         print(f"[!] No Discord webhook URL configured for channel {CHANNEL_ID}.")
@@ -55,7 +61,7 @@ def send_update(version="2.3.0", title=None, notes=None, ping=False):
                 "fields": [
                     {
                         "name": "📦 Direct Downloads",
-                        "value": f"[Download GeodeSync.exe]({release_url})\n[Download Windows (.zip)]({release_url})\n[Download Linux (.tar.gz)]({release_url})\n[Download macOS (.zip)]({release_url})"
+                        "value": f"[Download Windows (.zip)](https://github.com/willmakesrandomshit/GeodeSync/releases/latest/download/GeodeSync-Windows.zip)\n[Download Linux (.tar.gz)](https://github.com/willmakesrandomshit/GeodeSync/releases/latest/download/GeodeSync-Linux.tar.gz)\n[Download macOS builds]({release_url})"
                     }
                 ],
                 "footer": {
@@ -88,10 +94,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Read latest release notes
-    notes_file = os.path.join(os.path.dirname(__file__), "release_notes_v230.md")
+    notes_file = os.path.join(os.path.dirname(__file__), "release_notes.md")
     notes = None
     if os.path.exists(notes_file):
         with open(notes_file, "r", encoding="utf-8") as f:
             notes = f.read()
 
-    send_update(version="2.3.0", title="GeodeSync v2.3.0 • Power Tools & Demon Tracker", notes=notes)
+    version = current_version()
+    send_update(version=version, title=f"GeodeSync v{version} released", notes=notes)

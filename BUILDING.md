@@ -12,7 +12,9 @@ python -m pip install -r requirements-windows-build.txt
 ./package_windows.ps1
 ```
 
-The script produces an executable and ZIP under `dist/`. It signs the executable
+The script produces an onedir app folder (`dist/GeodeSync`) and a portable ZIP
+under `dist/`. Keep `GeodeSync.exe` and its `_internal` runtime directory together;
+the onedir layout avoids PyInstaller's per-launch `_MEI...` extraction. It signs the executable
 only if a code-signing certificate is already installed in the current user's
 certificate store. An unsigned output is not signed by this process and should
 not be described as publisher-verified.

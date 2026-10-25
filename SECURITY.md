@@ -29,7 +29,7 @@ ask the maintainer for verifiable signing and scan evidence.
 
 When a release includes `SHA256SUMS.txt`, verify the downloaded file from the
 repository root with `shasum -a 256 -c SHA256SUMS.txt` on macOS/Linux, or compare
-`(Get-FileHash .\GeodeSync.exe -Algorithm SHA256).Hash` in PowerShell with the
+`(Get-FileHash .\GeodeSync-Windows.zip -Algorithm SHA256).Hash` in PowerShell with the
 matching entry in the file. This confirms the bytes match the published checksum;
 it does not prove who published them.
 
