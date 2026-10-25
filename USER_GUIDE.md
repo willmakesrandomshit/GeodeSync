@@ -2,7 +2,7 @@
 
 GeodeSync helps manage a Steam copy of Geometry Dash: it can switch to a supported game version, protect that version from Steam auto-updates, manage saves and mods, and collect diagnostics when something goes wrong. It does not replace Steam or Geode.
 
-This guide follows v2.3.5. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases/latest) for published downloads.
+This guide follows v2.3.6. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases/latest) for published downloads.
 
 ## Before you start
 
@@ -53,7 +53,7 @@ The Linux package is built separately from Windows and macOS. Steam/Proton layou
 
 ## Switch to the Geode-compatible game version
 
-The default recommended target in v2.3.5 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
+The default recommended target in v2.3.6 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
 
 1. Make sure Geometry Dash is closed. If prompted, allow GeodeSync to close it or close it yourself.
 2. Click **Backup Saves** in the dashboard tools first if you want a manual backup. The version-switch flow also backs up detected save files and asks before proceeding if it cannot find any.
@@ -118,6 +118,12 @@ The dashboard's **Companion Tools** grid contains the main utilities; **More too
 GeodeSync checks stable releases in the background. When an update is available, review the prompt and choose **Restart to update** to apply it, or decline and apply it later from the update control. Existing installs older than v2.3.4 must install a current release manually once before in-app updates are available. Use the Windows package on Boot Camp, and do not mix Intel and Apple silicon Mac builds.
 
 ## Troubleshooting
+
+### Use Fix a problem
+
+Choose **Fix a problem** in the bottom bar. **Check Setup** runs a read-only check of the Steam path, game folder, Windows executable and game DLLs, or the Mac app bundle. **Explain Error** accepts the exact text or code from an error window and gives known steps. Unknown errors are not guessed at. Use **Copy Steps** to paste the instructions into support chat, or **Export Report** to save a privacy-filtered report for review before sharing.
+
+For a Windows `0xc000007b` or “Bad Image” error, close Geometry Dash and use Steam → Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Do not download individual DLLs. If it only happens with Geode, disable the last mod you installed and retry.
 
 ### Steam reports “disk write error”
 

@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.5"
+APP_VERSION = "2.3.6"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1380,6 +1380,120 @@ def validate_windows_game_images(game_root, expected_exe_size=None):
     if walk_errors:
         return f"A game folder could not be fully inspected ({walk_errors[0]})."
     return None
+
+
+def explain_error_text(error_text, platform_name=None):
+    """Map common player-facing errors to short, concrete, safe recovery steps."""
+    raw = str(error_text or "").strip()
+    text = raw.casefold()
+    platform_name = (platform_name or platform.system()).casefold()
+    if not raw:
+        return (
+            "Paste the exact error",
+            "Copy the full message from the error window and paste it above. Include any code such as 0xc000007b.",
+        )
+    if "0xc000007b" in text or "bad image" in text:
+        return (
+            "Windows could not load a game file",
+            "1. Close Geometry Dash and Steam.\n"
+            "2. In Steam, open Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files.\n"
+            "3. Launch Geometry Dash from Steam once.\n"
+            "4. If it only fails with Geode installed, disable the most recently added Geode mod and retry.\n\n"
+            "Do not download individual DLL files from websites. If the same error remains, export a GeodeSync support report and include this exact message.",
+        )
+    if any(token in text for token in ("failed to load python dll", "python314.dll", "_mei")):
+        return (
+            "GeodeSync did not start correctly",
+            "Download the latest Windows package from the official GeodeSync Releases page. Extract the whole ZIP to a normal folder, keep `_internal` beside `GeodeSync.exe`, and run the EXE from that folder—not from the ZIP preview.\n\n"
+            "If it still fails, export a support report and include the full message. Do not download replacement DLLs from third-party sites.",
+        )
+    if "disk write error" in text or ("disk" in text and "write" in text and "error" in text):
+        return (
+            "Steam could not write game files",
+            "1. Close Geometry Dash.\n"
+            "2. Check that the Steam library drive has free space.\n"
+            "3. Restart Steam, then use Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files.\n"
+            "4. If Steam still shows the error, export a GeodeSync support report and include the Steam message.\n\n"
+            "Do not delete Steam manifests or game files by hand.",
+        )
+    if any(token in text for token in ("access is denied", "permission denied", "winerror 5", "permissionerror")):
+        return (
+            "GeodeSync could not access a file",
+            "Close Geometry Dash and Steam, then reopen GeodeSync normally and check that the selected folder is the Steam Geometry Dash folder. If Windows Security shows a block notification, review that notification and allow only the official GeodeSync app if you trust it. Do not turn off Defender or run random repair scripts.\n\n"
+            "If it still fails, export a support report and include the exact message.",
+        )
+    if any(token in text for token in ("urlopen error", "name or service not known", "connection timed out", "network is unreachable", "temporary failure in name resolution")):
+        return (
+            "GeodeSync could not reach the download service",
+            "Check that your internet works, then retry once. If browsing works but GeodeSync still cannot download, check whether a firewall or proxy is blocking GitHub. Include the full error and export a support report if it continues.",
+        )
+    if "steam" in text and any(token in text for token in ("not running", "not found", "could not locate")):
+        return (
+            "Steam was not found",
+            "Open Steam, sign in, and make sure Geometry Dash is installed through Steam. Then return to GeodeSync and choose Game Folder if it still cannot find the install.",
+        )
+    if "incompatible with geode" in text or "unsupported game version" in text:
+        return (
+            "This Geometry Dash version may not work with Geode",
+            "In GeodeSync, choose a supported game version and switch it using the main game-version button. Wait for Steam to finish, then launch Geometry Dash from Steam. Check your mods for version compatibility too.",
+        )
+    return (
+        "No matching fix found yet",
+        "GeodeSync does not recognize this message, so it will not guess or change your files. Copy the full error, choose Export Report in Activity Log, and send both to support. Include what you clicked just before it appeared.",
+    )
+
+
+def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_error=None):
+    """Read-only checks for common setup problems; never modifies game or Steam files."""
+    is_windows = IS_WIN if is_windows is None else bool(is_windows)
+    is_macos = IS_MAC if is_macos is None else bool(is_macos)
+    findings = []
+    steam_path = getattr(manager, "steam_path", None)
+    if not steam_path or not os.path.isdir(steam_path):
+        findings.append({
+            "title": "Steam was not found",
+            "detail": "GeodeSync cannot check or manage the Steam game until it can find Steam.",
+            "steps": "Open and sign in to Steam. If it is already open, choose Game Folder in GeodeSync and select the Geometry Dash folder inside your Steam library.",
+        })
+
+    game_path = getattr(manager, "gd_path", None)
+    if not game_path or not os.path.isdir(game_path):
+        findings.append({
+            "title": "Geometry Dash folder was not found",
+            "detail": "The selected game folder is missing or unavailable.",
+            "steps": "Choose Game Folder and select the Steam Geometry Dash folder. On Windows it contains GeometryDash.exe; on Mac it contains Geometry Dash.app.",
+        })
+    elif is_windows:
+        problem = validate_windows_game_images(game_path)
+        if problem:
+            findings.append({
+                "title": "A Windows game file may be damaged or mismatched",
+                "detail": problem,
+                "steps": "Close the game, then in Steam open Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Do not replace individual DLLs from download sites. Run this check again after Steam finishes.",
+            })
+    elif is_macos:
+        app_path = find_macos_game_app(game_path)
+        problem = validate_macos_game_app(app_path)
+        if problem:
+            findings.append({
+                "title": "Geometry Dash.app looks incomplete",
+                "detail": problem,
+                "steps": "Quit Steam, reopen it, then use Geometry Dash → Properties → Installed Files → Verify integrity. Run this check again after Steam finishes.",
+            })
+
+    if recovery_error:
+        findings.append({
+            "title": "An interrupted game repair needs attention",
+            "detail": str(recovery_error),
+            "steps": "Stop here—do not start another version switch. Export a support report and send it with this message so the recovery files can be reviewed safely.",
+        })
+    if findings:
+        return findings
+    return [{
+        "title": "No obvious setup problem found",
+        "detail": "The Steam and game folders passed GeodeSync’s basic checks. This does not rule out a problem inside Steam, Geode, or a mod.",
+        "steps": "Paste the exact error above and choose Explain Error. If the game fails only with Geode, try disabling the most recently installed mod. Export a support report if you still need help.",
+    }]
 
 
 def recover_pending_install_transactions(destination_root):
@@ -2859,6 +2973,7 @@ class GeodeSyncApp(tk.Tk):
         self.latest_release_url = None
         self._app_update_in_progress = False
         self._staged_app_update = None
+        self.last_troubleshooting_error = ""
         self.is_downloading_depot = False
         self._monitor_running = True
 
@@ -3026,6 +3141,12 @@ class GeodeSyncApp(tk.Tk):
             "",
             "Recent activity (home folders and email addresses are redacted):",
         ]
+        if getattr(self, "last_troubleshooting_error", ""):
+            report_lines.extend([
+                "",
+                "Last error entered in Fix a problem:",
+                self._redact_diagnostic_text(self.last_troubleshooting_error),
+            ])
         try:
             with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as stream:
                 events = stream.readlines()[-250:]
@@ -3044,6 +3165,93 @@ class GeodeSyncApp(tk.Tk):
             "The report contains app and game status plus recent activity. It does not include save-file contents or mod files. "
             "Review the text before sharing it.",
         )
+
+    def open_troubleshooter(self, prefill=""):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Fix a problem")
+        dialog.geometry("650x590")
+        dialog.minsize(560, 470)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+
+        header = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        header.pack(fill="x")
+        tk.Label(header, text="Fix a problem", font=("Segoe UI", 14, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(
+            header,
+            text="Run a safe check or paste the exact error. GeodeSync gives simple steps and never guesses at a risky repair.",
+            font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"], wraplength=590, justify="left",
+        ).pack(anchor="w", pady=(3, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=18, pady=14)
+        content.pack(fill="both", expand=True)
+        tk.Label(content, text="What did the error say? (optional)", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["background"]).pack(anchor="w")
+        error_input = tk.Text(content, height=4, wrap="word", font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["text"], relief="flat", padx=8, pady=6)
+        error_input.pack(fill="x", pady=(5, 8))
+        if prefill:
+            error_input.insert("1.0", str(prefill)[:3000])
+
+        actions = tk.Frame(content, bg=UI["background"])
+        actions.pack(fill="x", pady=(0, 8))
+        result = tk.Text(content, wrap="word", font=("Segoe UI", 9), bg=UI["panel"], fg=UI["text"], relief="flat", padx=10, pady=9, height=13)
+        result.pack(fill="both", expand=True)
+        result.insert("1.0", "Choose Check Setup or paste an error and choose Explain Error.")
+        result.config(state="disabled")
+
+        def show_result(title, detail, steps):
+            result.config(state="normal")
+            result.delete("1.0", "end")
+            result.insert("end", f"{title}\n\n{detail}\n\nWhat to do\n{steps}")
+            result.config(state="disabled")
+
+        def explain():
+            raw = error_input.get("1.0", "end").strip()
+            self.last_troubleshooting_error = raw[:3000]
+            title, steps = explain_error_text(raw)
+            show_result(title, "GeodeSync matched this message to a known troubleshooting guide." if title != "No matching fix found yet" else "GeodeSync does not recognize this message, so it will not change files.", steps)
+
+        def scan():
+            result.config(state="normal")
+            result.delete("1.0", "end")
+            result.insert("end", "Checking Steam and game files…\nThis read-only check can take a few seconds.")
+            result.config(state="disabled")
+            def worker():
+                try:
+                    findings = scan_installation_issues(
+                        self.mgr,
+                        recovery_error=self.recovery_error,
+                    )
+                    def finish():
+                        if not dialog.winfo_exists():
+                            return
+                        blocks = []
+                        for finding in findings:
+                            blocks.append(f"{finding['title']}\n\n{finding['detail']}\n\nWhat to do\n{finding['steps']}")
+                        show_result("Setup check", "\n\n──────────────\n\n".join(blocks), "Use Export Report if you still need help.")
+                except Exception as error:
+                    error_text = str(error)
+                    def fail():
+                        if dialog.winfo_exists():
+                            show_result("Check could not finish", "The check stopped safely without changing game files.", f"{error_text}\n\nPaste this message into Explain Error or export a report.")
+                    self.after(0, fail)
+                    return
+                self.after(0, finish)
+            threading.Thread(target=worker, daemon=True).start()
+
+        def copy_steps():
+            text = result.get("1.0", "end").strip()
+            dialog.clipboard_clear()
+            dialog.clipboard_append(text)
+            messagebox.showinfo("Copied", "The troubleshooting steps are copied. You can paste them into chat.", parent=dialog)
+
+        tk.Button(actions, text="Check Setup", command=scan, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(actions, text="Copy Steps", command=copy_steps, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right")
+
+        footer = tk.Frame(dialog, bg=UI["header"], padx=18, pady=10)
+        footer.pack(fill="x")
+        tk.Button(footer, text="Export Report", command=self.export_support_report, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(footer, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="right")
 
     def create_ui(self):
         # Update Banner
@@ -3262,6 +3470,9 @@ class GeodeSyncApp(tk.Tk):
 
         view_log_btn = tk.Button(footer, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         view_log_btn.pack(side="right", padx=(4, 0))
+
+        fix_problem_btn = tk.Button(footer, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
+        fix_problem_btn.pack(side="right", padx=(4, 0))
 
         discord_link = tk.Label(footer, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
         discord_link.pack(side="right", padx=6)
@@ -4525,6 +4736,7 @@ class GeodeSyncApp(tk.Tk):
                 flags = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080)
                 subprocess.Popen([exe_path], cwd=self.mgr.gd_path, creationflags=flags)
                 self.log("🚀 Launched Geometry Dash with HIGH CPU Priority (Ultra-Low Latency)!", "SUCCESS")
+                threading.Thread(target=self._monitor_windows_launch, daemon=True).start()
                 return
             except Exception as e:
                 self.log(f"Direct launch error ({e}), falling back to steam://", "WARN")
@@ -4731,13 +4943,7 @@ class GeodeSyncApp(tk.Tk):
                 threading.Thread(target=self._monitor_macos_launch, daemon=True).start()
                 return
             self.log(details, "ERROR")
-            messagebox.showerror(
-                "Geometry Dash could not be launched",
-                f"{details}\n\nGeodeSync did not modify the game or bypass macOS security. "
-                "If the app bundle is complete, use Steam → Geometry Dash → Properties → Installed Files → "
-                "Verify integrity, then try launching from Steam. If Steam still reports OS Error 256, "
-                "the Steam launch log or macOS Console report is needed to identify the cause.",
-            )
+            self.open_troubleshooter(details)
             return
 
         if not self.mgr.gd_path:
@@ -4747,6 +4953,13 @@ class GeodeSyncApp(tk.Tk):
         if self.mgr.is_gd_process_running():
             messagebox.showinfo("Already Running", "Geometry Dash is already running!")
             return
+
+        if IS_WIN:
+            image_problem = validate_windows_game_images(self.mgr.gd_path)
+            if image_problem:
+                self.log(f"Launch stopped: {image_problem}", "ERROR")
+                self.open_troubleshooter(image_problem)
+                return
 
         # Auto-heal known incompatible mods that cause Windows DLL Entry Point crashes
         incompat = self.mgr.check_incompatible_mods()
@@ -4776,9 +4989,24 @@ class GeodeSyncApp(tk.Tk):
 
         if not open_url_or_path(f"steam://run/{APP_ID}"):
             self.log("Could not pass the Geometry Dash launch request to Steam.", "ERROR")
-            messagebox.showerror("Launch failed", "Could not pass the Geometry Dash launch request to Steam.")
+            self.open_troubleshooter("Could not pass the Geometry Dash launch request to Steam.")
         else:
             self.log("Launched Geometry Dash via Steam.", "SUCCESS")
+            if IS_WIN:
+                threading.Thread(target=self._monitor_windows_launch, daemon=True).start()
+
+    def _monitor_windows_launch(self):
+        started = wait_for_process(self.mgr.is_gd_process_running, timeout=30, interval=0.5)
+        if started:
+            return
+        message = (
+            "Steam accepted the launch request, but Windows did not start Geometry Dash within 30 seconds. "
+            "If Windows showed an error window, paste its exact text or code into Fix a problem."
+        )
+        try:
+            self.after(0, lambda: self.open_troubleshooter(message))
+        except Exception:
+            pass
 
     def _monitor_macos_launch(self):
         started = wait_for_process(self.mgr.is_gd_process_running, timeout=60, interval=1)
