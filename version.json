@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.2",
+  "app_version": "2.3.3",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.2: Windows runtime packaging reliability and verified release downloads."
+  "announcement": "GeodeSync v2.3.3: Windows game DLL validation and safe rollback during version switches."
 }

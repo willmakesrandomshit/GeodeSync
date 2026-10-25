@@ -1,17 +1,18 @@
-# GeodeSync v2.3.2 — Windows runtime reliability update
+# GeodeSync v2.3.3 — Windows game-file validation hotfix
 
-This release changes the Windows package to keep its Python runtime beside the app. It addresses a failure mode reported during launch/update where PyInstaller could not load `python314.dll` from its temporary `_MEI...` extraction directory. The screenshot alone cannot establish whether the missing DLL came from extraction, security software, a damaged download, or another local issue.
+This hotfix strengthens Windows game-version switching after a report of `GeometryDash.exe - Bad Image` for `libcrypto-3-x64.dll` (Windows error `0xc000007b`). The report alone could not identify whether the DLL was damaged, the wrong architecture, or left over from an earlier install.
 
 ## Changes
 
-- Windows now ships as an onedir portable ZIP. Extract the complete ZIP and keep `_internal` beside `GeodeSync.exe`; no per-launch `_MEI...` runtime extraction is needed.
-- Windows CI runs the regression suite before packaging.
-- The latest release page and website use stable ZIP names, and the release includes SHA-256 checksums.
-- The in-app updater continues to open the official Releases page for review. v2.3.0 clients that expect a standalone `GeodeSync.exe` will fall back to that page because new releases no longer publish a one-file executable.
-- Existing installations are not silently replaced. Download and extract the latest ZIP, then launch the new executable.
+- Validate the staged `GeometryDash.exe` and every staged DLL as Windows PE files before changing the installed game.
+- Reject damaged DLL headers and DLLs whose architecture does not match the game executable.
+- Validate the assembled game folder before marking a switch successful; roll back the switch if a damaged or mismatched DLL remains.
+- Show a specific recovery instruction to verify Geometry Dash files through Steam when an invalid or incompatible Windows image is found.
+- Keep the previous transactional replacement behavior, including restoration of the old files if validation fails.
+- Add regression coverage for valid DLL replacement, damaged depot DLL rejection, wrong-architecture DLLs, stale invalid DLL detection, and rollback.
 
-## Compatibility and limits
+The validation checks PE structure and architecture. It does not cryptographically authenticate Steam depot files, diagnose every Windows loader failure, or guarantee compatibility with every local mod or driver. If Steam's cached depot itself contains an invalid file, GeodeSync stops without claiming the switch succeeded; repair the game through Steam before trying again.
 
-GeodeSync remains a companion for Steam installations of Geometry Dash. Review confirmations before changing game files and back up important saves. Release builds are produced by GitHub Actions for Windows, macOS (Apple silicon and Intel), and Linux. A build target does not prove compatibility on every operating-system version or device. The Windows onedir package must be built and launched on Windows CI; it has not been tested on the affected user's machine.
+## Verification
 
-This release is not Authenticode-signed or macOS-notarized unless the required publisher credentials are configured in the release workflow. Check the asset checksums and read [SECURITY.md](SECURITY.md) for verification details.
+The GitHub Actions release workflow runs the complete regression suite and builds the Windows onedir package on a Windows runner. The Windows CI result is required before this version is published.
