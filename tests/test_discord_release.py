@@ -77,6 +77,8 @@ class TestDiscordReleasePayload(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/notify-discord-update.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("release_tag:", workflow)
+        self.assertIn("announcement_body:", workflow)
+        self.assertIn("ANNOUNCEMENT_BODY", workflow)
         self.assertNotIn("types: [published]", workflow)
 
 

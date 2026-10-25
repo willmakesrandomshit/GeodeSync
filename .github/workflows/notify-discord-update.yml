@@ -7,6 +7,14 @@ on:
         description: Published release tag to announce again (for example, v2.3.6)
         required: true
         type: string
+      announcement_title:
+        description: Optional custom title for a combined announcement
+        required: false
+        type: string
+      announcement_body:
+        description: Optional custom Markdown announcement body
+        required: false
+        type: string
 
 jobs:
   notify:
@@ -23,6 +31,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          ANNOUNCEMENT_TITLE: ${{ inputs.announcement_title }}
+          ANNOUNCEMENT_BODY: ${{ inputs.announcement_body }}
         run: |
           case "$RELEASE_TAG" in
             v[0-9]*.[0-9]*.[0-9]*) ;;
@@ -35,9 +45,9 @@ jobs:
               release = json.load(f)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
               for key, value in (
-                  ("RELEASE_TITLE", release.get("name") or release["tagName"]),
+                  ("RELEASE_TITLE", os.environ.get("ANNOUNCEMENT_TITLE") or release.get("name") or release["tagName"]),
                   ("RELEASE_TAG", release["tagName"]),
-                  ("RELEASE_BODY", release.get("body") or ""),
+                  ("RELEASE_BODY", os.environ.get("ANNOUNCEMENT_BODY") or release.get("body") or ""),
                   ("RELEASE_URL", release["url"]),
               ):
                   delimiter = "GEODESYNC_" + uuid.uuid4().hex
