@@ -107,14 +107,12 @@ jobs:
         run: |
           ./package_windows.ps1
           $version = (Get-Content version.json -Raw | ConvertFrom-Json).app_version
-          Copy-Item "dist/GeodeSync-v$version-Windows.zip" "GeodeSync-v$version-Windows.zip"
           Copy-Item "dist/GeodeSync-v$version-Windows.zip" "GeodeSync-Windows.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: GeodeSync-Windows
           path: |
             GeodeSync-Windows.zip
-            GeodeSync-v*-Windows.zip
           if-no-files-found: error
 
   build-linux:
@@ -150,12 +148,10 @@ jobs:
           chmod +x dist/GeodeSync-Linux/run.sh
           VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['app_version'])")
           tar -czvf "GeodeSync-v${VERSION}-Linux.tar.gz" -C dist/GeodeSync-Linux .
-          cp "GeodeSync-v${VERSION}-Linux.tar.gz" GeodeSync-Linux.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: GeodeSync-Linux
           path: |
-            GeodeSync-Linux.tar.gz
             GeodeSync-v*-Linux.tar.gz
           if-no-files-found: error
 
@@ -200,7 +196,7 @@ jobs:
       - name: Generate SHA-256 release checksums
         run: |
           shopt -s nullglob
-          assets=(GeodeSync-Windows.zip GeodeSync-v*-Windows.zip GeodeSync-macOS-*.zip GeodeSync-Linux.tar.gz GeodeSync-v*-Linux.tar.gz)
+          assets=(GeodeSync-Windows.zip GeodeSync-macOS-*.zip GeodeSync-v*-Linux.tar.gz)
           test "${#assets[@]}" -gt 0
           sha256sum "${assets[@]}" > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
@@ -211,9 +207,7 @@ jobs:
           body_path: release_notes.md
           files: |
             GeodeSync-Windows.zip
-            GeodeSync-v*-Windows.zip
             GeodeSync-macOS-*.zip
-            GeodeSync-Linux.tar.gz
             GeodeSync-v*-Linux.tar.gz
             SHA256SUMS.txt
           fail_on_unmatched_files: true

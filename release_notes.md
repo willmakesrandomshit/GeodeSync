@@ -1,18 +1,21 @@
-# GeodeSync v2.3.3 — Windows game-file validation hotfix
+# GeodeSync v2.3.5 — clearer downloads and Windows auto-updates
 
-This hotfix strengthens Windows game-version switching after a report of `GeometryDash.exe - Bad Image` for `libcrypto-3-x64.dll` (Windows error `0xc000007b`). The report alone could not identify whether the DLL was damaged, the wrong architecture, or left over from an earlier install.
+## Windows users
 
-## Changes
+Download the single Windows ZIP, `GeodeSync-Windows.zip`, from the Assets list. If you use Windows through Boot Camp, choose this Windows ZIP. Extract it fully, keep the `_internal` folder beside `GeodeSync.exe`, and launch `GeodeSync.exe` from the extracted folder. Do not run it inside the ZIP preview.
 
-- Validate the staged `GeometryDash.exe` and every staged DLL as Windows PE files before changing the installed game.
-- Reject damaged DLL headers and DLLs whose architecture does not match the game executable.
-- Validate the assembled game folder before marking a switch successful; roll back the switch if a damaged or mismatched DLL remains.
-- Show a specific recovery instruction to verify Geometry Dash files through Steam when an invalid or incompatible Windows image is found.
-- Keep the previous transactional replacement behavior, including restoration of the old files if validation fails.
-- Add regression coverage for valid DLL replacement, damaged depot DLL rejection, wrong-architecture DLLs, stale invalid DLL detection, and rollback.
+The Windows app updater selects this stable asset name, so updates work without asking users to guess between filenames.
 
-The validation checks PE structure and architecture. It does not cryptographically authenticate Steam depot files, diagnose every Windows loader failure, or guarantee compatibility with every local mod or driver. If Steam's cached depot itself contains an invalid file, GeodeSync stops without claiming the switch succeeded; repair the game through Steam before trying again.
+## Automatic updates
+
+GeodeSync now checks for stable releases in the background, downloads the package for the current operating system and Mac architecture, verifies its SHA-256 digest against official GitHub release metadata, validates the archive, and stages the update beside the current app. It asks before closing and restarting to apply the update.
+
+The updater rejects unexpected URLs, redirects, package sizes, archive paths, and file types. It preserves the existing installation until the staged replacement is ready and restores it if the swap or launch request fails. It does not request administrator privileges or bypass Windows or macOS security warnings.
+
+The SHA-256 metadata is served by the same GitHub release service as the package. It detects transfer corruption and mismatched assets, but it is not an independent publisher signature. Builds are Authenticode or Apple signed only when legitimate signing credentials are configured.
+
+Existing installs older than v2.3.4 must install a current package manually once; after that, future releases can be staged and applied from inside GeodeSync.
 
 ## Verification
 
-The GitHub Actions release workflow runs the complete regression suite and builds the Windows onedir package on a Windows runner. The Windows CI result is required before this version is published.
+The automated regression suite covers versioned update URL selection, archive traversal rejection, Linux symlink rejection, staged installation, and rollback. The Windows release workflow runs regression tests and packages the application; live updater behavior still needs verification on an installed Windows machine.

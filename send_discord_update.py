@@ -61,7 +61,7 @@ def send_update(version=None, title=None, notes=None, ping=False):
                 "fields": [
                     {
                         "name": "📦 Direct Downloads",
-                        "value": f"[Download Windows (.zip)](https://github.com/willmakesrandomshit/GeodeSync/releases/latest/download/GeodeSync-Windows.zip)\n[Download Linux (.tar.gz)](https://github.com/willmakesrandomshit/GeodeSync/releases/latest/download/GeodeSync-Linux.tar.gz)\n[Download macOS builds]({release_url})"
+                        "value": f"[Choose a download for your system]({release_url})"
                     }
                 ],
                 "footer": {
