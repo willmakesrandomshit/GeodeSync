@@ -30,6 +30,7 @@ import hashlib
 import platform
 import posixpath
 import zipfile
+import tarfile
 import zlib
 import struct
 import plistlib
@@ -60,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.3.4"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -503,6 +504,7 @@ SIZE_22081 = 10700288
 SIZE_2209 = 13178880
 EXPECTED_DEPOT_BYTES = 230000000 if IS_MAC else 204000000
 MACOS_UPDATE_MAX_BYTES = 300 * 1024 * 1024
+APP_UPDATE_MAX_BYTES = 500 * 1024 * 1024
 GEODE_PACKAGE_MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 GEODE_PACKAGE_MAX_EXPANDED_BYTES = 500 * 1024 * 1024
 
@@ -668,16 +670,306 @@ def verify_macos_update_digest(expected_digest, actual_digest):
         raise ValueError("The downloaded Mac update failed its SHA-256 integrity check.")
 
 
+def select_app_update_asset(release, platform_name=None, architecture=None):
+    """Select one exact official release package for this app build."""
+    platform_name = platform_name or ("windows" if IS_WIN else "macos" if IS_MAC else "linux")
+    architecture = (architecture or platform.machine()).lower()
+    tag = str(release.get("tag_name") or "")
+    if (version_sort_key(tag) is None or release.get("draft") or release.get("prerelease")
+            or not release.get("published_at")):
+        raise ValueError("The update is not a published stable GeodeSync release.")
+    if platform_name == "windows":
+        expected = "GeodeSync-Windows.zip"
+    elif platform_name == "linux":
+        expected = f"GeodeSync-{tag}-Linux.tar.gz"
+    elif platform_name == "macos":
+        expected = "GeodeSync-macOS-arm64.zip" if architecture in ("arm64", "aarch64") else "GeodeSync-macOS-x86_64.zip" if architecture in ("x86_64", "amd64") else None
+        if expected is None:
+            raise ValueError(f"Unsupported Mac architecture: {architecture}")
+    else:
+        raise ValueError(f"Unsupported platform: {platform_name}")
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") == expected]
+    if len(matches) != 1:
+        raise FileNotFoundError(f"Release must contain exactly one {expected} asset.")
+    asset = matches[0]
+    url = str(asset.get("browser_download_url") or "")
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "github.com" or parsed.path != f"/{GITHUB_REPO}/releases/download/{tag}/{expected}":
+        raise ValueError("The update asset URL is not the expected official GitHub release URL.")
+    size = int(asset.get("size") or 0)
+    if size <= 0 or size > APP_UPDATE_MAX_BYTES:
+        raise ValueError("The update package has an invalid or excessive size.")
+    return asset
+
+
+def validate_app_update_zip(archive, platform_name):
+    """Validate package shape, traversal, special files and expanded size."""
+    if platform_name == "macos":
+        validate_macos_update_zip(archive)
+        return
+    total = 0
+    names = set()
+    for info in archive.infolist():
+        name = info.filename.replace("\\", "/")
+        parts = name.rstrip("/").split("/")
+        if name.startswith("/") or any(part in ("", ".", "..") for part in parts) or ":" in name or "\x00" in name:
+            raise ValueError("The update archive contains an unsafe path.")
+        if platform_name == "windows":
+            reserved = {"CON", "PRN", "AUX", "NUL"} | {f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)}
+            if any(any(char in part for char in '<>"|?*') or part.endswith((" ", ".")) or part.split(".", 1)[0].upper() in reserved for part in parts):
+                raise ValueError("The Windows update archive contains an invalid filename.")
+        mode = info.external_attr >> 16
+        file_type = stat.S_IFMT(mode)
+        if stat.S_ISLNK(mode) or (file_type and file_type not in (stat.S_IFREG, stat.S_IFDIR)):
+            raise ValueError("The update archive contains an unsupported special file.")
+        canonical_name = name.rstrip("/").casefold() if platform_name == "windows" else name.rstrip("/")
+        if canonical_name in names:
+            raise ValueError("The update archive contains duplicate paths.")
+        total += info.file_size
+        if info.file_size > APP_UPDATE_MAX_BYTES or total > APP_UPDATE_MAX_BYTES:
+            raise ValueError("The update archive expands beyond the allowed size.")
+        names.add(canonical_name)
+    if platform_name == "windows" and ("geodesync.exe" not in names or not any(name.startswith("_internal/") for name in names)):
+        raise ValueError("The Windows update package is missing required application files.")
+    elif platform_name == "linux" and "GeodeSync" not in names:
+        raise ValueError("The Linux update package is missing the application executable.")
+
+
+def safe_extract_app_zip(archive, destination):
+    root = os.path.realpath(destination)
+    os.makedirs(root, exist_ok=True)
+    symlinks = []
+    for info in archive.infolist():
+        normalized_name = info.filename.replace("\\", "/")
+        target = os.path.realpath(os.path.join(root, *normalized_name.split("/")))
+        if os.path.commonpath((root, target)) != root:
+            raise ValueError("The update archive contains a path outside its staging folder.")
+        if info.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        mode = info.external_attr >> 16
+        if stat.S_ISLNK(mode):
+            link_target = archive.read(info).decode("utf-8", errors="strict").replace("\\", "/")
+            resolved_link = os.path.realpath(os.path.join(os.path.dirname(target), link_target))
+            if link_target.startswith("/") or os.path.commonpath((root, resolved_link)) != root:
+                raise ValueError("The update archive contains an unsafe symbolic link.")
+            symlinks.append((info, target, link_target))
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with archive.open(info) as source, open(target, "wb") as output:
+            shutil.copyfileobj(source, output)
+        if mode & 0o111:
+            os.chmod(target, mode & 0o777)
+    for info, target, link_target in symlinks:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.symlink(link_target, target)
+
+
+def download_verified_app_update(release, destination, platform_name=None, architecture=None):
+    """Download one selected asset, validate its GitHub SHA-256 digest, and stage it."""
+    platform_name = platform_name or ("windows" if IS_WIN else "macos" if IS_MAC else "linux")
+    asset = select_app_update_asset(release, platform_name, architecture)
+    request = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "GeodeSync-Updater"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        final = urlparse(response.geturl())
+        if final.scheme != "https" or final.hostname not in {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}:
+            raise ValueError("GitHub redirected the update download to an untrusted host.")
+        data = response.read(APP_UPDATE_MAX_BYTES + 1)
+    if len(data) != int(asset["size"]) or len(data) > APP_UPDATE_MAX_BYTES:
+        raise ValueError("The downloaded update size does not match the release metadata.")
+    verify_release_asset_digest(asset, data, "GeodeSync update")
+    os.makedirs(destination, exist_ok=True)
+    package = os.path.join(destination, asset["name"])
+    with open(package, "wb") as stream:
+        stream.write(data)
+    if platform_name == "windows":
+        mark_windows_download(package, asset["browser_download_url"])
+    if asset["name"].endswith(".zip"):
+        with zipfile.ZipFile(package) as archive:
+            validate_app_update_zip(archive, platform_name)
+            extracted = os.path.join(destination, "payload")
+            safe_extract_app_zip(archive, extracted)
+    else:
+        extracted = os.path.join(destination, "payload")
+        os.makedirs(extracted, exist_ok=True)
+        with tarfile.open(package, "r:gz") as archive:
+            validate_app_update_tar(archive)
+            archive.extractall(extracted, filter="data")
+        if not os.path.isfile(os.path.join(extracted, "GeodeSync")):
+            raise ValueError("The Linux update package is missing the application executable.")
+    if platform_name == "windows":
+        mark_windows_download(os.path.join(extracted, "GeodeSync.exe"), asset["browser_download_url"])
+    elif platform_name == "macos":
+        mark_macos_quarantine(os.path.join(extracted, "GeodeSync.app"))
+    return asset, extracted
+
+
+def mark_windows_download(path, source_url):
+    """Retain Windows Mark-of-the-Web so SmartScreen can still evaluate files."""
+    if "\n" in source_url or "\r" in source_url:
+        raise ValueError("The Windows download source metadata is invalid.")
+    with open(path + ":Zone.Identifier", "w", encoding="utf-8", newline="\r\n") as stream:
+        stream.write("[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=" + source_url + "\r\n")
+
+
+def mark_macos_quarantine(app_path):
+    """Keep Gatekeeper's first-open check for the downloaded Mac app bundle."""
+    import uuid
+    quarantine = f"0081;{int(time.time()):x};GeodeSync;{uuid.uuid4()}"
+    subprocess.run(["/usr/bin/xattr", "-w", "com.apple.quarantine", quarantine, app_path], check=True, timeout=10)
+
+
+def validate_app_update_tar(archive):
+    total = 0
+    for member in archive.getmembers():
+        name = member.name.replace("\\", "/")
+        parts = name.rstrip("/").split("/")
+        if name.startswith("/") or any(part in ("", ".", "..") for part in parts) or ":" in name or not (member.isfile() or member.isdir()):
+            raise ValueError("The Linux update archive contains an unsafe or unsupported entry.")
+        total += member.size
+        if member.size > APP_UPDATE_MAX_BYTES or total > APP_UPDATE_MAX_BYTES:
+            raise ValueError("The Linux update archive expands beyond the allowed size.")
+
+
+def _application_root():
+    if IS_MAC and getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(sys.executable))))
+    return os.path.dirname(os.path.realpath(sys.executable if getattr(sys, "frozen", False) else __file__))
+
+
+def _wait_for_process_exit(pid, timeout=90):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if IS_WIN:
+            import ctypes
+            from ctypes import wintypes
+            open_process = ctypes.windll.kernel32.OpenProcess
+            open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            open_process.restype = wintypes.HANDLE
+            wait_for_single = ctypes.windll.kernel32.WaitForSingleObject
+            wait_for_single.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            wait_for_single.restype = wintypes.DWORD
+            close_handle = ctypes.windll.kernel32.CloseHandle
+            close_handle.argtypes = [wintypes.HANDLE]
+            close_handle.restype = wintypes.BOOL
+            handle = open_process(0x00100000, False, int(pid))  # SYNCHRONIZE; never signals the process.
+            if not handle:
+                error = ctypes.windll.kernel32.GetLastError()
+                if error == 87:  # ERROR_INVALID_PARAMETER: process no longer exists.
+                    return
+                raise OSError(error, "Could not wait for the GeodeSync process to close.")
+            try:
+                result = wait_for_single(handle, min(250, max(0, int((deadline - time.time()) * 1000))))
+            finally:
+                close_handle(handle)
+            if result == 0:
+                return
+            if result != 258:  # WAIT_TIMEOUT
+                raise OSError("Windows could not wait for GeodeSync to close.")
+        else:
+            try:
+                os.kill(int(pid), 0)
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                pass
+        time.sleep(0.25)
+    raise TimeoutError("GeodeSync did not close in time for the update.")
+
+
+def _apply_staged_update(payload, target, backup, pid):
+    """Helper mode: swap a verified staged install and roll back on failure."""
+    _wait_for_process_exit(pid)
+    target = os.path.abspath(target)
+    payload = os.path.abspath(payload)
+    backup = os.path.abspath(backup)
+    target_parent = os.path.dirname(target)
+    try:
+        staging_inside_parent = os.path.commonpath((target_parent, payload)) == target_parent and os.path.commonpath((target_parent, backup)) == target_parent
+    except ValueError:
+        staging_inside_parent = False
+    if not staging_inside_parent:
+        raise ValueError("Update staging paths are not siblings of the installation.")
+    if not os.path.isdir(payload):
+        raise FileNotFoundError("The verified update staging folder is missing.")
+    moved_old = False
+    try:
+        if os.path.exists(target):
+            os.replace(target, backup)
+            moved_old = True
+        os.replace(payload, target)
+        executable = os.path.join(target, "Contents", "MacOS", "GeodeSync") if IS_MAC else os.path.join(target, "GeodeSync.exe" if IS_WIN else "GeodeSync")
+        if not os.path.isfile(executable):
+            raise FileNotFoundError("The updated application executable is missing.")
+        if IS_MAC:
+            mark_macos_quarantine(target)
+            subprocess.Popen(["open", target], close_fds=True)
+        else:
+            if IS_WIN:
+                mark_windows_download(executable, "https://github.com/" + GITHUB_REPO + "/releases")
+            subprocess.Popen([executable], close_fds=True)
+    except Exception:
+        if os.path.exists(target):
+            shutil.rmtree(target, ignore_errors=True)
+        if moved_old and os.path.exists(backup):
+            os.replace(backup, target)
+        raise
+    else:
+        shutil.rmtree(backup, ignore_errors=True)
+        work_dir = os.path.dirname(backup)
+        if IS_WIN:
+            try:
+                _schedule_windows_update_cleanup(work_dir, target_parent)
+            except OSError:
+                pass
+        else:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _schedule_windows_update_cleanup(work_dir, parent):
+    """Remove the temporary Windows helper after the OS releases its files."""
+    name = os.path.basename(work_dir)
+    if not re.fullmatch(r"\.GeodeSync-update-[A-Za-z0-9_-]+", name):
+        raise ValueError("The temporary update folder name is invalid.")
+    script = os.path.join(parent, f".GeodeSync-cleanup-{name.rsplit('-', 1)[-1]}.cmd")
+    relative_target = name
+    command = (
+        "@echo off\r\n"
+        ":retry\r\n"
+        f'rmdir /s /q "%~dp0{relative_target}" >nul 2>&1\r\n'
+        f'if exist "%~dp0{relative_target}" (timeout /t 1 /nobreak >nul & goto retry)\r\n'
+        'del "%~f0" >nul 2>&1\r\n'
+    )
+    with open(script, "w", encoding="utf-8", newline="") as stream:
+        stream.write(command)
+    subprocess.Popen(
+        ["cmd.exe", "/d", "/c", f'start "" /b "{script}"'],
+        cwd=parent,
+        close_fds=True,
+        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+    )
+
+
+def _run_update_helper(encoded):
+    payload = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8"))
+    _apply_staged_update(payload["payload"], payload["target"], payload["backup"], payload["pid"])
+
+
 def validate_macos_update_zip(archive):
     """Reject path traversal and unexpected top-level content in a Mac update."""
     app_entries = 0
     expanded_size = 0
+    names = set()
     for info in archive.infolist():
         name = info.filename
         normalized = name.replace("\\", "/")
-        parts = normalized.split("/")
-        if normalized.startswith("/") or ".." in parts:
+        parts = normalized.rstrip("/").split("/")
+        if normalized.startswith("/") or any(part in ("", ".", "..") for part in parts):
             raise ValueError("The Mac update archive contains an unsafe path.")
+        canonical_name = normalized.rstrip("/")
+        if canonical_name in names:
+            raise ValueError("The Mac update archive contains duplicate paths.")
+        names.add(canonical_name)
         if normalized.startswith("GeodeSync.app/"):
             app_entries += 1
         elif normalized.startswith("__MACOSX/GeodeSync.app/") or normalized == "__MACOSX/":
@@ -2565,6 +2857,8 @@ class GeodeSyncApp(tk.Tk):
             self.recovered_transactions = []
             self.recovery_error = str(error)
         self.latest_release_url = None
+        self._app_update_in_progress = False
+        self._staged_app_update = None
         self.is_downloading_depot = False
         self._monitor_running = True
 
@@ -2757,7 +3051,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="View release", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Install update", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -4525,7 +4819,9 @@ class GeodeSyncApp(tk.Tk):
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                self.after(0, lambda: self.show_update_banner(tag, prompt=True))
+                self.after(0, lambda: self.show_update_banner(tag))
+                if getattr(sys, "frozen", False):
+                    self.after(0, lambda: self._start_auto_update_if_needed(rel))
         except Exception:
             pass
 
@@ -4538,19 +4834,11 @@ class GeodeSyncApp(tk.Tk):
                 self.update_banner.pack(fill="x", side="top")
         except Exception:
             self.update_banner.pack(fill="x", side="top")
-        self.log(f"New update detected: v{new_ver}. Open the official release page to review and download it.", "SUCCESS")
-        if prompt:
-            def ask():
-                try:
-                    if messagebox.askyesno(
-                        "GeodeSync Update Available",
-                        f"A new version of GeodeSync (v{new_ver}) is available.\n\nOpen the official GitHub release page to review the files and download manually?",
-                        parent=self,
-                    ):
-                        self.start_self_update()
-                except Exception as e:
-                    self.log(f"Update prompt error: {e}", "WARN")
-            self.after(50, ask)
+        self.log(f"GeodeSync v{new_ver} is available. The app will download and verify the official update package.", "SUCCESS")
+
+    def _start_auto_update_if_needed(self, release):
+        if not self._app_update_in_progress and not self._staged_app_update:
+            self.start_self_update(auto_install=True, release=release)
 
     def manual_check_updates(self):
         self.log("Checking for GeodeSync updates...", "INFO")
@@ -4560,7 +4848,9 @@ class GeodeSyncApp(tk.Tk):
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-                    self.after(0, lambda: self.show_update_banner(tag, prompt=True))
+                    self.after(0, lambda: self.show_update_banner(tag))
+                    if getattr(sys, "frozen", False):
+                        self.after(0, lambda: self._start_auto_update_if_needed(rel))
                 else:
                     self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION}).", parent=self))
                     self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
@@ -4959,16 +5249,80 @@ class GeodeSyncApp(tk.Tk):
     # ==========================================
     # v1.1.2 PRO FEATURE: 1-CLICK IN-APP SELF-UPDATER
     # ==========================================
-    def start_self_update(self):
-        """Open the official release page; installs remain an explicit user action."""
-        release_url = official_release_page(self.latest_release_url)
-        self.latest_release_url = release_url
-        self.log(
-            "Opening the official GitHub release page. Automatic installation is disabled "
-            "until releases can be independently signature-verified.",
-            "INFO",
-        )
-        webbrowser.open(release_url)
+    def start_self_update(self, auto_install=False, release=None):
+        """Download and verify the official package, then offer a safe restart install."""
+        if self._staged_app_update:
+            self._launch_staged_app_update(self._staged_app_update)
+            return
+        if self._app_update_in_progress:
+            return
+        if not getattr(sys, "frozen", False):
+            self.open_update_link()
+            return
+        self._app_update_in_progress = True
+        self.update_action_btn.config(state="disabled", text="Downloading…")
+        self.log("Downloading the official GeodeSync update and checking its SHA-256 digest…", "INFO")
+
+        def download_and_offer():
+            work_dir = None
+            try:
+                rel = release or fetch_latest_published_release(timeout=20)
+                tag = str(rel.get("tag_name", "")).lstrip("v")
+                if not is_newer_app_version(tag, APP_VERSION):
+                    raise ValueError("No newer stable GeodeSync release is available.")
+                target = _application_root()
+                parent = os.path.dirname(target)
+                if not os.path.isdir(target) or not os.access(parent, os.W_OK):
+                    raise PermissionError("GeodeSync is in a protected folder. Move it to a user-writable folder, then update again.")
+                work_dir = tempfile.mkdtemp(prefix=".GeodeSync-update-", dir=parent)
+                asset, extracted = download_verified_app_update(rel, work_dir)
+                payload = os.path.join(extracted, "GeodeSync.app") if IS_MAC else extracted
+                if IS_MAC and not os.path.isdir(payload):
+                    raise ValueError("The Mac update package does not contain GeodeSync.app.")
+                data = {"payload": payload, "target": target, "backup": os.path.join(work_dir, "previous-install"), "pid": os.getpid()}
+                staged = {"tag": tag, "data": data, "work_dir": work_dir, "payload": payload, "asset": asset}
+                self.after(0, lambda staged=staged: self._finish_staged_app_update(staged, auto_install))
+            except Exception as error:
+                self._app_update_in_progress = False
+                if work_dir:
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                self.after(0, lambda error=error: self.update_action_btn.config(state="normal", text="Retry update"))
+                self.after(0, lambda error=error: self.log(f"Automatic update could not be staged: {error}", "ERROR"))
+                self.after(0, lambda error=error: messagebox.showerror("Update could not be installed", str(error), parent=self))
+
+        threading.Thread(target=download_and_offer, daemon=True).start()
+
+    def _finish_staged_app_update(self, staged, auto_install):
+        self._staged_app_update = staged
+        self._app_update_in_progress = False
+        self.update_action_btn.config(state="normal", text="Restart to update")
+        self.log(f"Downloaded v{staged['tag']} and verified the release checksum. Ready to install.", "SUCCESS")
+        if auto_install and messagebox.askyesno(
+            "GeodeSync update ready",
+            f"GeodeSync v{staged['tag']} is downloaded and its SHA-256 checksum matches GitHub's release metadata.\n\nClose GeodeSync and install it now?",
+            parent=self,
+        ):
+            self._launch_staged_app_update(staged)
+
+    def _launch_staged_app_update(self, staged):
+        try:
+            data = dict(staged["data"])
+            encoded = base64.urlsafe_b64encode(json.dumps(data).encode("utf-8")).decode("ascii")
+            work_dir = staged["work_dir"]
+            if IS_WIN:
+                helper = os.path.join(work_dir, "updater")
+                shutil.copytree(staged["payload"], helper)
+                mark_windows_download(os.path.join(helper, "GeodeSync.exe"), "https://github.com/" + GITHUB_REPO + "/releases")
+                command = [os.path.join(helper, "GeodeSync.exe"), "--geodesync-apply-update", encoded]
+            elif IS_MAC:
+                command = [os.path.join(staged["payload"], "Contents", "MacOS", "GeodeSync"), "--geodesync-apply-update", encoded]
+            else:
+                command = [os.path.join(staged["payload"], "GeodeSync"), "--geodesync-apply-update", encoded]
+            subprocess.Popen(command, cwd=os.path.dirname(_application_root()), close_fds=True)
+            self.quit_app()
+        except Exception as error:
+            self.log(f"Could not start the verified update helper: {error}", "ERROR")
+            messagebox.showerror("Update could not be started", str(error), parent=self)
 
     def _schedule_update_progress(self, text, value=None, hide=False):
         def update_ui():
@@ -6054,6 +6408,9 @@ class GeodeSyncApp(tk.Tk):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--geodesync-apply-update":
+        _run_update_helper(sys.argv[2])
+        raise SystemExit(0)
     try:
         app = GeodeSyncApp()
         app.mainloop()

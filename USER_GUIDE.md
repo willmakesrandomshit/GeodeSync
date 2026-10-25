@@ -2,7 +2,7 @@
 
 GeodeSync helps manage a Steam copy of Geometry Dash: it can switch to a supported game version, protect that version from Steam auto-updates, manage saves and mods, and collect diagnostics when something goes wrong. It does not replace Steam or Geode.
 
-This guide follows the current v2.3.3 source. The latest published package can be older, so a feature or button may not appear until that version is released. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases) for published downloads.
+This guide follows the current v2.3.4 source. The latest published package can be older, so a feature or button may not appear until that version is released. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases) for published downloads.
 
 ## Before you start
 
@@ -53,7 +53,7 @@ The Linux package is built separately from Windows and macOS. Steam/Proton layou
 
 ## Switch to the Geode-compatible game version
 
-The default recommended target in v2.3.3 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
+The default recommended target in v2.3.4 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
 
 1. Make sure Geometry Dash is closed. If prompted, allow GeodeSync to close it or close it yourself.
 2. Click **Backup Saves** in the dashboard tools first if you want a manual backup. The version-switch flow also backs up detected save files and asks before proceeding if it cannot find any.

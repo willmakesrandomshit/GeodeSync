@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from main import (
     decode_geometry_dash_save,
@@ -17,6 +17,11 @@ from main import (
     is_safe_geode_mod_id,
     validate_geode_package_zip,
     verify_release_asset_digest,
+    select_app_update_asset,
+    validate_app_update_zip,
+    validate_app_update_tar,
+    _apply_staged_update,
+    download_verified_app_update,
 )
 
 
@@ -58,15 +63,14 @@ class SecurityHardeningTests(unittest.TestCase):
                 self.assertNotIn("Unblock-File", text)
                 self.assertNotIn("xattr -cr", text)
 
-    def test_update_action_uses_manual_official_release_review(self):
+    def test_update_action_downloads_verified_official_package(self):
         source = (ROOT / "main.py").read_text(encoding="utf-8")
-        start = source.index("    def start_self_update(self):")
-        end = source.index("    def _schedule_update_progress", start)
+        start = source.index("    def start_self_update(self, auto_install=False, release=None):")
+        end = source.index("    def _finish_staged_app_update", start)
         update_action = source[start:end]
-        self.assertIn("official_release_page", update_action)
-        self.assertIn("webbrowser.open", update_action)
-        self.assertNotIn("urlopen", update_action)
-        self.assertNotIn("subprocess", update_action)
+        self.assertIn("download_verified_app_update", update_action)
+        self.assertIn("_launch_staged_app_update", update_action)
+        self.assertIn("SHA-256", source)
 
     def test_windows_release_uses_portable_onedir_package(self):
         package_script = (ROOT / "package_windows.ps1").read_text(encoding="utf-8")
@@ -167,6 +171,87 @@ class SecurityHardeningTests(unittest.TestCase):
             verify_release_asset_digest(asset, b"tampered", "fixture")
         with self.assertRaises(ValueError):
             verify_release_asset_digest({}, payload, "fixture")
+
+    def test_app_update_asset_must_be_exact_official_release_asset(self):
+        release = {"tag_name": "v2.4.0", "published_at": "2026-10-25T00:00:00Z", "assets": [{
+            "name": "GeodeSync-Windows.zip", "size": 10,
+            "browser_download_url": "https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.4.0/GeodeSync-Windows.zip",
+        }]}
+        self.assertEqual(select_app_update_asset(release, "windows")["name"], "GeodeSync-Windows.zip")
+        release["assets"][0]["browser_download_url"] = "https://evil.example/payload.zip"
+        with self.assertRaises(ValueError):
+            select_app_update_asset(release, "windows")
+
+    def test_verified_update_download_checks_digest_and_extracts(self):
+        import hashlib
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as archive:
+            archive.writestr("GeodeSync.exe", b"new-app")
+            archive.writestr("_internal/runtime.dll", b"runtime")
+        package = data.getvalue()
+        url = "https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.4.0/GeodeSync-Windows.zip"
+        release = {"tag_name": "v2.4.0", "published_at": "2026-10-25T00:00:00Z", "assets": [{
+            "name": "GeodeSync-Windows.zip", "size": len(package),
+            "digest": "sha256:" + hashlib.sha256(package).hexdigest(),
+            "browser_download_url": url,
+        }]}
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = package
+        response.__enter__.return_value.geturl.return_value = url
+        with tempfile.TemporaryDirectory() as destination, patch("main.urllib.request.urlopen", return_value=response):
+            asset, payload = download_verified_app_update(release, destination, "windows")
+            self.assertEqual(asset["name"], "GeodeSync-Windows.zip")
+            self.assertEqual((pathlib.Path(payload) / "GeodeSync.exe").read_bytes(), b"new-app")
+
+    def test_app_update_zip_rejects_traversal(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as archive:
+            archive.writestr("GeodeSync.exe", b"exe")
+            archive.writestr("_internal/runtime.dll", b"dll")
+            archive.writestr("../../outside", b"bad")
+        with zipfile.ZipFile(io.BytesIO(data.getvalue())) as archive:
+            with self.assertRaises(ValueError):
+                validate_app_update_zip(archive, "windows")
+
+    def test_linux_update_tar_rejects_symlink_and_traversal(self):
+        import tarfile
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w:gz") as archive:
+            info = tarfile.TarInfo("GeodeSync")
+            payload = b"binary"
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+            link = tarfile.TarInfo("outside")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../outside"
+            archive.addfile(link)
+        with tarfile.open(fileobj=io.BytesIO(data.getvalue()), mode="r:gz") as archive:
+            with self.assertRaises(ValueError):
+                validate_app_update_tar(archive)
+
+    def test_staged_app_update_swaps_and_rolls_back(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            target = root / "GeodeSync"
+            work = root / ".GeodeSync-update-test"
+            payload = work / "payload"
+            backup = work / "previous-install"
+            (target / "_internal").mkdir(parents=True)
+            (target / "GeodeSync.exe").write_bytes(b"old")
+            (payload / "_internal").mkdir(parents=True)
+            (payload / "GeodeSync.exe").write_bytes(b"new")
+            with patch("main._wait_for_process_exit"), patch("main.subprocess.Popen"), patch("main.IS_WIN", True), patch("main.IS_MAC", False):
+                _apply_staged_update(str(payload), str(target), str(backup), 123)
+            self.assertEqual((target / "GeodeSync.exe").read_bytes(), b"new")
+            self.assertFalse(backup.exists())
+
+            failed_payload = work / "failed-payload"
+            (failed_payload / "_internal").mkdir(parents=True)
+            (failed_payload / "GeodeSync.exe").write_bytes(b"broken")
+            with patch("main._wait_for_process_exit"), patch("main.subprocess.Popen", side_effect=OSError("launch failed")), patch("main.IS_WIN", True), patch("main.IS_MAC", False):
+                with self.assertRaises(OSError):
+                    _apply_staged_update(str(failed_payload), str(target), str(backup), 123)
+            self.assertEqual((target / "GeodeSync.exe").read_bytes(), b"new")
 
 
 if __name__ == "__main__":

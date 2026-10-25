@@ -19,6 +19,12 @@ Download the latest published build from [GitHub Releases](https://github.com/wi
 - **Windows:** Extract the entire ZIP to a normal folder and open `GeodeSync.exe` or `Run-GeodeSync.bat`. Keep the `_internal` folder beside the executable; do not move the executable by itself.
 - **macOS Apple silicon:** Use `GeodeSync-macOS-arm64.zip`.
 - **macOS Intel:** Use `GeodeSync-macOS-x86_64.zip`.
+
+### App updates
+
+Packaged builds check the official GitHub Releases API in the background. When a newer stable version is available, GeodeSync downloads the matching platform package, checks that its size and SHA-256 digest match GitHub's release metadata, and validates archive paths before staging it beside the current app. It then asks before closing and restarting to apply the update; declining leaves the verified package staged until you choose **Restart to update**. Updates never run with administrator privileges. Install the app in a folder your account can write to (for example, `~/Applications` on macOS), or update it manually from the official Releases page if the operating system protects the install folder.
+
+The digest check detects transfer corruption and mismatched release assets. GitHub release metadata and the package are served by the same GitHub account, so this is not an independent publisher signature. Windows Authenticode and Apple signing are used only when release signing credentials are configured; GeodeSync does not bypass operating-system warnings.
 - **Linux / Steam Deck:** Use the Linux archive if it is attached to the release. Linux and Proton setups have less platform-specific validation than Windows and macOS.
 
 GeodeSync manages Geometry Dash installations provided by Steam; it does not replace Steam or Geode. Before switching versions, close the game and review the confirmation. The switch flow backs up detected saves, validates staged game files, and keeps recovery data if a swap is interrupted. If validation fails, the existing installation should be left in place.
