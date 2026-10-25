@@ -211,3 +211,16 @@ jobs:
             GeodeSync-v*-Linux.tar.gz
             SHA256SUMS.txt
           fail_on_unmatched_files: true
+      - name: Announce release in Discord
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GEODESYNC_DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          RELEASE_TAG: v${{ steps.version.outputs.app_version }}
+          RELEASE_TITLE: GeodeSync v${{ steps.version.outputs.app_version }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.app_version }}
+        run: |
+          if [ -z "$GEODESYNC_DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK is missing; release announcement was not sent." >&2
+            exit 1
+          fi
+          python3 send_discord_update.py

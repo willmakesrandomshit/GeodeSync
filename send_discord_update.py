@@ -9,6 +9,8 @@ import sys
 import json
 import urllib.request
 
+from discord_release import build_release_payload
+
 CHANNEL_ID = "1563643888537698314"
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "discord_webhook.json")
 
@@ -36,7 +38,7 @@ def current_version():
         return json.load(f)["app_version"]
 
 
-def send_update(version=None, title=None, notes=None, ping=False):
+def send_update(version=None, title=None, notes=None, ping=False, release_tag=None, release_url=None):
     version = version or current_version()
     webhook_url = get_webhook_url()
     if not webhook_url:
@@ -45,31 +47,12 @@ def send_update(version=None, title=None, notes=None, ping=False):
         print("    python send_discord_update.py --set-webhook https://discord.com/api/webhooks/...")
         return False
 
-    release_url = f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/v{version}"
+    release_tag = release_tag or f"v{version}"
+    release_url = release_url or f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/{release_tag}"
     display_title = title or f"GeodeSync v{version} Released!"
-    desc = notes or "A new update for GeodeSync is now available with automatic fixes and improvements."
-
-    payload = {
-        "content": "⚡ **New GeodeSync Update Released!**",
-        "allowed_mentions": {"parse": []},
-        "embeds": [
-            {
-                "title": f"🚀 {display_title}",
-                "url": release_url,
-                "description": desc,
-                "color": 0xc2e66b,
-                "fields": [
-                    {
-                        "name": "📦 Direct Downloads",
-                        "value": f"[Choose a download for your system]({release_url})"
-                    }
-                ],
-                "footer": {
-                    "text": f"GeodeSync v{version} • Broadcast to #{CHANNEL_ID}"
-                }
-            }
-        ]
-    }
+    payload = build_release_payload(
+        display_title, release_tag, notes, release_url
+    )
 
     try:
         req = urllib.request.Request(
@@ -93,12 +76,24 @@ if __name__ == "__main__":
         print(f"Saved webhook for channel {CHANNEL_ID} to {CONFIG_FILE}!")
         sys.exit(0)
 
-    # Read latest release notes
+    # GitHub Actions supplies the exact published release data. Local runs fall
+    # back to the checked-in version and release notes.
     notes_file = os.path.join(os.path.dirname(__file__), "release_notes.md")
-    notes = None
+    notes = os.environ.get("RELEASE_BODY")
     if os.path.exists(notes_file):
-        with open(notes_file, "r", encoding="utf-8") as f:
-            notes = f.read()
+        if not notes:
+            with open(notes_file, "r", encoding="utf-8") as f:
+                notes = f.read()
 
     version = current_version()
-    send_update(version=version, title=f"GeodeSync v{version} released", notes=notes)
+    tag = os.environ.get("RELEASE_TAG") or f"v{version}"
+    title = os.environ.get("RELEASE_TITLE") or f"GeodeSync {tag} released"
+    release_url = os.environ.get("RELEASE_URL") or f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/{tag}"
+    if not send_update(
+        version=version,
+        title=title,
+        notes=notes,
+        release_tag=tag,
+        release_url=release_url,
+    ):
+        sys.exit(1)

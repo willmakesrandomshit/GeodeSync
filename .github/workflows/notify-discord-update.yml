@@ -1,69 +1,54 @@
 name: Notify Discord on Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag to announce again (for example, v2.3.6)
+        required: true
+        type: string
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Send Discord Announcement to Channel
+      - name: Check out the trusted default-branch notifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Load the selected published release
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
-          RELEASE_TITLE: ${{ github.event.release.name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_BODY: ${{ github.event.release.body }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [ -z "$DISCORD_WEBHOOK" ]; then
-            echo "DISCORD_RELEASE_WEBHOOK secret not set. Skipping Discord notification."
-            exit 0
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Invalid release tag. Expected a version such as v2.3.6." >&2; exit 1 ;;
+          esac
+          gh release view "$RELEASE_TAG" --json name,tagName,body,url > "$RUNNER_TEMP/release.json"
+          python3 - <<'PY'
+          import json, os, uuid
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "release.json"), encoding="utf-8") as f:
+              release = json.load(f)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key, value in (
+                  ("RELEASE_TITLE", release.get("name") or release["tagName"]),
+                  ("RELEASE_TAG", release["tagName"]),
+                  ("RELEASE_BODY", release.get("body") or ""),
+                  ("RELEASE_URL", release["url"]),
+              ):
+                  delimiter = "GEODESYNC_" + uuid.uuid4().hex
+                  env_file.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
+          PY
+      - name: Send branded Discord release announcement
+        env:
+          GEODESYNC_DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if [ -z "$GEODESYNC_DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK is missing; announcement was not sent." >&2
+            exit 1
           fi
-
-          python3 - << 'EOF'
-          import os, json, urllib.request
-
-          webhook_url = os.environ.get("DISCORD_WEBHOOK")
-          title = os.environ.get("RELEASE_TITLE") or os.environ.get("RELEASE_TAG") or "New Update Released!"
-          tag = os.environ.get("RELEASE_TAG") or "latest"
-          body = os.environ.get("RELEASE_BODY") or "A new update for GeodeSync is now available!"
-          rel_url = os.environ.get("RELEASE_URL") or "https://github.com/willmakesrandomshit/GeodeSync/releases/latest"
-
-          # Truncate body if too long for embed description
-          if len(body) > 1800:
-              body = body[:1800] + "... [Read full release on GitHub]"
-
-          payload = {
-              "content": "⚡ **New GeodeSync Update Released!**",
-              "allowed_mentions": {"parse": []},
-              "embeds": [
-                  {
-                      "title": f"🚀 {title}",
-                      "url": rel_url,
-                      "description": body,
-                      "color": 0xc2e66b,
-                      "fields": [
-                          {
-                              "name": "📦 Downloads",
-                              "value": f"[Download Windows (.exe / .zip)]({rel_url})\n[Download Linux (.tar.gz)]({rel_url})\n[Download macOS (.zip)]({rel_url})"
-                          }
-                      ],
-                      "footer": {
-                          "text": f"GeodeSync {tag} • Channel Auto-Broadcast"
-                      }
-                  }
-              ]
-          }
-
-          req = urllib.request.Request(
-              webhook_url,
-              data=json.dumps(payload).encode("utf-8"),
-              headers={"Content-Type": "application/json", "User-Agent": "GeodeSync-Release-Notifier"}
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=10) as resp:
-                  print("Discord notification sent successfully!")
-          except Exception as e:
-              print(f"Failed to dispatch Discord webhook: {e}")
-          EOF
+          python3 send_discord_update.py

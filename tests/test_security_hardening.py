@@ -84,9 +84,15 @@ class SecurityHardeningTests(unittest.TestCase):
 
     def test_discord_release_helper_uses_current_version_and_assets(self):
         source = (ROOT / "send_discord_update.py").read_text(encoding="utf-8")
+        payload_helper = (ROOT / "discord_release.py").read_text(encoding="utf-8")
         self.assertIn('version = version or current_version()', source)
         self.assertIn('"release_notes.md"', source)
-        self.assertIn("releases/tag/v{version}", source)
+        self.assertIn('release_tag = release_tag or f"v{version}"', source)
+        self.assertIn("build_release_payload", source)
+        self.assertIn("GeodeSync-Windows.zip", payload_helper)
+        self.assertIn("GeodeSync-macOS-arm64.zip", payload_helper)
+        self.assertIn("GeodeSync-macOS-x86_64.zip", payload_helper)
+        self.assertIn("releases/download/", payload_helper)
         self.assertNotIn("GeodeSync.exe]", source)
 
     def test_python_gui_entry_points_stay_in_sync(self):
