@@ -2,7 +2,7 @@
 
 GeodeSync helps manage a Steam copy of Geometry Dash: it can switch to a supported game version, protect that version from Steam auto-updates, manage saves and mods, and collect diagnostics when something goes wrong. It does not replace Steam or Geode.
 
-This guide follows the current v2.3.4 source. The latest published package can be older, so a feature or button may not appear until that version is released. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases) for published downloads.
+This guide follows v2.3.5. Check the version shown in GeodeSync and use the official [GitHub Releases page](https://github.com/willmakesrandomshit/GeodeSync/releases/latest) for published downloads.
 
 ## Before you start
 
@@ -16,17 +16,17 @@ This guide follows the current v2.3.4 source. The latest published package can b
 
 ### Windows
 
-1. Download `GeodeSync-Windows.zip` from the official Releases page.
+1. Download the single Windows asset, `GeodeSync-Windows.zip`, from the latest release. If you use Windows through Boot Camp, this is the correct download.
 2. Extract the ZIP to a normal folder. Do not run the app from inside the ZIP preview.
 3. Keep the `_internal` folder beside `GeodeSync.exe`; the app needs those runtime files.
 4. Open `GeodeSync.exe` or `Run-GeodeSync.bat`.
 5. If Windows shows a security prompt, check that the download came from the official repository before deciding whether to continue.
 
-The Windows release is a portable folder packaged as a ZIP; Python is not required separately. Do not copy only `GeodeSync.exe` out of the extracted folder.
+The Windows release is a portable folder packaged as a ZIP; Python is not required separately. Keep `_internal` next to `GeodeSync.exe`. Do not run the app from inside the ZIP preview or copy only the EXE.
 
 ### macOS
 
-1. Download the ZIP for your Mac: `arm64` for Apple silicon, or `x86_64` for Intel.
+1. Download the ZIP for your Mac from the latest release: `arm64` for Apple silicon, or `x86_64` for Intel. Boot Camp users running Windows should choose the Windows ZIP.
 2. Extract it and move `GeodeSync.app` into your personal Applications folder (`~/Applications`).
 3. Open the app. The release includes its Python and Tk runtime; you do not need Terminal or a separate Python install.
 4. If Gatekeeper warns that the community build is not notarized, only proceed if you downloaded it from the official GeodeSync repository and trust that release. Control-click the app, choose **Open**, and confirm once. This is a one-time app-opening decision; do not disable Gatekeeper globally.
@@ -53,7 +53,7 @@ The Linux package is built separately from Windows and macOS. Steam/Proton layou
 
 ## Switch to the Geode-compatible game version
 
-The default recommended target in v2.3.4 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
+The default recommended target in v2.3.5 is Geometry Dash 2.2081. The target is not a promise that every Geode mod works; check the Geode and mod requirements too.
 
 1. Make sure Geometry Dash is closed. If prompted, allow GeodeSync to close it or close it yourself.
 2. Click **Backup Saves** in the dashboard tools first if you want a manual backup. The version-switch flow also backs up detected save files and asks before proceeding if it cannot find any.
@@ -115,7 +115,7 @@ The dashboard's **Companion Tools** grid contains the main utilities; **More too
 
 ## Updates to GeodeSync
 
-If GeodeSync shows an update banner, choose **View release** to open the official GitHub Releases page, review the release, and download the package for your system. In-app binary replacement is currently disabled because releases are not independently signature-verified. Close GeodeSync before replacing the old app/executable. Do not mix Intel and Apple silicon Mac builds.
+GeodeSync checks stable releases in the background. When an update is available, review the prompt and choose **Restart to update** to apply it, or decline and apply it later from the update control. Existing installs older than v2.3.4 must install a current release manually once before in-app updates are available. Use the Windows package on Boot Camp, and do not mix Intel and Apple silicon Mac builds.
 
 ## Troubleshooting
 

@@ -78,6 +78,7 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("--onedir", package_script)
         self.assertNotIn("--onefile", package_script)
         self.assertIn("GeodeSync-Windows.zip", workflow)
+        self.assertNotIn("GeodeSync-v*-Windows.zip", workflow)
         self.assertNotIn("            GeodeSync.exe\n", workflow)
         self.assertIn("Run regression suite on Windows", workflow)
 
@@ -85,7 +86,7 @@ class SecurityHardeningTests(unittest.TestCase):
         source = (ROOT / "send_discord_update.py").read_text(encoding="utf-8")
         self.assertIn('version = version or current_version()', source)
         self.assertIn('"release_notes.md"', source)
-        self.assertIn("GeodeSync-Windows.zip", source)
+        self.assertIn("releases/tag/v{version}", source)
         self.assertNotIn("GeodeSync.exe]", source)
 
     def test_python_gui_entry_points_stay_in_sync(self):
@@ -93,6 +94,13 @@ class SecurityHardeningTests(unittest.TestCase):
             (ROOT / "main.py").read_bytes(),
             (ROOT / "GeodeSync.pyw").read_bytes(),
         )
+
+    def test_release_download_instructions_use_the_release_page_and_versioned_assets(self):
+        workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
+        guide = (ROOT / "USER_GUIDE.md").read_text(encoding="utf-8")
+        site = (ROOT / "docs/index.html").read_text(encoding="utf-8")
+        self.assertIn("GeodeSync-Windows.zip", guide)
+        self.assertIn("releases/latest/download/GeodeSync-Windows.zip", site)
 
     def test_geode_archive_rejects_traversal_before_writing_anything(self):
         with pathlib.Path(__file__).resolve().parents[1].joinpath(".test-sentinel").open("w") as marker:

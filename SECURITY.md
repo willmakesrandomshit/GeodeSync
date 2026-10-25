@@ -21,9 +21,9 @@ Official source and release downloads are hosted in this repository:
 GeodeSync currently has no configured Windows Authenticode signing identity and
 does not have a pinned release-signing key for independent artifact verification.
 GitHub's asset SHA-256 digest detects transfer corruption, but it is served by the
-same release service and is not a separate proof of publisher identity. For that
-reason, in-app binary replacement is disabled; the update control opens the
-canonical release page for user review. Do not bypass SmartScreen, Defender,
+same release service and is not a separate proof of publisher identity. The app
+verifies the digest and stages stable release packages before asking to restart.
+Do not bypass SmartScreen, Defender,
 Gatekeeper, or quarantine warnings. If a release is unsigned or flagged, stop and
 ask the maintainer for verifiable signing and scan evidence.
 

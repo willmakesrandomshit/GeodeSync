@@ -129,11 +129,12 @@ ships alongside the executable and is not extracted into a per-run `_MEI...`
 directory. This reduces exposure to that failure mode; validation on Windows CI
 and the affected PC is still needed before claiming the user's issue is fixed.
 
-The release now packages Windows as a ZIP containing the app folder and `_internal`
-runtime directory, and publishes stable `GeodeSync-Windows.zip` and
-`GeodeSync-Linux.tar.gz` names for download links. Windows CI runs the regression
-suite before packaging. The Discord release helper derives the version from
-`version.json` and uses the current release notes and asset names.
+The release packages Windows as a ZIP containing the app folder and `_internal`
+runtime directory. Releases use one stable Windows asset name and one versioned
+Linux archive; the app updater selects the stable Windows asset consistently.
+Windows CI
+runs the regression suite before packaging. The Discord release helper derives the
+version from `version.json` and uses the current release notes and asset names.
 
 Verification in this checkout: `python3 -m unittest discover -s tests -v` — 57
 tests passed; `python3 -m py_compile main.py GeodeSync.pyw build_macos.py
