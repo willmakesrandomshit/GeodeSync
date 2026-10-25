@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.5",
+  "app_version": "2.3.6",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.5: clearer downloads and reliable Windows automatic updates."
+  "announcement": "GeodeSync v2.3.6: simple error explanations and safe setup checks."
 }

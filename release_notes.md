@@ -1,21 +1,15 @@
-# GeodeSync v2.3.5 — clearer downloads and Windows auto-updates
+# GeodeSync v2.3.6 — Fix a problem
 
-## Windows users
+## Simple troubleshooting in the app
 
-Download the single Windows ZIP, `GeodeSync-Windows.zip`, from the Assets list. If you use Windows through Boot Camp, choose this Windows ZIP. Extract it fully, keep the `_internal` folder beside `GeodeSync.exe`, and launch `GeodeSync.exe` from the extracted folder. Do not run it inside the ZIP preview.
+Choose **Fix a problem** in the bottom bar. Run **Check Setup** for a read-only Steam/game check, or paste the exact Windows or Steam error and choose **Explain Error**. For common problems, GeodeSync gives direct steps. If it does not recognize the error, it says so and points to the support report instead of guessing.
 
-The Windows app updater selects this stable asset name, so updates work without asking users to guess between filenames.
+The Windows setup check validates the Geometry Dash executable and DLL formats before launch. If Windows shows an error and the game does not start, GeodeSync can notice the failed launch and open the troubleshooter. macOS launch failures open the same guidance window.
 
-## Automatic updates
+**Copy Steps** copies the instructions for support chat. **Export Report** saves system status, recent activity, and the last error entered in the troubleshooter. The report is local; review it before sharing. It does not contain save-file contents or mod files.
 
-GeodeSync now checks for stable releases in the background, downloads the package for the current operating system and Mac architecture, verifies its SHA-256 digest against official GitHub release metadata, validates the archive, and stages the update beside the current app. It asks before closing and restarting to apply the update.
-
-The updater rejects unexpected URLs, redirects, package sizes, archive paths, and file types. It preserves the existing installation until the staged replacement is ready and restores it if the swap or launch request fails. It does not request administrator privileges or bypass Windows or macOS security warnings.
-
-The SHA-256 metadata is served by the same GitHub release service as the package. It detects transfer corruption and mismatched assets, but it is not an independent publisher signature. Builds are Authenticode or Apple signed only when legitimate signing credentials are configured.
-
-Existing installs older than v2.3.4 must install a current package manually once; after that, future releases can be staged and applied from inside GeodeSync.
+The troubleshooting scan is read-only. It never downloads replacement DLLs, disables security software, or changes game files by itself. Steam Verify is recommended when game files appear damaged.
 
 ## Verification
 
-The automated regression suite covers versioned update URL selection, archive traversal rejection, Linux symlink rejection, staged installation, and rollback. The Windows release workflow runs regression tests and packages the application; live updater behavior still needs verification on an installed Windows machine.
+The automated suite includes tests for the Windows `0xc000007b` / Bad Image guidance, the Python runtime extraction error, unknown errors, and read-only setup findings. GitHub Actions runs the Windows regression suite and builds Windows, macOS, and Linux packages.
