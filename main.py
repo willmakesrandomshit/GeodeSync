@@ -60,7 +60,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.2"
+APP_VERSION = "2.3.3"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -999,6 +999,97 @@ def _rollback_install_transaction(stage_root, destination_root, journal):
             _remove_path(installed_path)
 
 
+WINDOWS_PE_MACHINE_NAMES = {
+    0x014C: "x86",
+    0x8664: "x64",
+    0xAA64: "ARM64",
+}
+
+
+def read_windows_pe_machine(path):
+    """Read and structurally validate a PE executable/DLL's architecture."""
+    try:
+        file_size = os.path.getsize(path)
+        if file_size < 0x40:
+            raise ValueError("file is too small to contain a PE header")
+        with open(path, "rb") as stream:
+            dos_header = stream.read(0x40)
+            if dos_header[:2] != b"MZ":
+                raise ValueError("missing DOS MZ signature")
+            pe_offset = struct.unpack_from("<I", dos_header, 0x3C)[0]
+            if pe_offset < 0x40 or pe_offset > file_size - 24:
+                raise ValueError("PE header offset is outside the file")
+            stream.seek(pe_offset)
+            signature = stream.read(4)
+            coff_data = stream.read(20)
+            if signature != b"PE\0\0" or len(coff_data) != 20:
+                raise ValueError("missing or truncated PE/COFF header")
+            machine, section_count, _timestamp, _symbols, _symbol_count, optional_size, _flags = struct.unpack(
+                "<HHIIIHH", coff_data
+            )
+            if machine not in WINDOWS_PE_MACHINE_NAMES:
+                raise ValueError(f"unsupported PE machine type 0x{machine:04x}")
+            if not 1 <= section_count <= 96:
+                raise ValueError("invalid PE section count")
+            if optional_size < 2 or pe_offset + 24 + optional_size + section_count * 40 > file_size:
+                raise ValueError("truncated PE optional header or section table")
+            optional_header = stream.read(optional_size)
+            optional_magic = struct.unpack_from("<H", optional_header, 0)[0]
+            expected_magic = 0x10B if machine == 0x014C else 0x20B
+            if optional_magic != expected_magic:
+                raise ValueError("PE machine type does not match its optional-header format")
+            for _ in range(section_count):
+                section = stream.read(40)
+                if len(section) != 40:
+                    raise ValueError("truncated PE section table")
+                _name, _virtual_size, _virtual_address, raw_size, raw_offset, *_rest = struct.unpack(
+                    "<8sIIIIIIHHI", section
+                )
+                if raw_size and (raw_offset > file_size or raw_size > file_size - raw_offset):
+                    raise ValueError("PE section data extends beyond the file")
+            return machine
+    except OSError as exc:
+        raise ValueError(f"file cannot be read ({exc})") from exc
+
+
+def validate_windows_game_images(game_root, expected_exe_size=None):
+    """Reject damaged or wrong-architecture game EXE/DLL files before commit."""
+    executable = os.path.join(game_root, "GeometryDash.exe")
+    if not os.path.isfile(executable):
+        return "GeometryDash.exe is missing."
+    try:
+        if expected_exe_size and os.path.getsize(executable) != expected_exe_size:
+            return "GeometryDash.exe size does not match the selected Steam depot."
+    except OSError as exc:
+        return f"GeometryDash.exe cannot be inspected ({exc})."
+    try:
+        expected_machine = read_windows_pe_machine(executable)
+    except ValueError as exc:
+        return f"GeometryDash.exe is not a valid Windows executable ({exc})."
+
+    walk_errors = []
+    for directory, dirnames, filenames in os.walk(game_root, onerror=walk_errors.append):
+        # The active transaction contains backup copies of the old install;
+        # those are not part of the candidate game being validated.
+        dirnames[:] = [name for name in dirnames if not name.startswith(".geodesync-transaction-")]
+        for filename in filenames:
+            if not filename.lower().endswith(".dll"):
+                continue
+            path = os.path.join(directory, filename)
+            relative = os.path.relpath(path, game_root)
+            try:
+                machine = read_windows_pe_machine(path)
+            except ValueError as exc:
+                return f"DLL {relative!r} is damaged or not a valid Windows library ({exc})."
+            if machine != expected_machine:
+                actual = WINDOWS_PE_MACHINE_NAMES[machine]
+                expected = WINDOWS_PE_MACHINE_NAMES[expected_machine]
+                return f"DLL {relative!r} is {actual}, but GeometryDash.exe is {expected}."
+    if walk_errors:
+        return f"A game folder could not be fully inspected ({walk_errors[0]})."
+    return None
+
+
 def recover_pending_install_transactions(destination_root):
     """Roll back interrupted game swaps left by a crash or power loss."""
     destination_root = os.path.abspath(destination_root)
@@ -1026,7 +1117,10 @@ def recover_pending_install_transactions(destination_root):
     return recovered
 
 
-def install_depot_transactionally(source_root, destination_root, validator=None, reserve_bytes=128 * 1024 * 1024):
+def install_depot_transactionally(
+    source_root, destination_root, validator=None, installed_validator=None,
+    reserve_bytes=128 * 1024 * 1024,
+):
     """Stage and validate every depot entry; rollback all changed entries on any interruption."""
     source_root = os.path.abspath(source_root)
     destination_root = os.path.abspath(destination_root)
@@ -1075,6 +1169,10 @@ def install_depot_transactionally(source_root, destination_root, validator=None,
                 if os.path.lexists(destination):
                     _safe_replace(destination, old_path)
                 _safe_replace(new_path, destination)
+            if installed_validator:
+                problem = installed_validator(destination_root)
+                if problem:
+                    raise OSError(f"The installed game failed validation: {problem}")
         except Exception:
             _rollback_install_transaction(stage_root, destination_root, journal)
             raise
@@ -3399,25 +3497,36 @@ class GeodeSyncApp(tk.Tk):
 
         self.log(f"Staging and checking Geometry Dash {self.mgr.target_gd_version}...", "INFO")
         try:
+            expected_windows_exe_size = next(
+                (meta.get("size") for meta in KNOWN_VERSIONS.values()
+                 if str(meta.get("manifest")) == str(self.mgr.target_manifest)),
+                None,
+            )
+
             def validate_staged_depot(staged_root):
                 if IS_MAC:
                     app_path = find_macos_game_app(staged_root)
                     if not app_path:
                         return "Geometry Dash.app is missing from the downloaded depot."
                     return validate_macos_game_app(app_path)
-                expected_size = next(
-                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
-                     if str(meta.get("manifest")) == str(self.mgr.target_manifest)),
-                    None,
-                )
                 executable = os.path.join(staged_root, "GeometryDash.exe")
                 if not os.path.isfile(executable):
                     return "GeometryDash.exe is missing from the downloaded depot."
-                if expected_size and os.path.getsize(executable) != expected_size:
-                    return f"GeometryDash.exe size does not match the selected {self.mgr.target_gd_version} depot."
-                return None
+                return validate_windows_game_images(
+                    staged_root, expected_exe_size=expected_windows_exe_size,
+                )
 
-            install_depot_transactionally(depot, self.mgr.gd_path, validator=validate_staged_depot)
+            installed_validator = None
+            if not IS_MAC:
+                installed_validator = lambda installed_root: validate_windows_game_images(
+                    installed_root, expected_exe_size=expected_windows_exe_size,
+                )
+            install_depot_transactionally(
+                depot,
+                self.mgr.gd_path,
+                validator=validate_staged_depot,
+                installed_validator=installed_validator,
+            )
             self.log(f"Game files successfully replaced with {self.mgr.target_gd_version}!", "SUCCESS")
         except Exception as e:
             self.is_downloading_depot = False
@@ -3436,6 +3545,13 @@ class GeodeSyncApp(tk.Tk):
                 user_msg = (
                     "GeodeSync could not finish installing the selected game version. "
                     f"It restored the previous files or kept recovery data for the next launch.\n\n{e}"
+                )
+            if any(marker in err_msg.lower() for marker in ("dll ", "pe header", "windows executable", "section data")):
+                user_msg = (
+                    "GeodeSync found a damaged or incompatible Windows game DLL and stopped the switch. "
+                    "It restored any files changed during this attempt. In Steam, open Geometry Dash → Properties → "
+                    "Installed Files → Verify integrity of game files, then retry the switch after verification.\n\n"
+                    f"Details: {e}"
                 )
             messagebox.showerror(
                 "Game switch was not completed",
