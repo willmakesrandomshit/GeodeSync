@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from types import SimpleNamespace
 from unittest import mock
 
 from main import (
@@ -36,6 +37,37 @@ class MacUpdateValidationTests(unittest.TestCase):
         self.assertFalse(is_newer_app_version("1.1.3.1", "1.1.5"))
         self.assertFalse(is_newer_app_version("1.1.5", "1.1.5.0"))
         self.assertFalse(is_newer_app_version("preview", "1.1.5"))
+
+    def test_verified_automatic_update_restarts_without_confirmation(self):
+        staged = {"tag": "2.3.8"}
+        app = SimpleNamespace(
+            _staged_app_update=None,
+            _app_update_in_progress=True,
+            update_action_btn=mock.Mock(),
+            log=mock.Mock(),
+            _apply_verified_update_when_idle=mock.Mock(),
+        )
+        apply_update = app._apply_verified_update_when_idle
+        with mock.patch.object(GeodeSyncApp, "_apply_verified_update_when_idle", apply_update), \
+             mock.patch("main.messagebox.askyesno", side_effect=AssertionError("must not prompt")):
+            GeodeSyncApp._finish_staged_app_update(app, staged, auto_install=True)
+        self.assertIs(app._staged_app_update, staged)
+        self.assertFalse(app._app_update_in_progress)
+        app.update_action_btn.config.assert_called_once_with(state="normal", text="Updating…")
+        apply_update.assert_called_once_with(staged)
+
+    def test_automatic_update_waits_for_game_file_download_to_finish(self):
+        staged = {"tag": "2.3.8"}
+        app = SimpleNamespace(
+            is_downloading_depot=True,
+            after=mock.Mock(),
+            log=mock.Mock(),
+            _launch_staged_app_update=mock.Mock(),
+        )
+        GeodeSyncApp._apply_verified_update_when_idle(app, staged)
+        app.after.assert_called_once()
+        self.assertEqual(app.after.call_args.args[0], 5000)
+        app._launch_staged_app_update.assert_not_called()
 
     def test_steam_completion_log_never_overrides_invalid_depot(self):
         self.assertFalse(should_apply_downloaded_depot(True, False))

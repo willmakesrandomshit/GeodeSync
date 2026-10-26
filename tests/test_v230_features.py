@@ -23,7 +23,7 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.3.7")
+        self.assertEqual(APP_VERSION, "2.3.8")
 
     def test_check_outdated_mods(self):
         mods_dir = os.path.join(self.gd_path, "geode", "mods")

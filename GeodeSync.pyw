@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.7"
+APP_VERSION = "2.3.8"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3268,7 +3268,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Install update", command=self.start_self_update, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -5537,14 +5537,21 @@ class GeodeSyncApp(tk.Tk):
     def _finish_staged_app_update(self, staged, auto_install):
         self._staged_app_update = staged
         self._app_update_in_progress = False
-        self.update_action_btn.config(state="normal", text="Restart to update")
+        self.update_action_btn.config(state="normal", text="Updating…" if auto_install else "Restart to update")
         self.log(f"Downloaded v{staged['tag']} and verified the release checksum. Ready to install.", "SUCCESS")
-        if auto_install and messagebox.askyesno(
-            "GeodeSync update ready",
-            f"GeodeSync v{staged['tag']} is downloaded and its SHA-256 checksum matches GitHub's release metadata.\n\nClose GeodeSync and install it now?",
-            parent=self,
-        ):
-            self._launch_staged_app_update(staged)
+        if auto_install:
+            self._apply_verified_update_when_idle(staged)
+
+    def _apply_verified_update_when_idle(self, staged):
+        """Apply a verified update without a restart prompt, after game-file work ends."""
+        if getattr(self, "is_downloading_depot", False):
+            try:
+                self.after(5000, lambda staged=staged: self._apply_verified_update_when_idle(staged))
+            except Exception:
+                pass
+            return
+        self.log(f"Applying verified GeodeSync v{staged['tag']} and restarting now.", "INFO")
+        self._launch_staged_app_update(staged)
 
     def _launch_staged_app_update(self, staged):
         try:

@@ -115,7 +115,7 @@ The dashboard's **Companion Tools** grid contains the main utilities; **More too
 
 ## Updates to GeodeSync
 
-GeodeSync checks stable releases in the background. When an update is available, review the prompt and choose **Restart to update** to apply it, or decline and apply it later from the update control. Existing installs older than v2.3.4 must install a current release manually once before in-app updates are available. Use the Windows package on Boot Camp, and do not mix Intel and Apple silicon Mac builds.
+GeodeSync checks stable releases in the background and automatically applies a downloaded update after verifying it. It waits for an active Steam game-file download or switch to finish before restarting. Existing installs older than v2.3.8 still use the updater behavior they shipped with for the first update to v2.3.8. Use the Windows package on Boot Camp, and do not mix Intel and Apple silicon Mac builds.
 
 ## Troubleshooting
 
