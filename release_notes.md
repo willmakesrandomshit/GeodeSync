@@ -1,15 +1,13 @@
-# GeodeSync v2.3.9 — System tray and verified updates
+# GeodeSync v2.3.10 — Responsive dashboard
 
-## Close to the system tray on Windows
+## Dashboard layout
 
-With **Close to System Tray** enabled, closing the dashboard hides GeodeSync in the Windows notification area while background monitoring and Discord Rich Presence continue. Right-click the GeodeSync tray icon to reopen the dashboard or exit the app. If tray support cannot start, the app minimizes to the taskbar instead. macOS and Linux retain their existing background behavior.
+Setup badges now sit below player stats instead of competing for the same row. The tools grid fills its card cleanly, long tool names wrap to their available column width, and footer status text resizes around the action buttons. This avoids overlaps and clipping at different window sizes and Windows display scaling settings.
 
-Windows path-opening now checks that local targets exist before asking the shell to open them, preventing a native missing-path dialog for stale or malformed targets. Steam protocol links remain supported.
+## Windows system tray
+
+With **Close to System Tray** enabled, closing the dashboard hides GeodeSync in the Windows notification area while background monitoring and Discord Rich Presence continue. Right-click the tray icon to reopen the dashboard or exit. If tray support cannot start, GeodeSync minimizes to the taskbar. macOS and Linux retain their existing background behavior.
 
 ## Verified automatic updates
 
-GeodeSync downloads the official platform package, verifies its SHA-256 metadata and archive contents, then restarts to apply it without an approval dialog. If a Steam game-file download or switch is active, the verified update waits until that operation finishes. This behavior first shipped in v2.3.8.
-
-## Verification
-
-The release workflow runs the regression suite and packages Windows, macOS, and Linux builds. Windows packaging includes the tray runtime dependencies.
+GeodeSync downloads the official platform package, verifies its SHA-256 metadata and archive contents, then restarts to apply it. If a Steam game-file download or switch is active, the verified update waits until that operation finishes. Automatic updates first shipped in v2.3.8.

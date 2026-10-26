@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.9"
+APP_VERSION = "2.3.10"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3360,7 +3360,7 @@ class GeodeSyncApp(tk.Tk):
 
         # Left: Player identity & live stats
         p_left = tk.Frame(hero_top, bg=UI["panel"])
-        p_left.pack(side="left", fill="x", expand=True)
+        p_left.pack(side="top", fill="x", expand=True)
 
         p_name_row = tk.Frame(p_left, bg=UI["panel"])
         p_name_row.pack(anchor="w")
@@ -3393,10 +3393,10 @@ class GeodeSyncApp(tk.Tk):
 
         # Right: Game setup badges
         p_right = tk.Frame(hero_top, bg=UI["panel"])
-        p_right.pack(side="right", anchor="ne")
+        p_right.pack(side="top", fill="x", pady=(6, 0))
 
         setup_chips_row = tk.Frame(p_right, bg=UI["panel"])
-        setup_chips_row.pack(anchor="e")
+        setup_chips_row.pack(anchor="w")
 
         self.ver_badge = tk.Label(setup_chips_row, text="GD ...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=3)
         self.ver_badge.pack(side="left", padx=2)
@@ -3461,6 +3461,8 @@ class GeodeSyncApp(tk.Tk):
         tool_grid.pack(fill="both", expand=True)
         for col in range(4):
             tool_grid.columnconfigure(col, weight=1)
+        for row in range(5):
+            tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
             button = tk.Button(
@@ -3470,8 +3472,19 @@ class GeodeSyncApp(tk.Tk):
                 activeforeground=UI["text"], relief="flat", padx=8, pady=6,
                 cursor="hand2"
             )
-            button.grid(row=row, column=column, sticky="ew", padx=2, pady=2)
+            button.grid(row=row, column=column, sticky="nsew", padx=2, pady=2)
             return button
+
+        def _fit_tool_labels(event=None):
+            available = event.width if event is not None else tool_grid.winfo_width()
+            if available <= 1:
+                return
+            wrap_width = max(92, (available - 28) // 4)
+            for child in tool_grid.winfo_children():
+                if isinstance(child, tk.Button):
+                    child.configure(wraplength=wrap_width)
+
+        tool_grid.bind("<Configure>", _fit_tool_labels)
 
         # Row 0: Essential Mods & Game Controls
         add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
@@ -3512,7 +3525,7 @@ class GeodeSyncApp(tk.Tk):
         if not self.discord_rpc_enabled:
             self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
         if not self.run_in_bg_enabled:
-            self.bg_mode_btn.config(text="🌙 Keep in BG on close: OFF", fg=UI["muted"])
+            self.bg_mode_btn.config(text="🌙 Close to System Tray: OFF", fg=UI["muted"])
 
         # Backward compatibility references
         self.player_card = self.guide_card
@@ -3528,8 +3541,17 @@ class GeodeSyncApp(tk.Tk):
         footer = tk.Frame(self, bg=UI["header"], padx=20, pady=7)
         footer.pack(fill="x", side="bottom")
 
-        self.status_ticker_lbl = tk.Label(footer, text="● Ready to play Geometry Dash", font=("Segoe UI", 8), fg=UI["lime"], bg=UI["header"])
-        self.status_ticker_lbl.pack(side="left")
+        self.status_ticker_lbl = tk.Label(
+            footer,
+            text="● Ready to play Geometry Dash",
+            font=("Segoe UI", 8),
+            fg=UI["lime"],
+            bg=UI["header"],
+            wraplength=320,
+            justify="left",
+            anchor="w",
+        )
+        self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         choose_path_btn = tk.Button(footer, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         choose_path_btn.pack(side="right", padx=(4, 0))
@@ -3549,7 +3571,21 @@ class GeodeSyncApp(tk.Tk):
         repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
 
         self.path_lbl = tk.Label(footer, text=f"{self.mgr.gd_path or 'Not found'}", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["header"])
+        self.path_lbl.configure(wraplength=180, justify="right", anchor="e")
         self.path_lbl.pack(side="right", padx=(0, 8))
+
+        def _fit_footer_status(event=None):
+            available = event.width if event is not None else footer.winfo_width()
+            if available <= 1:
+                return
+            fixed_width = sum(
+                child.winfo_reqwidth()
+                for child in footer.winfo_children()
+                if child is not self.status_ticker_lbl
+            )
+            self.status_ticker_lbl.configure(wraplength=max(110, available - fixed_width - 40))
+
+        footer.bind("<Configure>", _fit_footer_status)
 
     def open_log_viewer(self):
         dialog = tk.Toplevel(self)
