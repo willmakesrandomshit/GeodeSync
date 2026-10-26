@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.6"
+APP_VERSION = "2.3.7"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -92,6 +92,8 @@ def official_release_page(url=None):
 
 class DiscordRPC:
     CLIENT_ID = "1563607447384367195"
+    PLAYING_DETAILS = "Playing Geometry Dash with GeodeSync"
+    COMPANION_DETAILS = "GeodeSync · Geometry Dash Companion"
 
     def __init__(self, enabled=True):
         self._enabled = enabled
@@ -99,7 +101,7 @@ class DiscordRPC:
         self._connected = False
         self._lock = threading.RLock()
         self._start_time = int(time.time())
-        self._current_details = "Geometry Dash Companion"
+        self._current_details = self.COMPANION_DETAILS
         self._current_state = "Geode Mods Synced & Protected 🛡️"
         self._geode_ver = "v5.x"
         self._running = True
@@ -2995,6 +2997,13 @@ class GeodeSyncApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
+        # Keep the RPC connection alive after the user closes the dashboard.
+        # Iconifying keeps the app available from the taskbar/Dock so it can be
+        # restored; turning background mode off preserves normal close behavior.
+        if getattr(self, "run_in_bg_enabled", True):
+            self.iconify()
+            self.log("GeodeSync is minimized and still running; Discord Rich Presence stays active. Turn Keep in BG on close off to exit.", "INFO")
+            return
         self.quit_app()
 
     def quit_app(self):
@@ -3030,11 +3039,11 @@ class GeodeSyncApp(tk.Tk):
     def toggle_bg_mode(self):
         self.run_in_bg_enabled = not getattr(self, "run_in_bg_enabled", True)
         if self.run_in_bg_enabled:
-            self.bg_mode_btn.config(text="🌙 Run in BG: ON", fg=UI["lime"])
-            self.log("Background Mode: ON (Discord Rich Presence stays active when window is closed).", "SUCCESS")
+            self.bg_mode_btn.config(text="🌙 Keep in BG on close: ON", fg=UI["lime"])
+            self.log("Keep in BG on close: ON. Closing the window minimizes GeodeSync and keeps Discord Rich Presence active.", "SUCCESS")
         else:
-            self.bg_mode_btn.config(text="🌙 Run in BG: OFF", fg=UI["muted"])
-            self.log("Background Mode: OFF (Closing window exits the app).", "INFO")
+            self.bg_mode_btn.config(text="🌙 Keep in BG on close: OFF", fg=UI["muted"])
+            self.log("Keep in BG on close: OFF. Closing the window exits GeodeSync and clears Rich Presence.", "INFO")
         self._save_settings()
 
     @staticmethod
@@ -3434,7 +3443,7 @@ class GeodeSyncApp(tk.Tk):
         self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
 
         # Row 4: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Run in BG: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
+        self.bg_mode_btn = add_tool("🌙 Keep in BG on close: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
         add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
         add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
         add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
@@ -3446,7 +3455,7 @@ class GeodeSyncApp(tk.Tk):
         if not self.discord_rpc_enabled:
             self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
         if not self.run_in_bg_enabled:
-            self.bg_mode_btn.config(text="🌙 Run in BG: OFF", fg=UI["muted"])
+            self.bg_mode_btn.config(text="🌙 Keep in BG on close: OFF", fg=UI["muted"])
 
         # Backward compatibility references
         self.player_card = self.guide_card
@@ -3600,7 +3609,12 @@ class GeodeSyncApp(tk.Tk):
                 status_desc = f"{player_tag} · Geode {g_tag} 🛡️" if is_locked else f"{player_tag} · Ready"
             else:
                 status_desc = f"Geode {g_tag} · Mods Protected 🛡️" if is_locked else f"Geode {g_tag} · Ready"
-            self.discord_rpc.update_presence(f"GD {ver_text}", status_desc, geode_ver=g_tag)
+            details = (
+                DiscordRPC.PLAYING_DETAILS
+                if self.mgr.is_gd_process_running()
+                else DiscordRPC.COMPANION_DETAILS
+            )
+            self.discord_rpc.update_presence(details, status_desc, geode_ver=g_tag)
 
         if geode_ver:
             self.geode_badge.config(text=f"Geode {geode_ver}", fg=UI["lilac"], bg=UI["lilac_dark"])
@@ -4975,7 +4989,7 @@ class GeodeSyncApp(tk.Tk):
         self.log("Launching Geometry Dash (High Priority Boost)...", "INFO")
         if hasattr(self, "discord_rpc"):
             ver_text, _ = self.mgr.get_gd_version_info()
-            self.discord_rpc.update_presence("Playing Geometry Dash", f"GD {ver_text} · Mods Protected 🛡️", reset_timer=True)
+            self.discord_rpc.update_presence(DiscordRPC.PLAYING_DETAILS, f"GD {ver_text} · Mods Protected 🛡️", reset_timer=True)
 
         exe_path = os.path.join(self.mgr.gd_path, "GeometryDash.exe") if IS_WIN else None
         if IS_WIN and exe_path and os.path.exists(exe_path):
@@ -5644,14 +5658,14 @@ class GeodeSyncApp(tk.Tk):
                     else:
                         status_desc = f"GD {ver_text} · Geode {geode_ver} 🛡️" if is_locked else f"GD {ver_text} · In Game"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Playing Geometry Dash", status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
+                        self.discord_rpc.update_presence(DiscordRPC.PLAYING_DETAILS, status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
                 else:
                     if player_tag:
                         idle_desc = f"{stats['name']} ({player_tag})"
                     else:
                         idle_desc = f"GD {ver_text} · Geode {geode_ver} (Ready)" if is_locked else f"GD {ver_text} · Ready to Play"
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence("Geometry Dash Companion", idle_desc, reset_timer=(was_running is True), geode_ver=geode_ver)
+                        self.discord_rpc.update_presence(DiscordRPC.COMPANION_DETAILS, idle_desc, reset_timer=(was_running is True), geode_ver=geode_ver)
 
                 if was_running is True and not is_running:
                     self.after(0, self.update_player_stats_ui)

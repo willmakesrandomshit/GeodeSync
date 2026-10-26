@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import struct
 import json
+from types import SimpleNamespace
 import main
 
 class TestDiscordRPC(unittest.TestCase):
@@ -40,11 +41,32 @@ class TestDiscordRPC(unittest.TestCase):
         self.assertEqual(rpc._current_state, "Protected")
         rpc.close()
 
+    def test_window_close_keeps_process_alive_when_background_mode_is_enabled(self):
+        app = SimpleNamespace(
+            run_in_bg_enabled=True,
+            iconify=MagicMock(),
+            log=MagicMock(),
+            quit_app=MagicMock(),
+        )
+
+        main.GeodeSyncApp.on_close(app)
+
+        app.iconify.assert_called_once_with()
+        app.quit_app.assert_not_called()
+
+    def test_window_close_exits_when_background_mode_is_disabled(self):
+        app = SimpleNamespace(run_in_bg_enabled=False, quit_app=MagicMock())
+
+        main.GeodeSyncApp.on_close(app)
+
+        app.quit_app.assert_called_once_with()
+
     def test_send_activity_payload(self):
         with patch("threading.Thread"):
             rpc = main.DiscordRPC(enabled=False)
         rpc._connected = True
         rpc._enabled = True
+        rpc.update_presence(main.DiscordRPC.PLAYING_DETAILS, "Protected")
         mock_sock = MagicMock()
         mock_resp_body = b'{"cmd":"SET_ACTIVITY","data":{}}'
         mock_resp_hdr = struct.pack("<II", 1, len(mock_resp_body))
@@ -59,6 +81,7 @@ class TestDiscordRPC(unittest.TestCase):
         payload = json.loads(sent_data[8:8+length].decode("utf-8"))
         self.assertEqual(payload["cmd"], "SET_ACTIVITY")
         activity = payload["args"]["activity"]
+        self.assertEqual(activity["details"], "Playing Geometry Dash with GeodeSync")
         self.assertIn("assets", activity)
         self.assertIn("buttons", activity)
         self.assertEqual(len(activity["buttons"]), 2)
