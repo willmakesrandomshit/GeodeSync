@@ -41,6 +41,7 @@ class TestDiscordRPC(unittest.TestCase):
         self.assertEqual(rpc._current_state, "Protected")
         rpc.close()
 
+    @patch.object(main, "IS_WIN", False)
     def test_window_close_keeps_process_alive_when_background_mode_is_enabled(self):
         app = SimpleNamespace(
             run_in_bg_enabled=True,
