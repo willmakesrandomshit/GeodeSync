@@ -33,7 +33,7 @@ GeodeSync manages Geometry Dash installations provided by Steam; it does not rep
 
 - Switch between supported Geometry Dash versions and manage Steam's update lock.
 - Back up and restore saves, recover interrupted switches, and get clear error steps from Fix a problem.
-- Keep Discord Rich Presence active when the window is closed (the app stays minimized), showing “Playing Geometry Dash with GeodeSync” while GD is running.
+- Keep Discord Rich Presence active when the window is closed. On Windows, GeodeSync moves to the system tray, where you can reopen it or exit; while GD is running it shows “Playing Geometry Dash with GeodeSync”.
 - Save game and mod profiles; inspect, enable, disable, and update Geode mods.
 - Inspect Geometry Dash progress and troubleshoot mod crashes and keybind conflicts.
 - Install and restore texture packs with a vanilla texture backup.

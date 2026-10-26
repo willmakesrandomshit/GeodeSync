@@ -106,7 +106,7 @@ The dashboard's **Companion Tools** grid contains the main utilities; **More too
 - **Texture Packs** makes a vanilla texture backup before installing a selected pack and offers a restore option. Keep Geometry Dash closed while files are changed.
 - **Keybind Doctor** inspects available mod keybind configuration and reports detected collisions. It can only see mappings present in files it can read.
 - **Game Profiles** stores supported game version and active mod selections locally. Applying one can change game files and mods; check the confirmation before continuing.
-- **Discord RPC** controls whether GeodeSync advertises its activity through Discord Rich Presence. **Run in BG** controls whether the app stays open in the background. Both can be toggled from the dashboard.
+- **Discord RPC** controls whether GeodeSync advertises its activity through Discord Rich Presence. **Close to System Tray** controls whether the app stays open in the background. On Windows, closing the window hides it in the system tray; right-click the tray icon to reopen or exit. Both can be toggled from the dashboard.
 - **Mods folder** opens the detected Geode mods folder.
 - **Cache cleaner** can remove selected crash/log files and downloaded song/audio cache. Selected cached songs may need to download again. Review the selection before confirming.
 - **Crash Doctor** inspects recent Geode crash logs and may offer to temporarily disable a suspected mod. A suspected mod is a clue, not proof; re-enable it if disabling it does not resolve the crash.

@@ -7,6 +7,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
+import main
 
 from main import (
     decode_geometry_dash_save,
@@ -35,6 +36,17 @@ def tempfile_zip():
 
 
 class SecurityHardeningTests(unittest.TestCase):
+    def test_windows_path_opener_rejects_missing_and_bare_unc_paths(self):
+        with patch("main.IS_WIN", True), patch("main.os.startfile", create=True) as startfile, patch("main.os.path.exists", return_value=False):
+            self.assertFalse(main.open_url_or_path("\\\\"))
+            self.assertFalse(main.open_url_or_path(r"C:\missing\folder"))
+        startfile.assert_not_called()
+
+    def test_windows_path_opener_still_delegates_protocol_urls(self):
+        with patch("main.IS_WIN", True), patch("main.os.startfile", create=True) as startfile:
+            self.assertTrue(main.open_url_or_path("steam://rungameid/322170"))
+        startfile.assert_called_once_with("steam://rungameid/322170")
+
     def test_geometry_dash_save_wrapper_round_trips(self):
         xml = b"<?xml version='1.0'?><plist><dict><key>playerName</key></dict></plist>"
         self.assertEqual(decode_geometry_dash_save(encode_geometry_dash_save(xml)), xml)

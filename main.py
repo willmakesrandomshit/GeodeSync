@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.8"
+APP_VERSION = "2.3.9"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1000,6 +1000,12 @@ def open_url_or_path(path):
         return False
     path_str = str(path)
     if IS_WIN:
+        # ShellExecute can show a confusing native "Windows cannot find" dialog
+        # for stale or malformed paths (including a bare UNC prefix like "\\\\").
+        # Protocol URLs such as steam:// are intentionally delegated to Windows.
+        if "://" not in path_str:
+            if path_str.strip() in ("\\", "\\\\", "//") or not os.path.exists(path_str):
+                return False
         try:
             os.startfile(path_str)
             return True
@@ -2997,16 +3003,67 @@ class GeodeSyncApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
-        # Keep the RPC connection alive after the user closes the dashboard.
-        # Iconifying keeps the app available from the taskbar/Dock so it can be
-        # restored; turning background mode off preserves normal close behavior.
+        # Keep the RPC connection alive after the dashboard is closed.
         if getattr(self, "run_in_bg_enabled", True):
-            self.iconify()
-            self.log("GeodeSync is minimized and still running; Discord Rich Presence stays active. Turn Keep in BG on close off to exit.", "INFO")
+            if IS_WIN and self._start_system_tray():
+                self.withdraw()
+                self.log("GeodeSync is running in the system tray. Right-click its tray icon to reopen or exit; Discord Rich Presence stays active.", "INFO")
+            else:
+                self.iconify()
+                self.log("GeodeSync is minimized and still running; Discord Rich Presence stays active. Turn Keep in BG on close off to exit.", "INFO")
             return
         self.quit_app()
 
+    def _start_system_tray(self):
+        """Start the Windows notification-area icon; return False if unavailable."""
+        if getattr(self, "_tray_icon", None) is not None:
+            return True
+        try:
+            import pystray
+            from PIL import Image
+
+            base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+            icon_path = os.path.join(base_dir, "icon.ico")
+            tray_image = Image.open(icon_path).convert("RGBA") if os.path.isfile(icon_path) else Image.new("RGBA", (64, 64), (80, 110, 255, 255))
+            tray_icon = pystray.Icon(
+                "GeodeSync",
+                tray_image,
+                "GeodeSync — Geometry Dash companion",
+                menu=pystray.Menu(
+                    pystray.MenuItem("Open GeodeSync", lambda _icon, _item: self.after(0, self.restore_from_background), default=True),
+                    pystray.MenuItem("Exit GeodeSync", lambda _icon, _item: self.after(0, self.quit_app)),
+                ),
+            )
+            self._tray_icon = tray_icon
+            threading.Thread(target=self._run_system_tray, args=(tray_icon,), name="GeodeSyncSystemTray", daemon=True).start()
+            return True
+        except Exception as exc:
+            self._tray_icon = None
+            self.log(f"System tray could not start; GeodeSync will minimize to the taskbar instead: {exc}", "WARN")
+            return False
+
+    def _run_system_tray(self, tray_icon):
+        try:
+            tray_icon.run()
+        except Exception as exc:
+            self._tray_icon = None
+            try:
+                self.after(0, lambda error=exc: self._system_tray_failed(error))
+            except Exception:
+                pass
+
+    def _system_tray_failed(self, exc):
+        self.deiconify()
+        self.log(f"System tray stopped unexpectedly; GeodeSync was restored: {exc}", "WARN")
+
     def quit_app(self):
+        tray_icon = getattr(self, "_tray_icon", None)
+        self._tray_icon = None
+        if tray_icon is not None:
+            try:
+                tray_icon.stop()
+            except Exception:
+                pass
         try:
             self._monitor_running = False
             if hasattr(self, "discord_rpc"):
@@ -3039,10 +3096,10 @@ class GeodeSyncApp(tk.Tk):
     def toggle_bg_mode(self):
         self.run_in_bg_enabled = not getattr(self, "run_in_bg_enabled", True)
         if self.run_in_bg_enabled:
-            self.bg_mode_btn.config(text="🌙 Keep in BG on close: ON", fg=UI["lime"])
-            self.log("Keep in BG on close: ON. Closing the window minimizes GeodeSync and keeps Discord Rich Presence active.", "SUCCESS")
+            self.bg_mode_btn.config(text="🌙 Close to System Tray: ON", fg=UI["lime"])
+            self.log("Keep in BG on close: ON. On Windows, closing puts GeodeSync in the system tray and keeps Discord Rich Presence active.", "SUCCESS")
         else:
-            self.bg_mode_btn.config(text="🌙 Keep in BG on close: OFF", fg=UI["muted"])
+            self.bg_mode_btn.config(text="🌙 Close to System Tray: OFF", fg=UI["muted"])
             self.log("Keep in BG on close: OFF. Closing the window exits GeodeSync and clears Rich Presence.", "INFO")
         self._save_settings()
 
@@ -3443,7 +3500,7 @@ class GeodeSyncApp(tk.Tk):
         self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
 
         # Row 4: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Keep in BG on close: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
+        self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
         add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
         add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
         add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)

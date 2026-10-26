@@ -54,6 +54,39 @@ class TestDiscordRPC(unittest.TestCase):
         app.iconify.assert_called_once_with()
         app.quit_app.assert_not_called()
 
+    @patch.object(main, "IS_WIN", True)
+    def test_window_close_with_tray_enabled_withdraws_window(self):
+        app = SimpleNamespace(
+            run_in_bg_enabled=True,
+            _start_system_tray=MagicMock(return_value=True),
+            withdraw=MagicMock(),
+            iconify=MagicMock(),
+            log=MagicMock(),
+            quit_app=MagicMock(),
+        )
+
+        main.GeodeSyncApp.on_close(app)
+
+        app._start_system_tray.assert_called_once_with()
+        app.withdraw.assert_called_once_with()
+        app.iconify.assert_not_called()
+        app.quit_app.assert_not_called()
+
+    @patch.object(main, "IS_WIN", True)
+    def test_window_close_falls_back_to_taskbar_when_tray_unavailable(self):
+        app = SimpleNamespace(
+            run_in_bg_enabled=True,
+            _start_system_tray=MagicMock(return_value=False),
+            iconify=MagicMock(),
+            log=MagicMock(),
+            quit_app=MagicMock(),
+        )
+
+        main.GeodeSyncApp.on_close(app)
+
+        app.iconify.assert_called_once_with()
+        app.quit_app.assert_not_called()
+
     def test_window_close_exits_when_background_mode_is_disabled(self):
         app = SimpleNamespace(run_in_bg_enabled=False, quit_app=MagicMock())
 
