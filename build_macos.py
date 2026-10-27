@@ -23,7 +23,7 @@ def make_app_icon(destination: Path) -> None:
     if iconset.exists():
         shutil.rmtree(iconset)
     iconset.mkdir(parents=True)
-    source = ROOT / "assets" / "thumbnail_square.png"
+    source = ROOT / "assets" / "geodesync-app-icon.png"
     if not source.exists():
         raise FileNotFoundError(f"App icon source is missing: {source}")
 

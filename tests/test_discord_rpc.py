@@ -121,8 +121,8 @@ class TestDiscordRPC(unittest.TestCase):
         self.assertEqual(len(activity["buttons"]), 2)
         self.assertEqual(activity["buttons"][0]["label"], "View GitHub Repo")
         self.assertEqual(activity["buttons"][1]["label"], "Join Discord Server")
-        self.assertIn("geodesync_rpc_icon", activity["assets"]["large_image"])
-        self.assertIn("real_geode_logo.png", activity["assets"]["small_image"])
+        self.assertIn("geodesync-brand-2026.png", activity["assets"]["large_image"])
+        self.assertIn("geodesync-brand-2026.png", activity["assets"]["small_image"])
         rpc.close()
 
 if __name__ == "__main__":

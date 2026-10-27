@@ -4,7 +4,7 @@ import re
 
 
 REPOSITORY = "https://github.com/willmakesrandomshit/GeodeSync"
-AVATAR_URL = "https://raw.githubusercontent.com/willmakesrandomshit/GeodeSync/refs/heads/main/assets/geodesync_rpc_icon_v2.png"
+AVATAR_URL = "https://raw.githubusercontent.com/willmakesrandomshit/GeodeSync/refs/heads/main/assets/geodesync-brand-2026.png"
 BRAND_COLOR = 0x7557E8
 
 

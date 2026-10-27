@@ -61,7 +61,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.10"
+APP_VERSION = "2.3.11"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -105,6 +105,7 @@ class DiscordRPC:
         self._current_state = "Geode Mods Synced & Protected 🛡️"
         self._geode_ver = "v5.x"
         self._running = True
+        self._wake = threading.Event()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
@@ -114,6 +115,7 @@ class DiscordRPC:
             self._close_socket()
         else:
             self._start_time = int(time.time())
+        self._wake.set()
 
     def is_connected(self):
         return self._connected and self._enabled
@@ -206,7 +208,8 @@ class DiscordRPC:
                         self._send_activity()
             except Exception:
                 self._close_socket()
-            time.sleep(4)
+            self._wake.wait(4)
+            self._wake.clear()
 
     def _send_activity(self):
         if not self._connected or not self._sock or not self._enabled:
@@ -222,10 +225,10 @@ class DiscordRPC:
                             "state": self._current_state,
                             "timestamps": {"start": self._start_time},
                             "assets": {
-                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync_rpc_icon_v2.png",
+                                "large_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync-brand-2026.png",
                                 "large_text": f"GeodeSync v{APP_VERSION} · Geometry Dash Mod Manager",
-                                "small_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/real_geode_logo.png",
-                                "small_text": f"Geode {self._geode_ver} Active"
+                                "small_image": f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/geodesync-brand-2026.png",
+                                "small_text": "GeodeSync"
                             },
                             "buttons": [
                                 {"label": "View GitHub Repo", "url": f"https://github.com/{GITHUB_REPO}"},
@@ -277,8 +280,8 @@ class DiscordRPC:
         if reset_timer:
             self._start_time = int(time.time())
             changed = True
-        if self._connected and changed:
-            threading.Thread(target=self._send_activity, daemon=True).start()
+        if changed:
+            self._wake.set()
 
     def clear_presence(self):
         if not self._connected or not self._sock:
@@ -306,6 +309,7 @@ class DiscordRPC:
 
     def close(self):
         self._running = False
+        self._wake.set()
         self.clear_presence()
 
 
@@ -2926,6 +2930,15 @@ class ModernButton(tk.Canvas):
 
 
 class GeodeSyncApp(tk.Tk):
+    def report_callback_exception(self, exc_type, exc_value, exc_traceback):
+        # Tk callbacks normally print errors to an invisible console in the
+        # packaged application. Keep the traceback in the support crash log.
+        _global_excepthook(exc_type, exc_value, exc_traceback)
+        try:
+            self.log("An unexpected interface error was recorded in crash.log. Please send it to support.", "ERROR")
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__()
         self.title(f"GeodeSync v{APP_VERSION} • Geometry Dash companion")
@@ -5190,8 +5203,8 @@ class GeodeSyncApp(tk.Tk):
                     self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION}).", parent=self))
                     self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{e}", parent=self))
-                self.after(0, lambda: self.log(f"Update check failed: {e}", "ERROR"))
+                self.after(0, lambda error=str(e): messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{error}", parent=self))
+                self.after(0, lambda error=str(e): self.log(f"Update check failed: {error}", "ERROR"))
         threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
@@ -5734,8 +5747,8 @@ class GeodeSyncApp(tk.Tk):
                 self.after(0, lambda: self.log(f"🎉 Geode successfully updated to {updated_tag}!", "SUCCESS"))
                 self.after(0, lambda: messagebox.showinfo("Geode Updated!", f"🎉 Geode was successfully updated to {updated_tag}!\n\nAll your mods and configurations are preserved.", parent=self))
             except Exception as e:
-                self.after(0, lambda: self.log(f"Failed to update Geode: {e}", "ERROR"))
-                self.after(0, lambda: messagebox.showerror("Update Error", f"Could not update Geode:\n{e}", parent=self))
+                self.after(0, lambda error=str(e): self.log(f"Failed to update Geode: {error}", "ERROR"))
+                self.after(0, lambda error=str(e): messagebox.showerror("Update Error", f"Could not update Geode:\n{error}", parent=self))
         threading.Thread(target=_worker, daemon=True).start()
 
     # ==========================================
@@ -5880,7 +5893,7 @@ class GeodeSyncApp(tk.Tk):
         if self.discord_rpc_enabled:
             self.rpc_btn.config(text="🎮 Discord RPC: ON", fg=UI["lilac"])
             self.discord_rpc.set_enabled(True)
-            self.log("Discord Rich Presence enabled. Status showing on Discord profile.", "SUCCESS")
+            self.log("Discord Rich Presence enabled. Discord chooses which activity to display; Medal or other apps may take priority.", "INFO")
             self.play_ding()
         else:
             self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
