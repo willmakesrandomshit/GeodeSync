@@ -42,9 +42,11 @@ class LinuxSupportTests(unittest.TestCase):
             game.mkdir(parents=True)
             (game / "GeometryDash.exe").write_bytes(b"proton game")
             (root / "steamapps").mkdir(parents=True)
+            vdf_root = str(root).replace("\\", "\\\\")
+            vdf_secondary = str(secondary).replace("\\", "\\\\")
             (root / "steamapps/libraryfolders.vdf").write_text(
-                '"libraryfolders" { "0" { "path" "' + str(root) + '" } '
-                '"1" { "path" "' + str(secondary) + '" } }',
+                '"libraryfolders" { "0" { "path" "' + vdf_root + '" } '
+                '"1" { "path" "' + vdf_secondary + '" } }',
                 encoding="utf-8",
             )
             roots = discover_linux_steam_roots(
