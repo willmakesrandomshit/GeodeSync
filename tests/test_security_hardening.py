@@ -230,6 +230,7 @@ class SecurityHardeningTests(unittest.TestCase):
 
     def test_release_workflow_can_publish_without_untrusted_mac_packages(self):
         workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
+        self.assertIn('      - "hotfix/**"', workflow)
         self.assertIn("if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != ''", workflow)
         self.assertIn("xcrun stapler validate", workflow)
         self.assertIn("spctl --assess --type execute", workflow)
