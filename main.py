@@ -374,45 +374,26 @@ def version_sort_key(version):
 
 
 def fetch_latest_published_release(timeout=8):
-    """Choose the greatest stable published version with instant CDN fallback."""
+    """Return the newest stable *published release*, never a source version manifest."""
+    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
     try:
-        request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             releases = json.loads(response.read().decode("utf-8"))
-        if isinstance(releases, list):
-            stable = []
-            for release in releases:
-                if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
-                    continue
-                tag = str(release.get("tag_name", "")).strip()
-                key = version_sort_key(tag)
-                if key is not None:
-                    stable.append((key, release))
-            if stable:
-                return max(stable, key=lambda item: item[0])[1]
-    except Exception:
-        pass
-
-    # Instant fallback to raw version.json (zero rate limits, 50ms response)
-    try:
-        req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            cfg = json.loads(resp.read().decode("utf-8"))
-            tag = cfg.get("app_version")
-            if tag:
-                return {
-                    "tag_name": f"v{tag}",
-                    "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/v{tag}",
-                    "assets": [
-                        {
-                            "name": f"GeodeSync-v{tag}-Windows.zip",
-                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync-v{tag}-Windows.zip"
-                        }
-                    ]
-                }
-    except Exception:
-        pass
-    raise ValueError("Could not connect to GitHub to check for updates.")
+    except Exception as error:
+        raise ValueError("Could not connect to GitHub to check for published updates.") from error
+    if not isinstance(releases, list):
+        raise ValueError("GitHub returned an invalid release list.")
+    stable = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+            continue
+        tag = str(release.get("tag_name", "")).strip()
+        key = version_sort_key(tag)
+        if key is not None:
+            stable.append((key, release))
+    if stable:
+        return max(stable, key=lambda item: item[0])[1]
+    raise ValueError("GitHub has no published stable GeodeSync release.")
 
 
 GEODE_REPO = "geode-sdk/geode"
@@ -716,6 +697,15 @@ def select_app_update_asset(release, platform_name=None, architecture=None):
     if size <= 0 or size > APP_UPDATE_MAX_BYTES:
         raise ValueError("The update package has an invalid or excessive size.")
     return asset
+
+
+def release_has_app_update(release, platform_name=None, architecture=None):
+    """Whether this published release has a valid package for this platform."""
+    try:
+        select_app_update_asset(release, platform_name, architecture)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def validate_app_update_zip(archive, platform_name):
@@ -5495,6 +5485,12 @@ class GeodeSyncApp(tk.Tk):
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                if not release_has_app_update(rel):
+                    self.after(0, lambda tag=tag: self.log(
+                        f"GeodeSync v{tag} exists, but no verified update package is published for this platform yet.",
+                        "INFO",
+                    ))
+                    return
                 self.after(0, lambda: self.show_update_banner(tag))
                 if getattr(sys, "frozen", False):
                     self.after(0, lambda: self._start_auto_update_if_needed(rel))
@@ -5524,6 +5520,19 @@ class GeodeSyncApp(tk.Tk):
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                    if not release_has_app_update(rel):
+                        message = (
+                            f"GeodeSync v{tag} is published, but its verified package for this platform "
+                            "is not available yet. Your current installation was left unchanged."
+                        )
+                        self.after(0, lambda message=message: messagebox.showinfo(
+                            "Update not available yet", message, parent=self
+                        ))
+                        self.after(0, lambda tag=tag: self.log(
+                            f"GeodeSync v{tag} is published, but this platform has no verified package yet.",
+                            "INFO",
+                        ))
+                        return
                     self.after(0, lambda: self.show_update_banner(tag))
                     if getattr(sys, "frozen", False):
                         self.after(0, lambda: self._start_auto_update_if_needed(rel))
