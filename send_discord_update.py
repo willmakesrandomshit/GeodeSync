@@ -50,8 +50,13 @@ def send_update(version=None, title=None, notes=None, ping=False, release_tag=No
     release_tag = release_tag or f"v{version}"
     release_url = release_url or f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/{release_tag}"
     display_title = title or f"GeodeSync v{version} Released!"
+    assets = os.environ.get("RELEASE_ASSETS")
     payload = build_release_payload(
-        display_title, release_tag, notes, release_url
+        display_title,
+        release_tag,
+        notes,
+        release_url,
+        assets=assets.split(",") if assets is not None else None,
     )
 
     try:
@@ -78,7 +83,7 @@ if __name__ == "__main__":
 
     # GitHub Actions supplies the exact published release data. Local runs fall
     # back to the checked-in version and release notes.
-    notes_file = os.path.join(os.path.dirname(__file__), "release_notes.md")
+    notes_file = os.environ.get("RELEASE_BODY_FILE") or os.path.join(os.path.dirname(__file__), "release_notes.md")
     notes = os.environ.get("RELEASE_BODY")
     if os.path.exists(notes_file):
         if not notes:
