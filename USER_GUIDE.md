@@ -35,9 +35,10 @@ The packaged Mac builds target macOS 11 or newer on Apple silicon and macOS 10.1
 
 ### Linux / Steam Deck
 
-1. Download the Linux `.tar.gz` package if the release provides one.
-2. Extract it to a writable folder.
-3. Run the included `run.sh` from a terminal or your desktop environment.
+1. Download `GeodeSync-v<version>-Linux.tar.gz` from the official release and extract the complete archive into a folder you can write to.
+2. Run `./run.sh` from that extracted folder. The package includes its Python runtime; a separate Python/Tk install is not required.
+3. On Steam Deck, switch to Desktop Mode. GeodeSync manages Steam's Windows Geometry Dash files through Proton; it is not a native Linux game build.
+4. If the game is in a custom Steam library, open Steam → Geometry Dash → Properties → Installed Files → Browse, then select the folder containing `GeometryDash.exe` with **Browse GD Folder**. GeodeSync searches the normal Steam and Flatpak library locations automatically.
 
 The Linux package is built separately from Windows and macOS. Steam/Proton layouts and desktop environments vary; Linux and Steam Deck support has less platform-specific validation. Do not use the Windows or Mac package on Linux.
 
@@ -46,7 +47,7 @@ The Linux package is built separately from Windows and macOS. Steam/Proton layou
 1. Start Steam and make sure Geometry Dash appears in your Library.
 2. Open GeodeSync. The dashboard shows detected Steam, Geometry Dash, Geode, saves, and update-lock status. These are detection results; if a path is wrong, use **Browse GD Folder** in the footer and select the Steam Geometry Dash folder. On Mac, you may select the folder containing `Geometry Dash.app` or the app bundle itself.
 3. Follow the primary setup card. It recommends one action based on the detected setup:
-   - **Install Geode**: opens the official Geode installer. Complete that installer, return to GeodeSync, and refresh/reopen if the status has not updated.
+   - **Install Geode**: opens the official Geode installer. Confirm it targets the Steam Geometry Dash folder shown in GeodeSync (on Windows, the folder containing `GeometryDash.exe` under `steamapps\\common\\Geometry Dash`). Do not move the installer into the game folder. After installation, launch Geometry Dash once from Steam and return to GeodeSync.
    - **Install game version 2.2081**: starts the safe version switch described below.
    - **Launch Geometry Dash**: asks Steam to launch the game. On macOS, GeodeSync checks the app bundle first and then asks Steam to launch it; an accepted request does not guarantee the game process started.
 4. Read every confirmation before continuing. A version change replaces game files and changes Steam's update lock.
@@ -123,6 +124,12 @@ GeodeSync checks stable releases in the background and automatically applies a d
 ### Use Fix a problem
 
 Choose **Fix a problem** in the bottom bar. **Check Setup** runs a read-only check of the Steam path, game folder, Windows executable and game DLLs, or the Mac app bundle. **Explain Error** accepts the exact text or code from an error window and gives known steps. Unknown errors are not guessed at. Use **Copy Steps** to paste the instructions into support chat, or **Export Report** to save a privacy-filtered report for review before sharing.
+
+### Geode shows “Whoopsies! An unhandled exception has occurred”
+
+That is Geode's crash report, not a diagnosis by itself. Reinstalling GeodeSync or deleting an older game folder will not identify the cause. In **Fix a problem → Explain Error**, paste the message; include the complete report from the crash window, especially **Geode Information**, **Exception Information**, **Stack Trace**, and **Installed Mods**. Crash Doctor will only name a mod when the report explicitly identifies one; it will not assume an unknown crash is a game-version mismatch or recommend a downgrade. If no report is found in the usual folders, that does not mean the game is crash-free—copy it from the crash window or attach a screenshot of the whole report.
+
+For Steam on Windows, the selected game folder should end in `steamapps\\common\\Geometry Dash` and contain `GeometryDash.exe`. Choose that folder in the Geode Installer; do not put the installer inside the game folder or copy Geode files manually. GeodeSync's support report records whether the selected folder matches Steam's library layout, but the crash report is still needed to identify a Geode or mod crash.
 
 For a Windows `0xc000007b` or “Bad Image” error, close Geometry Dash and use Steam → Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Do not download individual DLLs. If it only happens with Geode, disable the last mod you installed and retry.
 
