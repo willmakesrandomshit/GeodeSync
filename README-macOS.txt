@@ -5,9 +5,11 @@
 INSTALL AND OPEN
 1. Download the build for your Mac chip (Apple silicon or Intel) and unzip it.
 2. Drag GeodeSync.app to your personal Applications folder (`~/Applications`), then double-click it.
-3. If macOS blocks the first launch because this community build is not
-   notarized, Control-click GeodeSync.app, choose Open, then choose Open once
-   more. You do not need Terminal or Python.
+3. If macOS says it cannot verify the developer, stop and confirm the download
+   came from the official release before deciding whether to approve that app.
+   If macOS says the app is damaged, do not open it or bypass the warning; send
+   support the release version and exact alert because the package may be broken.
+   You do not need Terminal or Python.
 
 COMPATIBILITY
 - Apple silicon build: macOS 11 Big Sur or newer.
