@@ -19,10 +19,12 @@ from main import (
     validate_geode_package_zip,
     verify_release_asset_digest,
     select_app_update_asset,
+    release_has_app_update,
     validate_app_update_zip,
     validate_app_update_tar,
     _apply_staged_update,
     download_verified_app_update,
+    fetch_latest_published_release,
 )
 
 
@@ -207,6 +209,33 @@ class SecurityHardeningTests(unittest.TestCase):
         release["assets"][0]["browser_download_url"] = "https://evil.example/payload.zip"
         with self.assertRaises(ValueError):
             select_app_update_asset(release, "windows")
+
+    def test_missing_platform_asset_does_not_advertise_an_update(self):
+        release = {
+            "tag_name": "v2.4.0",
+            "published_at": "2026-10-25T00:00:00Z",
+            "assets": [{
+                "name": "GeodeSync-Windows.zip", "size": 10,
+                "browser_download_url": "https://github.com/willmakesrandomshit/GeodeSync/releases/download/v2.4.0/GeodeSync-Windows.zip",
+            }],
+        }
+        self.assertTrue(release_has_app_update(release, "windows"))
+        self.assertFalse(release_has_app_update(release, "macos", "arm64"))
+        self.assertFalse(release_has_app_update(release, "linux"))
+
+    def test_update_check_never_treats_source_manifest_as_a_published_release(self):
+        with patch("main.urllib.request.urlopen", side_effect=OSError("offline")):
+            with self.assertRaisesRegex(ValueError, "Could not connect to GitHub"):
+                fetch_latest_published_release(timeout=0.1)
+
+    def test_release_workflow_can_publish_without_untrusted_mac_packages(self):
+        workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != ''", workflow)
+        self.assertIn("xcrun stapler validate", workflow)
+        self.assertIn("spctl --assess --type execute", workflow)
+        self.assertIn("RELEASE_ASSETS: ${{ steps.assets.outputs.asset_names }}", workflow)
+        self.assertIn("macOS packages are temporarily withheld", workflow)
+        self.assertIn("release_has_app_update(rel)", (ROOT / "main.py").read_text(encoding="utf-8"))
 
     def test_verified_update_download_checks_digest_and_extracts(self):
         import hashlib
