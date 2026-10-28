@@ -9,6 +9,7 @@ on:
     branches:
       - "main"
       - "release/v*"
+      - "hotfix/**"
 
 permissions:
   contents: read
