@@ -86,7 +86,9 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' dist/GeodeSync.app/Contents/Info.plist)" = "${{ matrix.minimum_macos }}"
           test "$(lipo -archs dist/GeodeSync.app/Contents/MacOS/GeodeSync)" = "${{ matrix.arch }}"
           file dist/GeodeSync.app/Contents/MacOS/GeodeSync
-          # Release builds fail closed above when credentials are missing. Always verify the final bundle.
+          # The build script signs the finished bundle ad-hoc when no Developer
+          # ID identity is configured. Always verify so a stale/broken resource
+          # seal cannot be published as a "damaged" app.
           codesign --verify --deep --strict dist/GeodeSync.app
       - name: Package app for download
         run: ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "GeodeSync-macOS-${{ matrix.arch }}.zip"
@@ -126,34 +128,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3 python3-pip python3-venv python3-tk xvfb xauth
+      - name: Create build environment with the system Tk runtime
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/python -c "import tkinter; print('Python', __import__('sys').version); print('Tk', tkinter.TkVersion)"
       - name: Install build tool
         run: |
-          python -m pip install pyinstaller
+          .venv/bin/python -m pip install -r requirements-linux-build.txt
+      - name: Run regression suite on Linux
+        run: .venv/bin/python -m unittest discover -s tests -v
       - name: Build Linux executable
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
+          .venv/bin/python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
       - name: Package Linux downloads
         run: |
           mkdir -p dist/GeodeSync-Linux
           cp dist/GeodeSync dist/GeodeSync-Linux/GeodeSync
-          chmod +x dist/GeodeSync-Linux/GeodeSync
+          cp run-geodesync-linux.sh dist/GeodeSync-Linux/run.sh
+          cp README-Linux.txt dist/GeodeSync-Linux/README-Linux.txt
           cp README.md dist/GeodeSync-Linux/README.md
           cp USER_GUIDE.md dist/GeodeSync-Linux/USER_GUIDE.md
-          printf '%s\n' \
-            '#!/bin/bash' \
-            'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
-            'chmod +x "$DIR/GeodeSync"' \
-            '"$DIR/GeodeSync" "$@"' > dist/GeodeSync-Linux/run.sh
-          chmod +x dist/GeodeSync-Linux/run.sh
+          cp assets/geodesync-app-icon.png dist/GeodeSync-Linux/icon.png
+          chmod +x dist/GeodeSync-Linux/GeodeSync dist/GeodeSync-Linux/run.sh
+      - name: Launch packaged app in a virtual Linux desktop
+        run: |
+          set +e
+          timeout 15s xvfb-run -a ./dist/GeodeSync-Linux/run.sh > /tmp/geodesync-linux-smoke.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/geodesync-linux-smoke.log
+          if [ "$status" -ne 124 ]; then
+            echo "GeodeSync did not remain open in the virtual desktop (exit $status)." >&2
+            exit 1
+          fi
+      - name: Create Linux release archive
+        run: |
           VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['app_version'])")
-          tar -czvf "GeodeSync-v${VERSION}-Linux.tar.gz" -C dist/GeodeSync-Linux .
+          tar -czf "GeodeSync-v${VERSION}-Linux.tar.gz" -C dist/GeodeSync-Linux GeodeSync run.sh README-Linux.txt README.md USER_GUIDE.md icon.png
       - uses: actions/upload-artifact@v4
         with:
           name: GeodeSync-Linux
