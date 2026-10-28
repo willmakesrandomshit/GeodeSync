@@ -36,15 +36,6 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require Apple signing and notarization for public releases
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
-        run: |
-          test -n "$APPLE_CERTIFICATE_P12_BASE64" || { echo "APPLE_CERTIFICATE_P12_BASE64 is required for releases." >&2; exit 1; }
-          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "APPLE_CERTIFICATE_PASSWORD is required for releases." >&2; exit 1; }
-          test -n "$APPLE_SIGNING_IDENTITY" || { echo "APPLE_SIGNING_IDENTITY is required for releases." >&2; exit 1; }
-          test -n "$APPLE_ID" || { echo "APPLE_ID is required for releases." >&2; exit 1; }
-          test -n "$APPLE_TEAM_ID" || { echo "APPLE_TEAM_ID is required for releases." >&2; exit 1; }
-          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || { echo "APPLE_APP_SPECIFIC_PASSWORD is required for releases." >&2; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -75,6 +66,8 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "$RUNNER_TEMP/GeodeSync-notarization.zip"
           xcrun notarytool submit "$RUNNER_TEMP/GeodeSync-notarization.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
           xcrun stapler staple dist/GeodeSync.app
+          xcrun stapler validate dist/GeodeSync.app
+          spctl --assess --type execute --verbose=4 dist/GeodeSync.app
           codesign --verify --deep --strict dist/GeodeSync.app
       - name: Verify app bundle and executable architecture
         run: |
@@ -93,6 +86,7 @@ jobs:
       - name: Package app for download
         run: ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "GeodeSync-macOS-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
+        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
         with:
           name: GeodeSync-macOS-${{ matrix.arch }}
           path: GeodeSync-macOS-${{ matrix.arch }}.zip
@@ -183,9 +177,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
         with:
           pattern: GeodeSync-macOS-*
           merge-multiple: true
@@ -220,17 +222,29 @@ jobs:
           assets=(GeodeSync-Windows.zip GeodeSync-macOS-*.zip GeodeSync-v*-Linux.tar.gz)
           test "${#assets[@]}" -gt 0
           sha256sum "${assets[@]}" > SHA256SUMS.txt
+          {
+            echo 'files<<EOF'
+            printf '%s\n' "${assets[@]}" SHA256SUMS.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          printf 'asset_names=%s\n' "$(IFS=,; echo "${assets[*]}")" >> "$GITHUB_OUTPUT"
+          cp release_notes.md release_notes_for_release.md
+          if ! compgen -G 'GeodeSync-macOS-*.zip' > /dev/null; then
+            cat >> release_notes_for_release.md <<'EOF'
+
+## macOS download status
+
+The macOS packages are temporarily withheld because this release was not signed with an Apple Developer ID and notarized. Do not use an older or ad-hoc-signed package as a replacement. Windows and Linux packages are available below; the Mac package will be added only after Apple verification succeeds.
+EOF
+          fi
+        id: assets
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.app_version }}
           target_commitish: ${{ github.sha }}
           name: GeodeSync v${{ steps.version.outputs.app_version }}
-          body_path: release_notes.md
-          files: |
-            GeodeSync-Windows.zip
-            GeodeSync-macOS-*.zip
-            GeodeSync-v*-Linux.tar.gz
-            SHA256SUMS.txt
+          body_path: release_notes_for_release.md
+          files: ${{ steps.assets.outputs.files }}
           fail_on_unmatched_files: true
       - name: Announce release in Discord
         if: startsWith(github.ref, 'refs/tags/v')
@@ -239,9 +253,11 @@ jobs:
           RELEASE_TAG: v${{ steps.version.outputs.app_version }}
           RELEASE_TITLE: GeodeSync v${{ steps.version.outputs.app_version }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.app_version }}
+          RELEASE_ASSETS: ${{ steps.assets.outputs.asset_names }}
+          RELEASE_BODY_FILE: release_notes_for_release.md
         run: |
           if [ -z "$GEODESYNC_DISCORD_WEBHOOK" ]; then
-            echo "DISCORD_RELEASE_WEBHOOK is missing; release announcement was not sent." >&2
-            exit 1
+            echo "DISCORD_RELEASE_WEBHOOK is missing; release is published, but its optional Discord announcement was skipped." >&2
+            exit 0
           fi
           python3 send_discord_update.py
