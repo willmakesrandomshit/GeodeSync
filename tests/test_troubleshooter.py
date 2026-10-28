@@ -6,7 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from main import explain_error_text, scan_installation_issues
+from main import (
+    explain_error_text,
+    inspect_macos_app_security,
+    is_steam_library_game_path,
+    scan_installation_issues,
+)
 
 
 class TroubleshooterTests(unittest.TestCase):
@@ -33,6 +38,62 @@ class TroubleshooterTests(unittest.TestCase):
         self.assertEqual(title, "Paste the exact error")
         self.assertIn("code such as 0xc000007b", steps)
 
+    def test_macos_damaged_app_warning_does_not_recommend_bypassing_gatekeeper(self):
+        title, steps = explain_error_text(
+            "GeodeSync-8.app is damaged and can't be opened. You should move it to the Trash.",
+            "macOS",
+        )
+        self.assertEqual(title, "macOS rejected the GeodeSync app")
+        self.assertIn("Don’t keep deleting unrelated Trash items", steps)
+        self.assertIn("If macOS instead says it cannot check", steps)
+        self.assertIn("do not force it open", steps)
+
+    def test_macos_unverified_developer_warning_points_to_user_approved_settings(self):
+        title, steps = explain_error_text(
+            "Apple cannot check this app for malicious software", "macOS"
+        )
+        self.assertEqual(title, "macOS needs your approval to open this app")
+        self.assertIn("System Settings → Privacy & Security → Open Anyway", steps)
+        self.assertIn("does not make the app notarized", steps)
+
+    def test_macos_support_security_check_reports_only_summary(self):
+        with tempfile.TemporaryDirectory(suffix=".app") as app:
+            responses = [
+                SimpleNamespace(returncode=0, stdout="", stderr=""),
+                SimpleNamespace(returncode=0, stdout="", stderr="Signature=adhoc\nTeamIdentifier=not set\n"),
+                SimpleNamespace(returncode=3, stdout="", stderr="rejected"),
+                SimpleNamespace(returncode=0, stdout="", stderr="secret-quarantine-value"),
+            ]
+            with patch("main.IS_MAC", True):
+                result = inspect_macos_app_security(
+                    app,
+                    runner=lambda *args, **kwargs: responses.pop(0),
+                )
+        self.assertEqual(result["bundle_signature"], "valid")
+        self.assertEqual(result["signing_identity"], "ad-hoc signed (not Apple Developer ID signed)")
+        self.assertEqual(result["gatekeeper"], "rejected or not assessed")
+        self.assertEqual(result["quarantine"], "present")
+        self.assertNotIn("secret-quarantine-value", repr(result))
+
+    def test_geode_whoopsies_error_asks_for_full_crash_report_not_a_reset(self):
+        title, steps = explain_error_text(
+            "Whoopsies! An unhandled exception has occurred.", "Windows"
+        )
+        self.assertEqual(title, "Geode crashed")
+        self.assertIn("complete report", steps)
+        self.assertIn("Stack Trace", steps)
+        self.assertIn("expected Steam layout", steps)
+        self.assertIn("won’t identify the crash", steps)
+
+    def test_steam_game_folder_detection_accepts_custom_windows_library_path(self):
+        self.assertTrue(is_steam_library_game_path(
+            r"C:\Program Files (x86)\Steam\steamapps\common\Geometry Dash" + "\\"
+        ))
+        self.assertTrue(is_steam_library_game_path(
+            r"D:\Games\SteamLibrary\steamapps\common\Geometry Dash"
+        ))
+        self.assertFalse(is_steam_library_game_path(r"C:\Games\Geometry Dash"))
+
     def test_setup_scan_reports_missing_steam_and_game_folder(self):
         manager = SimpleNamespace(steam_path=None, gd_path=None)
         findings = scan_installation_issues(manager, is_windows=True, is_macos=False)
@@ -49,6 +110,27 @@ class TroubleshooterTests(unittest.TestCase):
             )
         self.assertEqual(findings[-1]["title"], "An interrupted game repair needs attention")
         self.assertIn("do not start another version switch", findings[-1]["steps"])
+
+    def test_setup_scan_warns_when_game_folder_is_outside_steam_library(self):
+        with tempfile.TemporaryDirectory() as steam, tempfile.TemporaryDirectory() as game:
+            findings = scan_installation_issues(
+                SimpleNamespace(steam_path=steam, gd_path=game),
+                is_windows=True, is_macos=False,
+            )
+        finding = next(item for item in findings if "not clearly inside" in item["title"])
+        self.assertIn("Steam", finding["steps"])
+        self.assertIn("GeometryDash.exe", finding["steps"])
+
+    def test_setup_scan_confirms_valid_steam_library_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game = os.path.join(temp, "steamapps", "common", "Geometry Dash")
+            os.makedirs(game)
+            findings = scan_installation_issues(
+                SimpleNamespace(steam_path=temp, gd_path=game),
+                is_windows=True, is_macos=False,
+            )
+        finding = next(item for item in findings if item["title"] == "Steam Geometry Dash folder confirmed")
+        self.assertIn("Geode Installer", finding["steps"])
 
     def test_windows_scan_reports_damaged_game_dll_with_safe_fix(self):
         with tempfile.TemporaryDirectory() as temp:

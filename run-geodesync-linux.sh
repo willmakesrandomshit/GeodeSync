@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
-cd "$(dirname "$0")"
+set -euo pipefail
 
-echo "=========================================="
-echo "  GeodeSync v1.1.2 (Linux / Steam Deck) ⚡"
-echo "=========================================="
+APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+APP="$APP_DIR/GeodeSync"
 
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is required to run GeodeSync."
-    echo "Please install python3 using your distribution's package manager (e.g. sudo apt install python3 python3-tk)."
-    exit 1
+if [[ ! -f "$APP" ]]; then
+  echo "GeodeSync executable is missing from: $APP_DIR" >&2
+  echo "Extract the complete Linux archive, then run this launcher again." >&2
+  exit 1
 fi
 
-python3 main.py
+if [[ ! -x "$APP" ]]; then
+  chmod u+x "$APP" || {
+    echo "GeodeSync could not mark its executable as runnable. Check folder permissions." >&2
+    exit 1
+  }
+fi
+
+if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+  echo "A graphical desktop session is required. On Steam Deck, switch to Desktop Mode." >&2
+  exit 1
+fi
+
+cd "$APP_DIR"
+exec "$APP" "$@"

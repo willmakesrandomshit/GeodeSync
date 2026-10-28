@@ -2,12 +2,22 @@ import os
 import sys
 import traceback
 
+def _crash_log_path():
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "GeodeSync", "crash.log")
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Logs/GeodeSync/crash.log")
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return os.path.join(state_home, "geodesync", "crash.log")
+
 def _global_excepthook(exc_type, exc_value, exc_traceback):
     try:
-        app_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "GeodeSync")
+        crash_path = _crash_log_path()
+        app_dir = os.path.dirname(crash_path)
         os.makedirs(app_dir, exist_ok=True)
         import time
-        with open(os.path.join(app_dir, "crash.log"), "a", encoding="utf-8") as f:
+        with open(crash_path, "a", encoding="utf-8") as f:
             f.write(f"\n--- CRASH AT {time.ctime()} ---\n")
             traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
     except Exception:
@@ -61,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.11"
+APP_VERSION = "2.3.12"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -364,45 +374,26 @@ def version_sort_key(version):
 
 
 def fetch_latest_published_release(timeout=8):
-    """Choose the greatest stable published version with instant CDN fallback."""
+    """Return the newest stable *published release*, never a source version manifest."""
+    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
     try:
-        request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             releases = json.loads(response.read().decode("utf-8"))
-        if isinstance(releases, list):
-            stable = []
-            for release in releases:
-                if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
-                    continue
-                tag = str(release.get("tag_name", "")).strip()
-                key = version_sort_key(tag)
-                if key is not None:
-                    stable.append((key, release))
-            if stable:
-                return max(stable, key=lambda item: item[0])[1]
-    except Exception:
-        pass
-
-    # Instant fallback to raw version.json (zero rate limits, 50ms response)
-    try:
-        req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            cfg = json.loads(resp.read().decode("utf-8"))
-            tag = cfg.get("app_version")
-            if tag:
-                return {
-                    "tag_name": f"v{tag}",
-                    "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/v{tag}",
-                    "assets": [
-                        {
-                            "name": f"GeodeSync-v{tag}-Windows.zip",
-                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync-v{tag}-Windows.zip"
-                        }
-                    ]
-                }
-    except Exception:
-        pass
-    raise ValueError("Could not connect to GitHub to check for updates.")
+    except Exception as error:
+        raise ValueError("Could not connect to GitHub to check for published updates.") from error
+    if not isinstance(releases, list):
+        raise ValueError("GitHub returned an invalid release list.")
+    stable = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+            continue
+        tag = str(release.get("tag_name", "")).strip()
+        key = version_sort_key(tag)
+        if key is not None:
+            stable.append((key, release))
+    if stable:
+        return max(stable, key=lambda item: item[0])[1]
+    raise ValueError("GitHub has no published stable GeodeSync release.")
 
 
 GEODE_REPO = "geode-sdk/geode"
@@ -708,6 +699,15 @@ def select_app_update_asset(release, platform_name=None, architecture=None):
     return asset
 
 
+def release_has_app_update(release, platform_name=None, architecture=None):
+    """Whether this published release has a valid package for this platform."""
+    try:
+        select_app_update_asset(release, platform_name, architecture)
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def validate_app_update_zip(archive, platform_name):
     """Validate package shape, traversal, special files and expanded size."""
     if platform_name == "macos":
@@ -825,16 +825,35 @@ def mark_macos_quarantine(app_path):
     subprocess.run(["/usr/bin/xattr", "-w", "com.apple.quarantine", quarantine, app_path], check=True, timeout=10)
 
 
+def _normalized_update_tar_name(name):
+    """Normalize harmless tar './' prefixes while retaining strict traversal checks."""
+    name = str(name or "").replace("\\", "/")
+    if name in ("", ".", "./"):
+        return ""
+    while name.startswith("./"):
+        name = name[2:]
+    return name
+
+
 def validate_app_update_tar(archive):
     total = 0
+    names = set()
     for member in archive.getmembers():
-        name = member.name.replace("\\", "/")
+        name = _normalized_update_tar_name(member.name)
+        if not name:
+            continue
         parts = name.rstrip("/").split("/")
         if name.startswith("/") or any(part in ("", ".", "..") for part in parts) or ":" in name or not (member.isfile() or member.isdir()):
             raise ValueError("The Linux update archive contains an unsafe or unsupported entry.")
+        canonical_name = name.rstrip("/")
+        if canonical_name in names:
+            raise ValueError("The Linux update archive contains duplicate paths.")
+        names.add(canonical_name)
         total += member.size
         if member.size > APP_UPDATE_MAX_BYTES or total > APP_UPDATE_MAX_BYTES:
             raise ValueError("The Linux update archive expands beyond the allowed size.")
+    if "GeodeSync" not in names:
+        raise ValueError("The Linux update archive is missing the GeodeSync executable.")
 
 
 def _application_root():
@@ -1073,6 +1092,104 @@ def validate_macos_game_app(app_path):
     return None
 
 
+def inspect_macos_app_security(app_path=None, runner=None):
+    """Collect a small, read-only summary of the running app's macOS trust state.
+
+    This deliberately reports status only: it never removes quarantine metadata,
+    changes Gatekeeper settings, or exposes raw command output in support reports.
+    """
+    if sys.platform != "darwin" and not IS_MAC:
+        return None
+    runner = runner or subprocess.run
+    if not app_path:
+        current = os.path.abspath(sys.executable)
+        while current and current != os.path.dirname(current):
+            if current.lower().endswith(".app") and os.path.isdir(current):
+                app_path = current
+                break
+            current = os.path.dirname(current)
+    if not app_path or not os.path.isdir(app_path):
+        return {
+            "bundle_signature": "app bundle not found",
+            "signing_identity": "unknown",
+            "gatekeeper": "not checked",
+            "quarantine": "unknown",
+        }
+
+    def run_status(arguments):
+        try:
+            return runner(arguments, capture_output=True, text=True, timeout=15, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    verification = run_status(["/usr/bin/codesign", "--verify", "--deep", "--strict", app_path])
+    details = run_status(["/usr/bin/codesign", "-dv", "--verbose=2", app_path])
+    assessment = run_status(["/usr/sbin/spctl", "--assess", "--type", "execute", "-vv", app_path])
+    quarantine = run_status(["/usr/bin/xattr", "-p", "com.apple.quarantine", app_path])
+
+    detail_text = "\n".join(
+        str(getattr(details, field, "") or "") for field in ("stdout", "stderr")
+    ) if details else ""
+    if re.search(r"(?im)^Signature=adhoc\s*$", detail_text) or re.search(
+        r"(?im)^TeamIdentifier=not set\s*$", detail_text
+    ):
+        identity = "ad-hoc signed (not Apple Developer ID signed)"
+    elif re.search(r"(?im)^Authority=Developer ID Application:", detail_text):
+        identity = "Apple Developer ID signed"
+    elif details and getattr(details, "returncode", 1) == 0:
+        identity = "signed; identity not identified"
+    else:
+        identity = "unsigned or signature details unavailable"
+
+    return {
+        "bundle_signature": (
+            "valid" if verification and verification.returncode == 0
+            else "invalid or unverifiable"
+        ),
+        "signing_identity": identity,
+        "gatekeeper": (
+            "accepted" if assessment and assessment.returncode == 0
+            else "rejected or not assessed"
+        ),
+        "quarantine": "present" if quarantine and quarantine.returncode == 0 else "not detected",
+    }
+
+
+def is_steam_library_game_path(path):
+    """Recognize a Geometry Dash folder inside any Steam library, including Windows paths."""
+    parts = [part.casefold() for part in re.split(r"[/\\]+", str(path or "").strip()) if part]
+    return any(
+        parts[index:index + 3] == ["steamapps", "common", "geometry dash"]
+        for index in range(max(0, len(parts) - 2))
+    )
+
+
+def find_linux_geometry_dash_pids(proc_root="/proc"):
+    """Return only processes whose argv contains GeometryDash.exe (Proton)."""
+    pids = []
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return pids
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc_root, entry, "cmdline"), "rb") as stream:
+                argv = stream.read(1024 * 1024).decode("utf-8", errors="ignore").split("\0")
+        except OSError:
+            continue
+        if any(arg.replace("\\", "/").rsplit("/", 1)[-1].casefold() == "geometrydash.exe" for arg in argv if arg):
+            pids.append(int(entry))
+    return pids
+
+
+def desktop_exec_value(path):
+    """Quote a filesystem path as one freedesktop .desktop Exec argument."""
+    value = str(path).replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`").replace("$", "\\$")
+    return f'"{value}"'
+
+
 def request_macos_steam_launch(game_path, runner=None):
     """Ask LaunchServices to route the game request through Steam; this is not proof the game started."""
     app_path = find_macos_game_app(game_path)
@@ -1205,7 +1322,71 @@ def get_app_data_dir():
         return os.path.join(base, "GeodeSync")
     if IS_MAC:
         return os.path.expanduser("~/Library/Application Support/GeodeSync")
-    return os.path.expanduser("~/.config/geodesync")
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(config_home, "geodesync")
+
+
+def discover_linux_steam_roots(home=None, environ=None, which=None):
+    """Find common native/Flatpak Steam roots without assuming one install path."""
+    home = os.path.expanduser(home or "~")
+    environ = os.environ if environ is None else environ
+    which = shutil.which if which is None else which
+    xdg_data = environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    candidates = [
+        environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH"),
+        environ.get("STEAM_DIR"),
+        os.path.join(xdg_data, "Steam"),
+        os.path.join(home, ".steam", "steam"),
+        os.path.join(home, ".steam", "root"),
+        os.path.join(home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam"),
+    ]
+    steam_command = which("steam") if which else None
+    if steam_command:
+        current = os.path.dirname(os.path.realpath(steam_command))
+        for _ in range(5):
+            if os.path.isdir(os.path.join(current, "steamapps")):
+                candidates.append(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+
+    roots = []
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        expanded = os.path.abspath(os.path.expanduser(os.path.expandvars(str(candidate))))
+        if not os.path.isdir(expanded):
+            continue
+        canonical = os.path.realpath(expanded)
+        if canonical not in seen:
+            roots.append(canonical)
+            seen.add(canonical)
+    return roots
+
+
+def discover_steam_game_folders(steam_roots):
+    """Return Geometry Dash folders from each Steam root and its listed libraries."""
+    folders = []
+    seen = set()
+    for root in steam_roots:
+        libraries = [root]
+        vdf_path = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        try:
+            with open(vdf_path, "r", encoding="utf-8", errors="ignore") as stream:
+                content = stream.read()
+            libraries.extend(re.findall(r'"path"\s+"((?:\\\\.|[^"\\])*)"', content, re.IGNORECASE))
+        except OSError:
+            pass
+        for library in libraries:
+            library = library.replace(r"\\", "\\").replace(r'\"', '"')
+            game = os.path.join(os.path.expanduser(library), "steamapps", "common", "Geometry Dash")
+            canonical = os.path.realpath(game)
+            if canonical not in seen and os.path.isdir(canonical):
+                folders.append(canonical)
+                seen.add(canonical)
+    return folders
 
 
 def atomic_write_json(path, value):
@@ -1404,6 +1585,34 @@ def explain_error_text(error_text, platform_name=None):
             "Paste the exact error",
             "Copy the full message from the error window and paste it above. Include any code such as 0xc000007b.",
         )
+    if "whoopsies" in text and "unhandled exception" in text:
+        return (
+            "Geode crashed",
+            "“Whoopsies! An unhandled exception has occurred” is Geode’s crash report, not the cause by itself. Reinstalling GeodeSync or deleting the old game folder won’t identify the crash.\n\n"
+            "Copy the complete report, including Geode Information, Exception Information, Stack Trace, and Installed Mods. If the crash window has a Copy button, use it; otherwise open Crash Doctor or attach a screenshot of the whole report.\n\n"
+            "A selected folder ending in `steamapps\\common\\Geometry Dash` and containing `GeometryDash.exe` is the expected Steam layout. We still need the crash report to tell whether a mod, Geode, or another game component failed. Do not delete saves or download replacement DLLs.",
+        )
+    if platform_name in ("darwin", "mac", "macos") and (
+        ("damaged" in text and "can’t be opened" in text)
+        or ("damaged" in text and "can't be opened" in text)
+        or ("move it to the trash" in text)
+    ):
+        return (
+            "macOS rejected the GeodeSync app",
+            "Don’t keep deleting unrelated Trash items, run Terminal commands, or turn off Gatekeeper. This alert can mean the downloaded app bundle is incomplete or its signature cannot be verified. Confirm the exact GeodeSync version and that the download came from the official release. If it still says the app is damaged, stop and send support a screenshot plus the reviewed GeodeSync support report so the package can be checked.\n\n"
+            "If macOS instead says it cannot check the app for malicious software, and you have verified that it came from the official release, Apple may offer an Open Anyway choice under System Settings → Privacy & Security. That only records your decision to allow this app; it does not make the app Apple-trusted. If the damaged-app alert remains, do not force it open.",
+        )
+    if platform_name in ("darwin", "mac", "macos") and (
+        "cannot be opened because apple cannot check" in text
+        or "apple cannot check this app for malicious software" in text
+        or "apple cannot check it for malicious software" in text
+        or "unidentified developer" in text
+        or "developer cannot be verified" in text
+    ):
+        return (
+            "macOS needs your approval to open this app",
+            "First confirm the app came from the official GeodeSync release and that its download completed. If you trust that exact build, try opening it once, then use System Settings → Privacy & Security → Open Anyway if macOS offers that choice. Review the warning before deciding. This does not make the app notarized or Apple-trusted. If macOS says the app is damaged, stop and send support the exact alert instead of overriding it.",
+        )
     if "0xc000007b" in text or "bad image" in text:
         return (
             "Windows could not load a game file",
@@ -1455,10 +1664,11 @@ def explain_error_text(error_text, platform_name=None):
     )
 
 
-def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_error=None):
+def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_error=None, is_linux=None):
     """Read-only checks for common setup problems; never modifies game or Steam files."""
     is_windows = IS_WIN if is_windows is None else bool(is_windows)
     is_macos = IS_MAC if is_macos is None else bool(is_macos)
+    is_linux = IS_LINUX if is_linux is None else bool(is_linux)
     findings = []
     steam_path = getattr(manager, "steam_path", None)
     if not steam_path or not os.path.isdir(steam_path):
@@ -1476,6 +1686,18 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
             "steps": "Choose Game Folder and select the Steam Geometry Dash folder. On Windows it contains GeometryDash.exe; on Mac it contains Geometry Dash.app.",
         })
     elif is_windows:
+        if is_steam_library_game_path(game_path):
+            findings.append({
+                "title": "Steam Geometry Dash folder confirmed",
+                "detail": "The selected folder follows Steam’s `steamapps\\common\\Geometry Dash` layout.",
+                "steps": "This is the folder to select in the Geode Installer. It should contain `GeometryDash.exe`; do not put the installer file inside the folder or copy Geode files by hand.",
+            })
+        else:
+            findings.append({
+                "title": "This game folder is not clearly inside a Steam library",
+                "detail": "GeodeSync found a Geometry Dash folder, but its path does not match Steam’s `steamapps\\common\\Geometry Dash` layout.",
+                "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Browse. In GeodeSync choose Game Folder and select that folder—the one containing `GeometryDash.exe`. Do not select the installer or copy Geode files by hand.",
+            })
         problem = validate_windows_game_images(game_path)
         if problem:
             findings.append({
@@ -1484,6 +1706,18 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
                 "steps": "Close the game, then in Steam open Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Do not replace individual DLLs from download sites. Run this check again after Steam finishes.",
             })
     elif is_macos:
+        if is_steam_library_game_path(game_path):
+            findings.append({
+                "title": "Steam Geometry Dash folder confirmed",
+                "detail": "The selected folder follows Steam’s `steamapps/common/Geometry Dash` layout.",
+                "steps": "This is the folder to select in the Geode Installer. Do not copy Geode files by hand.",
+            })
+        else:
+            findings.append({
+                "title": "This game folder is not clearly inside a Steam library",
+                "detail": "GeodeSync found a Geometry Dash app, but its path does not match Steam’s `steamapps/common/Geometry Dash` layout.",
+                "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Browse. In GeodeSync choose Game Folder and select the Geometry Dash folder in that Steam library.",
+            })
         app_path = find_macos_game_app(game_path)
         problem = validate_macos_game_app(app_path)
         if problem:
@@ -1491,6 +1725,26 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
                 "title": "Geometry Dash.app looks incomplete",
                 "detail": problem,
                 "steps": "Quit Steam, reopen it, then use Geometry Dash → Properties → Installed Files → Verify integrity. Run this check again after Steam finishes.",
+            })
+    elif is_linux:
+        if is_steam_library_game_path(game_path):
+            findings.append({
+                "title": "Steam / Proton Geometry Dash folder confirmed",
+                "detail": "This folder follows Steam’s `steamapps/common/Geometry Dash` layout used by the Proton game files.",
+                "steps": "Keep using this Steam library folder. GeodeSync manages the Windows Geometry Dash files Steam runs through Proton; it does not install a native Linux build.",
+            })
+        else:
+            findings.append({
+                "title": "This game folder is not clearly inside a Steam library",
+                "detail": "GeodeSync found a folder, but its path does not match Steam’s `steamapps/common/Geometry Dash` layout.",
+                "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Browse. Select that folder in GeodeSync. On Steam Deck, switch to Desktop Mode first.",
+            })
+        executable = os.path.join(game_path, "GeometryDash.exe")
+        if not os.path.isfile(executable):
+            findings.append({
+                "title": "The Proton game executable is missing",
+                "detail": "The selected folder does not contain `GeometryDash.exe`.",
+                "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Verify integrity of game files. Wait for Steam to finish, then select the folder containing `GeometryDash.exe` again.",
             })
 
     if recovery_error:
@@ -1632,16 +1886,8 @@ class GDManager:
             return os.path.expanduser("~/Library/Application Support/Steam")
 
         if IS_LINUX:
-            candidates = [
-                os.path.expanduser("~/.local/share/Steam"),
-                os.path.expanduser("~/.steam/steam"),
-                os.path.expanduser("~/.var/app/com.valvesoftware.Steam/data/Steam"),
-                os.path.expanduser("~/.steam/root")
-            ]
-            for c in candidates:
-                if os.path.exists(c):
-                    return c
-            return os.path.expanduser("~/.local/share/Steam")
+            roots = discover_linux_steam_roots()
+            return roots[0] if roots else None
 
         if IS_WIN and winreg:
             try:
@@ -1718,6 +1964,11 @@ class GDManager:
             return True
 
     def detect_gd_path(self):
+        if IS_LINUX:
+            for candidate in discover_steam_game_folders(discover_linux_steam_roots()):
+                if os.path.isfile(os.path.join(candidate, "GeometryDash.exe")):
+                    return candidate
+            return None
         if not self.steam_path:
             return None
 
@@ -1821,13 +2072,11 @@ class GDManager:
 
         if IS_LINUX:
             candidates = []
-            if self.steam_path:
-                candidates.append(os.path.join(self.steam_path, "steamapps", "compatdata", APP_ID, "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "GeometryDash"))
-            candidates.extend([
-                os.path.expanduser(f"~/.local/share/Steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash"),
-                os.path.expanduser(f"~/.steam/steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash"),
-                os.path.expanduser(f"~/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/{APP_ID}/pfx/drive_c/users/steamuser/AppData/Local/GeometryDash")
-            ])
+            if self.gd_path:
+                game_steamapps = os.path.dirname(os.path.dirname(os.path.abspath(self.gd_path)))
+                candidates.append(os.path.join(game_steamapps, "compatdata", APP_ID, "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "GeometryDash"))
+            for root in discover_linux_steam_roots():
+                candidates.append(os.path.join(root, "steamapps", "compatdata", APP_ID, "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "GeometryDash"))
             for c in candidates:
                 if os.path.exists(c):
                     return c
@@ -1959,8 +2208,7 @@ class GDManager:
                 return False
 
         try:
-            output = subprocess.check_output(["pgrep", "-f", "GeometryDash"]).decode()
-            return bool(output.strip())
+            return bool(find_linux_geometry_dash_pids())
         except Exception:
             return False
 
@@ -1989,8 +2237,26 @@ class GDManager:
             except Exception:
                 return False
 
+        if IS_LINUX:
+            pids = find_linux_geometry_dash_pids()
+            if not pids:
+                return True
+            for pid in pids:
+                try:
+                    os.kill(pid, 15)
+                except ProcessLookupError:
+                    continue
+                except OSError:
+                    return False
+            deadline = time.time() + 8
+            while time.time() < deadline:
+                if not find_linux_geometry_dash_pids():
+                    return True
+                time.sleep(0.25)
+            return False
+
         try:
-            subprocess.run(["pkill", "-9", "-f", "GeometryDash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-TERM", "-x", "GeometryDash"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
             return True
         except Exception:
@@ -3212,6 +3478,7 @@ class GeodeSyncApp(tk.Tk):
             f"Python: {platform.python_version()}",
             f"Steam detected: {'yes' if self.mgr.steam_path and os.path.isdir(self.mgr.steam_path) else 'no'}",
             f"Game detected: {'yes' if self.mgr.gd_path and os.path.isdir(self.mgr.gd_path) else 'no'}",
+            f"Game folder matches Steam library layout: {'yes' if is_steam_library_game_path(self.mgr.gd_path) else 'no'}",
             f"Game version: {game_version}",
             f"Geode detected: {'yes' if self.mgr.is_geode_installed() else 'no'}",
             f"Steam update lock: {'locked' if self.mgr.is_manifest_locked() else 'unlocked'}",
@@ -3220,6 +3487,17 @@ class GeodeSyncApp(tk.Tk):
             "",
             "Recent activity (home folders and email addresses are redacted):",
         ]
+        if IS_MAC:
+            mac_security = inspect_macos_app_security()
+            if mac_security:
+                report_lines.extend([
+                    "",
+                    "macOS app security checks (read-only; no Gatekeeper changes made):",
+                    f"Bundle signature: {mac_security['bundle_signature']}",
+                    f"Signing identity: {mac_security['signing_identity']}",
+                    f"Gatekeeper assessment: {mac_security['gatekeeper']}",
+                    f"Download quarantine metadata: {mac_security['quarantine']}",
+                ])
         if getattr(self, "last_troubleshooting_error", ""):
             report_lines.extend([
                 "",
@@ -3258,7 +3536,7 @@ class GeodeSyncApp(tk.Tk):
         tk.Label(header, text="Fix a problem", font=("Segoe UI", 14, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
         tk.Label(
             header,
-            text="Run a safe check or paste the exact error. GeodeSync gives simple steps and never guesses at a risky repair.",
+            text="Run a safe check or paste the exact error. GeodeSync checks common causes and gives safe next steps; it never guesses at a risky repair.",
             font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"], wraplength=590, justify="left",
         ).pack(anchor="w", pady=(3, 0))
 
@@ -3330,7 +3608,33 @@ class GeodeSyncApp(tk.Tk):
         footer = tk.Frame(dialog, bg=UI["header"], padx=18, pady=10)
         footer.pack(fill="x")
         tk.Button(footer, text="Export Report", command=self.export_support_report, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(
+            footer,
+            text="Ask WilBot",
+            command=lambda: self.open_wilbot_support(),
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"],
+            relief="flat", padx=10, pady=5, cursor="hand2",
+        ).pack(side="left", padx=(8, 0))
         tk.Button(footer, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="right")
+
+    def open_wilbot_support(self):
+        """Open the official GeodeSync help channel; no diagnostic data is sent automatically."""
+        support_url = "https://discord.com/channels/1503910985524711476/1563643888537698314"
+        try:
+            opened = webbrowser.open(support_url)
+        except Exception:
+            opened = False
+        if not opened:
+            messagebox.showerror(
+                "Could not open support",
+                "Open the WilCord server and choose #geodesync-help. No files or diagnostic details were sent.",
+            )
+            return
+        messagebox.showinfo(
+            "GeodeSync support",
+            "The GeodeSync help channel is open. Start a support ticket and mention @WilBot.\n\n"
+            "Your report stays on this device until you choose Export Report and attach it. Review it before sharing.",
+        )
 
     def create_ui(self):
         # Update Banner
@@ -3855,7 +4159,8 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showinfo(
                 "Geode Installer Launched",
                 "The official Geode installer has started!\n\n"
-                "Follow the on-screen steps to complete installation, then return to GeodeSync."
+                f"Check that it installs into the Steam Geometry Dash folder:\n{self.mgr.gd_path or 'Select the folder opened from Steam → Properties → Installed Files → Browse'}\n\n"
+                "That folder should contain GeometryDash.exe. Do not place the installer inside it or copy Geode files by hand. When installation finishes, launch Geometry Dash from Steam once."
             )
             time.sleep(3)
             self.refresh_status()
@@ -4227,15 +4532,19 @@ class GeodeSyncApp(tk.Tk):
         try:
             os.makedirs(fmod_dir, exist_ok=True)
             fmod_settings = {
-                "output-type": "CoreAudio" if IS_MAC else "WASAPI",
                 "sample-rate": "48000",
                 "buffer-size": "128",
                 "master-volume": 100,
                 "output-device": -1
             }
+            if IS_MAC:
+                fmod_settings["output-type"] = "CoreAudio"
+            elif IS_WIN:
+                fmod_settings["output-type"] = "WASAPI"
             with open(os.path.join(fmod_dir, "settings.json"), "w", encoding="utf-8") as f:
                 json.dump(fmod_settings, f, indent=2)
-            applied.append(f"✓ FMOD Audio Buffer set to 128 samples / {'CoreAudio' if IS_MAC else 'WASAPI'} (slashes audio delay to ~2.7ms)")
+            backend = "CoreAudio" if IS_MAC else "WASAPI" if IS_WIN else "the system-selected Linux audio backend"
+            applied.append(f"✓ FMOD Audio Buffer set to 128 samples / {backend}; your plugin may use its platform default")
         except Exception as e:
             self.log(f"FMOD optimizer note: {e}", "WARN")
 
@@ -4301,35 +4610,41 @@ class GeodeSyncApp(tk.Tk):
 
         crash_dir = self.mgr.get_crashlogs_dir()
         if not crash_dir or not os.path.exists(crash_dir):
-            messagebox.showinfo("🩺 Crash Doctor", "No crash logs folder found! Your Geometry Dash installation looks clean.")
+            messagebox.showinfo(
+                "🩺 Crash Doctor",
+                "No Geode crash-report folder was found in the usual locations. That does not mean the game is crash-free.\n\n"
+                "If Geode’s “Whoopsies!” window is open, copy its complete report and use Fix a problem → Explain Error, or export a support report and attach the crash report separately.",
+            )
             return
 
         logs = [os.path.join(crash_dir, f) for f in os.listdir(crash_dir) if f.endswith(".log")]
         if not logs:
-            messagebox.showinfo("🩺 Crash Doctor", "Great news! Zero crash logs were detected. No broken mods found!")
+            messagebox.showinfo(
+                "🩺 Crash Doctor",
+                "No Geode crash report was found in the usual folder. This does not prove the install is clean.\n\n"
+                "If the “Whoopsies!” window is open, copy the complete report and send it to support so the stack trace and mod list can be checked.",
+            )
             return
 
         logs.sort(key=os.path.getmtime, reverse=True)
         latest_log = logs[0]
 
         culprit = None
+        reported_component = ""
         details = []
         try:
             with open(latest_log, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
 
             for line in content.splitlines():
-                if "Faulty Mod:" in line and "<Unknown>" not in line:
-                    culprit = line.split("Faulty Mod:")[1].strip()
+                if "Faulty Mod:" in line:
+                    reported_component = line.split("Faulty Mod:", 1)[1].strip()
+                    mod_id = re.search(r"\(([A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+)\)", reported_component)
+                    if mod_id and mod_id.group(1).casefold() != "geode.loader":
+                        culprit = mod_id.group(1)
                     break
                 if "Failed to load:" in line:
                     details.append(line.strip())
-
-            if not culprit:
-                # Scan stack trace for known mod id patterns
-                matches = re.findall(r"([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+)\.dll", content)
-                if matches:
-                    culprit = matches[0]
 
         except Exception as e:
             self.log(f"Crash Doctor scan error: {e}", "WARN")
@@ -4355,9 +4670,12 @@ class GeodeSyncApp(tk.Tk):
                 else:
                     messagebox.showinfo("Info", f"Mod file {culprit}.geode not found in mods folder (already removed?).")
         else:
-            msg = f"Latest Crash Log: {os.path.basename(latest_log)} ({time_str})\n\n"
-            msg += "No single specific mod was flagged as the culprit. This usually means a game version mismatch (e.g. 2.209 vs 2.2081).\n\n"
-            msg += "Clicking '⚡ 1-Click Fix' to downgrade to 2.2081 will resolve most startup crashes!"
+            msg = f"Latest Geode crash report: {os.path.basename(latest_log)} ({time_str})\n\n"
+            if "geode.loader" in reported_component.casefold():
+                msg += "The report points to the Geode loader, not a specific add-on mod. That alone does not prove the loader is the root cause.\n\n"
+            else:
+                msg += "The report did not identify one specific add-on mod. That is not enough evidence to blame a game-version mismatch or recommend a downgrade.\n\n"
+            msg += "Use Fix a problem → Explain Error, paste the complete “Whoopsies!” report, then choose Export Report. Do not reset the game or remove mods until the report has been reviewed."
             messagebox.showinfo("🩺 Crash Doctor Report", msg)
 
     # ==========================================
@@ -5167,6 +5485,12 @@ class GeodeSyncApp(tk.Tk):
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                if not release_has_app_update(rel):
+                    self.after(0, lambda tag=tag: self.log(
+                        f"GeodeSync v{tag} exists, but no verified update package is published for this platform yet.",
+                        "INFO",
+                    ))
+                    return
                 self.after(0, lambda: self.show_update_banner(tag))
                 if getattr(sys, "frozen", False):
                     self.after(0, lambda: self._start_auto_update_if_needed(rel))
@@ -5196,6 +5520,19 @@ class GeodeSyncApp(tk.Tk):
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                    if not release_has_app_update(rel):
+                        message = (
+                            f"GeodeSync v{tag} is published, but its verified package for this platform "
+                            "is not available yet. Your current installation was left unchanged."
+                        )
+                        self.after(0, lambda message=message: messagebox.showinfo(
+                            "Update not available yet", message, parent=self
+                        ))
+                        self.after(0, lambda tag=tag: self.log(
+                            f"GeodeSync v{tag} is published, but this platform has no verified package yet.",
+                            "INFO",
+                        ))
+                        return
                     self.after(0, lambda: self.show_update_banner(tag))
                     if getattr(sys, "frozen", False):
                         self.after(0, lambda: self._start_auto_update_if_needed(rel))
@@ -5867,14 +6204,15 @@ class GeodeSyncApp(tk.Tk):
                 desktop_dir = os.path.expanduser("~/Desktop")
                 if os.path.exists(desktop_dir):
                     dest = os.path.join(desktop_dir, "GeodeSync.desktop")
+                    exec_line = desktop_exec_value(my_exe) if getattr(sys, "frozen", False) else f"{desktop_exec_value(sys.executable)} {desktop_exec_value(my_exe)}"
                     with open(dest, "w") as f:
                         f.write(
                             "[Desktop Entry]\n"
                             "Type=Application\n"
                             "Name=GeodeSync\n"
                             "Comment=Geometry Dash Companion\n"
-                            f"Exec={my_exe}\n"
-                            "Icon=utilities-system-monitor\n"
+                            f"Exec={exec_line}\n"
+                            f"Icon={os.path.join(os.path.dirname(my_exe), 'icon.png')}\n"
                             "Terminal=false\n"
                             "Categories=Game;Utility;\n"
                         )
@@ -6772,9 +7110,10 @@ if __name__ == "__main__":
     except Exception:
         import traceback, time
         try:
-            app_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "GeodeSync")
+            crash_path = _crash_log_path()
+            app_dir = os.path.dirname(crash_path)
             os.makedirs(app_dir, exist_ok=True)
-            with open(os.path.join(app_dir, "crash.log"), "a", encoding="utf-8") as f:
+            with open(crash_path, "a", encoding="utf-8") as f:
                 f.write(f"\n--- MAINLOOP CRASH AT {time.ctime()} ---\n")
                 traceback.print_exc(file=f)
         except Exception:

@@ -22,13 +22,31 @@ not be described as publisher-verified.
 ## macOS
 
 Use a supported macOS runner and install `requirements-macos-build.txt`, then run
-`python build_macos.py --arch arm64` or `--arch x86_64`. The release workflow may
-sign and notarize only when all corresponding Apple secrets are configured.
+`python build_macos.py --arch arm64` or `--arch x86_64`. The build seals the
+finished bundle after editing `Info.plist` and verifies that seal before it can
+be packaged. CI replaces the ad-hoc seal with a Developer ID signature and
+notarizes/staples the app when the corresponding Apple secrets are configured.
+An app that fails strict `codesign --verify --deep --strict` must not be
+published. A structurally valid ad-hoc signature is still not the same as a
+Developer ID signature or notarization.
 
 ## Linux
 
-Install Python, Tk, and PyInstaller, then follow the Linux packaging commands in
-`.github/workflows/build-macos.yml`.
+Build on Ubuntu with Python 3.12, Tk, and the pinned PyInstaller version. Use
+Ubuntu's Python so the venv can see the matching Tk runtime:
+
+```sh
+sudo apt-get install python3 python3-venv python3-tk xvfb xauth
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -c "import tkinter; print(tkinter.TkVersion)"
+.venv/bin/python -m pip install -r requirements-linux-build.txt
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
+```
+
+The Linux CI workflow also launches the packaged app under Xvfb to catch missing
+runtime files or Tk startup failures. Linux builds target Steam's Windows game
+files under Proton; use Desktop Mode on Steam Deck.
 
 ## Checks
 

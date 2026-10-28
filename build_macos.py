@@ -110,6 +110,19 @@ def main() -> None:
     with info_plist.open("wb") as stream:
         plistlib.dump(metadata, stream, sort_keys=False)
 
+    # PyInstaller leaves an ad-hoc signature on its macOS bundle. Updating
+    # Info.plist above invalidates that seal, which makes Gatekeeper report
+    # that the app is damaged. Re-seal the completed bundle before packaging.
+    # CI may replace this with a Developer ID signature and notarize it later.
+    subprocess.run(
+        ["codesign", "--force", "--deep", "--sign", "-", str(app)],
+        check=True,
+    )
+    subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app)],
+        check=True,
+    )
+
     # Preserve extended attributes. In particular, do not strip quarantine or
     # provenance metadata: macOS must remain in control of Gatekeeper checks.
     print(f"Built self-contained {arch} app: {app}")
