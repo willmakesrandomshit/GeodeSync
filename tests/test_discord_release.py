@@ -30,7 +30,7 @@ class TestDiscordReleasePayload(unittest.TestCase):
             "GeodeSync-Windows.zip",
             "GeodeSync-macOS-arm64.zip",
             "GeodeSync-macOS-x86_64.zip",
-            "GeodeSync-Linux.tar.gz",
+            "GeodeSync-v2.3.2-Linux.tar.gz",
         ):
             self.assertIn(f"/releases/download/v2.3.2/{asset}", links)
         self.assertNotIn("releases/latest/download", links)
@@ -44,6 +44,17 @@ class TestDiscordReleasePayload(unittest.TestCase):
         self.assertLessEqual(len(description), 3500)
         self.assertIn("Read the full changelog", description)
         self.assertIn("https://example.test/release", description)
+
+    def test_announcement_only_links_to_assets_in_this_release(self):
+        payload = build_release_payload(
+            "Release", "v2.3.12", "Mac download withheld", "https://example.test/release",
+            assets={"GeodeSync-Windows.zip", "GeodeSync-v2.3.12-Linux.tar.gz", "SHA256SUMS.txt"},
+        )
+        embed = payload["embeds"][0]
+        downloads = next(field["value"] for field in embed["fields"] if field["name"] == "⬇️ Get GeodeSync")
+        self.assertIn("GeodeSync-Windows.zip", downloads)
+        self.assertIn("GeodeSync-v2.3.12-Linux.tar.gz", downloads)
+        self.assertNotIn("macOS", downloads)
 
     @patch("send_discord_update.urllib.request.urlopen")
     @patch("send_discord_update.get_webhook_url", return_value="https://discord.com/api/webhooks/test")
@@ -72,6 +83,8 @@ class TestDiscordReleasePayload(unittest.TestCase):
         self.assertIn("if: startsWith(github.ref, 'refs/tags/v')", workflow[notify_step:])
         self.assertIn("python3 send_discord_update.py", workflow[notify_step:])
         self.assertIn("GEODESYNC_DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}", workflow[notify_step:])
+        self.assertIn("RELEASE_ASSETS: ${{ steps.assets.outputs.asset_names }}", workflow[notify_step:])
+        self.assertIn("RELEASE_BODY_FILE: release_notes_for_release.md", workflow[notify_step:])
 
     def test_notification_workflow_is_manual_retry_not_release_event(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/notify-discord-update.yml").read_text(encoding="utf-8")
