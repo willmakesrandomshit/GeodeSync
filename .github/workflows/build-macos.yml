@@ -56,6 +56,7 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
           security set-keychain-settings -lut 21600 "$RUNNER_TEMP/geodesync.keychain-db"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
+          # shellcheck disable=SC2046 # Preserve every existing keychain in the search list.
           security list-keychains -d user -s "$RUNNER_TEMP/geodesync.keychain-db" $(security list-keychains -d user | tr -d '"')
           security import "$RUNNER_TEMP/geodesync-signing.p12" -k "$RUNNER_TEMP/geodesync.keychain-db" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
@@ -231,12 +232,10 @@ jobs:
           printf 'asset_names=%s\n' "$(IFS=,; echo "${assets[*]}")" >> "$GITHUB_OUTPUT"
           cp release_notes.md release_notes_for_release.md
           if ! compgen -G 'GeodeSync-macOS-*.zip' > /dev/null; then
-            cat >> release_notes_for_release.md <<'EOF'
-
-## macOS download status
-
-The macOS packages are temporarily withheld because this release was not signed with an Apple Developer ID and notarized. Do not use an older or ad-hoc-signed package as a replacement. Windows and Linux packages are available below; the Mac package will be added only after Apple verification succeeds.
-EOF
+            printf '\n%s\n\n%s\n' \
+              '## macOS download status' \
+              'The macOS packages are temporarily withheld because this release was not signed with an Apple Developer ID and notarized. Do not use an older or ad-hoc-signed package as a replacement. Windows and Linux packages are available below; the Mac package will be added only after Apple verification succeeds.' \
+              >> release_notes_for_release.md
           fi
         id: assets
       - uses: softprops/action-gh-release@v2
