@@ -17,6 +17,8 @@ permissions:
 jobs:
   build-macos:
     name: Build ${{ matrix.arch }} app
+    outputs:
+      release_ready: ${{ steps.release_status.outputs.ready }}
     strategy:
       fail-fast: false
       matrix:
@@ -93,6 +95,17 @@ jobs:
           name: GeodeSync-macOS-${{ matrix.arch }}
           path: GeodeSync-macOS-${{ matrix.arch }}.zip
           if-no-files-found: error
+      - name: Report notarized artifact availability
+        id: release_status
+        shell: bash
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE_P12_BASE64" && -n "$APPLE_CERTIFICATE_PASSWORD" && \
+                -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && \
+                -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build-windows:
     name: Build Windows release assets
@@ -188,10 +201,14 @@ jobs:
 
   attach-to-release:
     name: Attach platform builds to GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
+    if: >-
+      always() &&
+      (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')) &&
+      needs.build-windows.result == 'success' &&
+      needs.build-linux.result == 'success'
     # Keep optional macOS packaging from blocking the verified Windows/Linux release.
     # macOS assets remain withheld until a notarized package is explicitly attached.
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -212,6 +229,12 @@ jobs:
         with:
           name: GeodeSync-Linux
           path: .
+      - uses: actions/download-artifact@v4
+        if: needs.build-macos.outputs.release_ready == 'true'
+        with:
+          pattern: GeodeSync-macOS-*
+          path: .
+          merge-multiple: true
       - name: Confirm release ref matches application version
         id: version
         run: |
