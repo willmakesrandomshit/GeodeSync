@@ -32,7 +32,9 @@ Developer ID signature or notarization.
 
 ## Linux
 
-Build on Ubuntu with Python 3.12, Tk, and the pinned PyInstaller version. Use
+Build on Ubuntu 22.04 (glibc 2.35) with its matching system Python and Tk,
+plus the pinned PyInstaller version. This older build baseline prevents bundled
+Tcl/Tk from requiring a newer glibc than SteamOS on Steam Deck provides. Use
 Ubuntu's Python so the venv can see the matching Tk runtime:
 
 ```sh
@@ -44,9 +46,10 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
 ```
 
-The Linux CI workflow also launches the packaged app under Xvfb to catch missing
-runtime files or Tk startup failures. Linux builds target Steam's Windows game
-files under Proton; use Desktop Mode on Steam Deck.
+The Linux CI workflow asserts the glibc baseline, runs tests under Xvfb, and
+launches the packaged app under Xvfb to catch missing runtime files or Tk
+startup failures. Linux builds target Steam's Windows game files under Proton;
+use Desktop Mode on Steam Deck. CI does not replace testing on a physical Deck.
 
 ## Checks
 

@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.12"
+APP_VERSION = "2.3.13"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -374,45 +374,26 @@ def version_sort_key(version):
 
 
 def fetch_latest_published_release(timeout=8):
-    """Choose the greatest stable published version with instant CDN fallback."""
+    """Return the newest stable *published release*, never a source version manifest."""
+    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
     try:
-        request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             releases = json.loads(response.read().decode("utf-8"))
-        if isinstance(releases, list):
-            stable = []
-            for release in releases:
-                if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
-                    continue
-                tag = str(release.get("tag_name", "")).strip()
-                key = version_sort_key(tag)
-                if key is not None:
-                    stable.append((key, release))
-            if stable:
-                return max(stable, key=lambda item: item[0])[1]
-    except Exception:
-        pass
-
-    # Instant fallback to raw version.json (zero rate limits, 50ms response)
-    try:
-        req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "GeodeSync-Client"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            cfg = json.loads(resp.read().decode("utf-8"))
-            tag = cfg.get("app_version")
-            if tag:
-                return {
-                    "tag_name": f"v{tag}",
-                    "html_url": f"https://github.com/{GITHUB_REPO}/releases/tag/v{tag}",
-                    "assets": [
-                        {
-                            "name": f"GeodeSync-v{tag}-Windows.zip",
-                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/v{tag}/GeodeSync-v{tag}-Windows.zip"
-                        }
-                    ]
-                }
-    except Exception:
-        pass
-    raise ValueError("Could not connect to GitHub to check for updates.")
+    except Exception as error:
+        raise ValueError("Could not connect to GitHub to check for published updates.") from error
+    if not isinstance(releases, list):
+        raise ValueError("GitHub returned an invalid release list.")
+    stable = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease") or not release.get("published_at"):
+            continue
+        tag = str(release.get("tag_name", "")).strip()
+        key = version_sort_key(tag)
+        if key is not None:
+            stable.append((key, release))
+    if stable:
+        return max(stable, key=lambda item: item[0])[1]
+    raise ValueError("GitHub has no published stable GeodeSync release.")
 
 
 GEODE_REPO = "geode-sdk/geode"
@@ -716,6 +697,15 @@ def select_app_update_asset(release, platform_name=None, architecture=None):
     if size <= 0 or size > APP_UPDATE_MAX_BYTES:
         raise ValueError("The update package has an invalid or excessive size.")
     return asset
+
+
+def release_has_app_update(release, platform_name=None, architecture=None):
+    """Whether this published release has a valid package for this platform."""
+    try:
+        select_app_update_asset(release, platform_name, architecture)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def validate_app_update_zip(archive, platform_name):
@@ -3652,7 +3642,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -3868,8 +3858,11 @@ class GeodeSyncApp(tk.Tk):
         footer = tk.Frame(self, bg=UI["header"], padx=20, pady=7)
         footer.pack(fill="x", side="bottom")
 
+        footer_actions = tk.Frame(footer, bg=UI["header"])
+        footer_actions.pack(fill="x")
+
         self.status_ticker_lbl = tk.Label(
-            footer,
+            footer_actions,
             text="● Ready to play Geometry Dash",
             font=("Segoe UI", 8),
             fg=UI["lime"],
@@ -3880,38 +3873,48 @@ class GeodeSyncApp(tk.Tk):
         )
         self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        choose_path_btn = tk.Button(footer, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
+        choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         choose_path_btn.pack(side="right", padx=(4, 0))
 
-        view_log_btn = tk.Button(footer, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
+        view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         view_log_btn.pack(side="right", padx=(4, 0))
 
-        fix_problem_btn = tk.Button(footer, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
+        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
         fix_problem_btn.pack(side="right", padx=(4, 0))
 
-        discord_link = tk.Label(footer, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
+        discord_link = tk.Label(footer_actions, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
         discord_link.pack(side="right", padx=6)
         discord_link.bind("<Button-1>", lambda e: webbrowser.open("https://discord.gg/tyQG5xNGCx"))
 
-        repo_link = tk.Label(footer, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["header"], cursor="hand2")
+        repo_link = tk.Label(footer_actions, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["header"], cursor="hand2")
         repo_link.pack(side="right", padx=6)
         repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
 
-        self.path_lbl = tk.Label(footer, text=f"{self.mgr.gd_path or 'Not found'}", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["header"])
-        self.path_lbl.configure(wraplength=180, justify="right", anchor="e")
-        self.path_lbl.pack(side="right", padx=(0, 8))
+        self.path_lbl = tk.Label(
+            footer,
+            text=f"Game folder: {self.mgr.gd_path or 'Not found'}",
+            font=("Segoe UI", 7),
+            fg=UI["quiet"],
+            bg=UI["header"],
+            wraplength=900,
+            justify="left",
+            anchor="w",
+        )
+        self.path_lbl.pack(fill="x", anchor="w", pady=(4, 0))
 
         def _fit_footer_status(event=None):
-            available = event.width if event is not None else footer.winfo_width()
+            available = event.width if event is not None else footer_actions.winfo_width()
             if available <= 1:
                 return
             fixed_width = sum(
                 child.winfo_reqwidth()
-                for child in footer.winfo_children()
+                for child in footer_actions.winfo_children()
                 if child is not self.status_ticker_lbl
             )
             self.status_ticker_lbl.configure(wraplength=max(110, available - fixed_width - 40))
+            self.path_lbl.configure(wraplength=max(240, footer.winfo_width() - 40))
 
+        footer_actions.bind("<Configure>", _fit_footer_status)
         footer.bind("<Configure>", _fit_footer_status)
 
     def open_log_viewer(self):
@@ -5495,6 +5498,12 @@ class GeodeSyncApp(tk.Tk):
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                if not release_has_app_update(rel):
+                    self.after(0, lambda tag=tag: self.log(
+                        f"GeodeSync v{tag} exists, but no verified update package is published for this platform yet.",
+                        "INFO",
+                    ))
+                    return
                 self.after(0, lambda: self.show_update_banner(tag))
                 if getattr(sys, "frozen", False):
                     self.after(0, lambda: self._start_auto_update_if_needed(rel))
@@ -5524,6 +5533,19 @@ class GeodeSyncApp(tk.Tk):
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+                    if not release_has_app_update(rel):
+                        message = (
+                            f"GeodeSync v{tag} is published, but its verified package for this platform "
+                            "is not available yet. Your current installation was left unchanged."
+                        )
+                        self.after(0, lambda message=message: messagebox.showinfo(
+                            "Update not available yet", message, parent=self
+                        ))
+                        self.after(0, lambda tag=tag: self.log(
+                            f"GeodeSync v{tag} is published, but this platform has no verified package yet.",
+                            "INFO",
+                        ))
+                        return
                     self.after(0, lambda: self.show_update_banner(tag))
                     if getattr(sys, "frozen", False):
                         self.after(0, lambda: self._start_auto_update_if_needed(rel))

@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.12",
+  "app_version": "2.3.13",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.12: fixes the macOS app bundle signature that caused the damaged-app warning."
+  "announcement": "GeodeSync v2.3.13 fixes Steam Deck/Linux startup compatibility. macOS downloads are withheld until an Apple-signed, notarized build is ready."
 }

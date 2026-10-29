@@ -9,6 +9,7 @@ on:
     branches:
       - "main"
       - "release/v*"
+      - "hotfix/**"
 
 permissions:
   contents: read
@@ -36,15 +37,6 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require Apple signing and notarization for public releases
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
-        run: |
-          test -n "$APPLE_CERTIFICATE_P12_BASE64" || { echo "APPLE_CERTIFICATE_P12_BASE64 is required for releases." >&2; exit 1; }
-          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "APPLE_CERTIFICATE_PASSWORD is required for releases." >&2; exit 1; }
-          test -n "$APPLE_SIGNING_IDENTITY" || { echo "APPLE_SIGNING_IDENTITY is required for releases." >&2; exit 1; }
-          test -n "$APPLE_ID" || { echo "APPLE_ID is required for releases." >&2; exit 1; }
-          test -n "$APPLE_TEAM_ID" || { echo "APPLE_TEAM_ID is required for releases." >&2; exit 1; }
-          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || { echo "APPLE_APP_SPECIFIC_PASSWORD is required for releases." >&2; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
@@ -64,6 +56,7 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
           security set-keychain-settings -lut 21600 "$RUNNER_TEMP/geodesync.keychain-db"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
+          # shellcheck disable=SC2046 # Preserve every existing keychain in the search list.
           security list-keychains -d user -s "$RUNNER_TEMP/geodesync.keychain-db" $(security list-keychains -d user | tr -d '"')
           security import "$RUNNER_TEMP/geodesync-signing.p12" -k "$RUNNER_TEMP/geodesync.keychain-db" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/geodesync.keychain-db"
@@ -75,6 +68,8 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "$RUNNER_TEMP/GeodeSync-notarization.zip"
           xcrun notarytool submit "$RUNNER_TEMP/GeodeSync-notarization.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
           xcrun stapler staple dist/GeodeSync.app
+          xcrun stapler validate dist/GeodeSync.app
+          spctl --assess --type execute --verbose=4 dist/GeodeSync.app
           codesign --verify --deep --strict dist/GeodeSync.app
       - name: Verify app bundle and executable architecture
         run: |
@@ -93,6 +88,7 @@ jobs:
       - name: Package app for download
         run: ditto -c -k --sequesterRsrc --keepParent dist/GeodeSync.app "GeodeSync-macOS-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
+        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
         with:
           name: GeodeSync-macOS-${{ matrix.arch }}
           path: GeodeSync-macOS-${{ matrix.arch }}.zip
@@ -125,13 +121,27 @@ jobs:
 
   build-linux:
     name: Build Linux release assets
-    runs-on: ubuntu-latest
+    # Build against Ubuntu 22.04 (glibc 2.35), which is compatible with SteamOS
+    # on Steam Deck. Building on ubuntu-latest can bundle newer Tcl/Tk libraries
+    # that fail to load on SteamOS (for example, requiring GLIBC_2.42).
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip python3-venv python3-tk xvfb xauth
+      - name: Verify Steam Deck-compatible glibc build baseline
+        run: |
+          python3 - <<'PY'
+          import platform
+          import re
+          version = platform.libc_ver()[1]
+          match = re.match(r"^(\d+)\.(\d+)", version)
+          if not match or tuple(map(int, match.groups())) > (2, 35):
+              raise SystemExit(f"Expected glibc <= 2.35 for SteamOS compatibility; found {version!r}")
+          print(f"Building against glibc {version} for SteamOS compatibility")
+          PY
       - name: Create build environment with the system Tk runtime
         run: |
           python3 -m venv --system-site-packages .venv
@@ -140,7 +150,7 @@ jobs:
         run: |
           .venv/bin/python -m pip install -r requirements-linux-build.txt
       - name: Run regression suite on Linux
-        run: .venv/bin/python -m unittest discover -s tests -v
+        run: xvfb-run -a .venv/bin/python -m unittest discover -s tests -v
       - name: Build Linux executable
         run: |
           .venv/bin/python -m PyInstaller --noconfirm --clean --onefile --windowed --name GeodeSync --add-data "icon.ico:." main.py
@@ -183,9 +193,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
         with:
           pattern: GeodeSync-macOS-*
           merge-multiple: true
@@ -220,17 +238,27 @@ jobs:
           assets=(GeodeSync-Windows.zip GeodeSync-macOS-*.zip GeodeSync-v*-Linux.tar.gz)
           test "${#assets[@]}" -gt 0
           sha256sum "${assets[@]}" > SHA256SUMS.txt
+          {
+            echo 'files<<EOF'
+            printf '%s\n' "${assets[@]}" SHA256SUMS.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          printf 'asset_names=%s\n' "$(IFS=,; echo "${assets[*]}")" >> "$GITHUB_OUTPUT"
+          cp release_notes.md release_notes_for_release.md
+          if ! compgen -G 'GeodeSync-macOS-*.zip' > /dev/null; then
+            printf '\n%s\n\n%s\n' \
+              '## macOS download status' \
+              'The macOS packages are temporarily withheld because this release was not signed with an Apple Developer ID and notarized. Do not use an older or ad-hoc-signed package as a replacement. Windows and Linux packages are available below; the Mac package will be added only after Apple verification succeeds.' \
+              >> release_notes_for_release.md
+          fi
+        id: assets
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.app_version }}
           target_commitish: ${{ github.sha }}
           name: GeodeSync v${{ steps.version.outputs.app_version }}
-          body_path: release_notes.md
-          files: |
-            GeodeSync-Windows.zip
-            GeodeSync-macOS-*.zip
-            GeodeSync-v*-Linux.tar.gz
-            SHA256SUMS.txt
+          body_path: release_notes_for_release.md
+          files: ${{ steps.assets.outputs.files }}
           fail_on_unmatched_files: true
       - name: Announce release in Discord
         if: startsWith(github.ref, 'refs/tags/v')
@@ -239,9 +267,11 @@ jobs:
           RELEASE_TAG: v${{ steps.version.outputs.app_version }}
           RELEASE_TITLE: GeodeSync v${{ steps.version.outputs.app_version }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.app_version }}
+          RELEASE_ASSETS: ${{ steps.assets.outputs.asset_names }}
+          RELEASE_BODY_FILE: release_notes_for_release.md
         run: |
           if [ -z "$GEODESYNC_DISCORD_WEBHOOK" ]; then
-            echo "DISCORD_RELEASE_WEBHOOK is missing; release announcement was not sent." >&2
-            exit 1
+            echo "DISCORD_RELEASE_WEBHOOK is missing; release is published, but its optional Discord announcement was skipped." >&2
+            exit 0
           fi
           python3 send_discord_update.py
