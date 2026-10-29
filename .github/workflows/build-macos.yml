@@ -189,7 +189,9 @@ jobs:
   attach-to-release:
     name: Attach platform builds to GitHub Release
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
-    needs: [build-macos, build-windows, build-linux]
+    # Keep optional macOS packaging from blocking the verified Windows/Linux release.
+    # macOS assets remain withheld until a notarized package is explicitly attached.
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -202,11 +204,6 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
-        with:
-          pattern: GeodeSync-macOS-*
-          merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: GeodeSync-Windows
