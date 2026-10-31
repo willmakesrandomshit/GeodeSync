@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.13"
+APP_VERSION = "2.3.14"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1090,6 +1090,42 @@ def validate_macos_game_app(app_path):
     if not os.access(executable, os.X_OK):
         return "Geometry Dash.app's main executable is not marked executable. Use Steam's Verify integrity action to restore it."
     return None
+
+
+def reset_invalid_macos_depot_cache(depot_path, installed_game_path=None):
+    """Remove only a malformed Geometry Dash Steam depot cache for a clean retry.
+
+    The installed game is never a valid target: the path must be Steam's exact
+    app_322170/depot_322172 content-cache directory, and the cached app bundle
+    must exist but fail structural validation.
+    """
+    if not depot_path or os.path.islink(depot_path) or not os.path.isdir(depot_path):
+        return False
+
+    target = os.path.realpath(os.path.abspath(depot_path))
+    normalized = os.path.normcase(target).replace("\\", "/").rstrip("/")
+    expected_suffix = f"/steamapps/content/app_{APP_ID}/depot_322172"
+    if not normalized.endswith(expected_suffix):
+        raise ValueError("Refusing to reset a path that is not the Geometry Dash Steam depot cache.")
+
+    installed = os.path.realpath(os.path.abspath(installed_game_path)) if installed_game_path else None
+    if installed and (target == installed or target.startswith(installed + os.sep)):
+        raise ValueError("Refusing to reset the installed Geometry Dash folder.")
+
+    app_path = find_macos_game_app(target)
+    if not app_path:
+        return False
+    problem = validate_macos_game_app(app_path)
+    if not problem:
+        return False
+
+    # Do not follow a bundle symlink, even though the parent cache path was
+    # checked above. Steam's cache contents are disposable; the live install
+    # and save directory are outside this narrowly validated path.
+    if os.path.islink(app_path):
+        raise ValueError("Refusing to reset a symlinked Geometry Dash.app cache.")
+    shutil.rmtree(target)
+    return True
 
 
 def inspect_macos_app_security(app_path=None, runner=None):
@@ -2431,17 +2467,56 @@ class GDManager:
         return False
 
     def is_geode_installed(self):
-        if not self.gd_path:
+        if not self.gd_path or not os.path.exists(self.gd_path):
             return False
         if IS_MAC:
-            app_dir = os.path.join(self.gd_path, "Geometry Dash.app")
+            app_dir = find_macos_game_app(self.gd_path)
             mac_geode_dir = os.path.expanduser("~/Library/Application Support/GeometryDash/geode")
-            in_app_geode = os.path.join(app_dir, "Contents", "Frameworks", "Geode.dylib")
-            return os.path.exists(mac_geode_dir) or os.path.exists(in_app_geode)
-        dll = os.path.join(self.gd_path, "Geode.dll")
-        proxy = os.path.join(self.gd_path, "XInput1_4.dll")
-        geode_dir = os.path.join(self.gd_path, "geode")
-        return (os.path.exists(dll) and os.path.exists(proxy)) or os.path.exists(geode_dir)
+            if app_dir:
+                bundle = os.path.join(app_dir, "Contents")
+                loader_candidates = (
+                    os.path.join(bundle, "Frameworks", "Geode.dylib"),
+                    os.path.join(bundle, "MacOS", "Geode.dylib"),
+                    os.path.join(bundle, "Frameworks", "Geode.framework", "Geode"),
+                )
+                if any(os.path.isfile(path) for path in loader_candidates):
+                    return True
+            # A data directory alone can survive an uninstall, so require
+            # evidence that Geode has actually started before treating it as
+            # an installed loader.
+            return self._has_geode_startup_log(mac_geode_dir)
+
+        # Geode's loader DLL is the authoritative Windows/Proton marker. Some
+        # valid installs do not have the legacy XInput proxy (or use a
+        # different proxy name), so requiring that second file caused false
+        # negatives. Ignore a leftover data folder unless it has a Geode log.
+        game_path = os.path.abspath(self.gd_path)
+        loader_candidates = (
+            os.path.join(game_path, "Geode.dll"),
+            os.path.join(game_path, "geode", "Geode.dll"),
+        )
+        if any(os.path.isfile(path) for path in loader_candidates):
+            return True
+        return self._has_geode_startup_log(os.path.join(game_path, "geode"))
+
+    @staticmethod
+    def _has_geode_startup_log(geode_dir):
+        log_dir = os.path.join(geode_dir, "logs")
+        if not os.path.isdir(log_dir):
+            return False
+        try:
+            files = [
+                os.path.join(log_dir, name)
+                for name in os.listdir(log_dir)
+                if name.lower().endswith(".log") and os.path.isfile(os.path.join(log_dir, name))
+            ]
+            if not files:
+                return False
+            latest = max(files, key=os.path.getmtime)
+            with open(latest, "r", encoding="utf-8", errors="ignore") as stream:
+                return any(re.search(r"\bRunning Geode\s+v?\d+\.\d+\.\d+", line, re.IGNORECASE) for line in stream)
+        except OSError:
+            return False
 
     def get_installed_geode_version(self):
         if not self.gd_path or not os.path.isdir(self.gd_path):
@@ -4298,6 +4373,41 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror("Error", "Steam installation not found.")
             return
 
+        # Steam can log “Depot download complete” while leaving a truncated
+        # Geometry Dash.app in its content cache. On the next attempt, recover
+        # that exact cache before starting another Steam download; otherwise
+        # Steam may keep reusing the malformed bundle indefinitely. Steam must
+        # be fully closed before touching its cache.
+        if IS_MAC:
+            depot_path = self.mgr.get_depot_path()
+            cached_app = find_macos_game_app(depot_path)
+            if cached_app and validate_macos_game_app(cached_app):
+                if self.mgr.is_steam_running():
+                    self.is_downloading_depot = False
+                    self.pending_profile_mods = None
+                    self.primary_btn.set_enabled(True)
+                    self.log("Invalid Geometry Dash depot cache found; Steam must be fully quit before it can be safely reset.", "WARN")
+                    messagebox.showwarning(
+                        "Quit Steam to repair the download",
+                        "Steam left an incomplete Geometry Dash download in its cache. Quit Steam completely (Steam → Quit), then click 1-Click Fix again. GeodeSync will remove only that damaged downloaded cache and fetch it again. Your installed game and save files will not be touched.",
+                    )
+                    self.refresh_status()
+                    return
+                try:
+                    if reset_invalid_macos_depot_cache(depot_path, self.mgr.gd_path):
+                        self.log("Removed the malformed Geometry Dash Steam download cache; requesting a clean depot download.", "WARN")
+                except (OSError, ValueError) as error:
+                    self.is_downloading_depot = False
+                    self.pending_profile_mods = None
+                    self.primary_btn.set_enabled(True)
+                    self.log(f"Could not safely reset the invalid Steam download cache: {error}", "ERROR")
+                    messagebox.showerror(
+                        "Steam cache could not be repaired",
+                        "GeodeSync could not safely clear the damaged downloaded cache. The installed game was not changed. Quit Steam, then send support the full activity log so the exact cache path can be checked.",
+                    )
+                    self.refresh_status()
+                    return
+
         if not self.mgr.is_steam_running():
             self.log("Steam is not currently running. Launching Steam...", "INFO")
             try:
@@ -4417,7 +4527,8 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror(
                 "Steam download is incomplete",
                 "Steam reported the download as complete, but its cached Geometry Dash.app is still missing valid app metadata. "
-                "GeodeSync did not replace your installed game. Quit Steam fully, reopen it, and retry 1-Click Fix once. "
+                "GeodeSync did not replace your installed game. Quit Steam completely (Steam → Quit), then click 1-Click Fix again. "
+                "On that retry, GeodeSync will clear only the malformed downloaded depot cache and request a fresh copy; it will not touch the installed game or saves. "
                 "If it still fails, send the full GeodeSync activity log so the depot path and Steam result can be checked.",
             )
             self.refresh_status()

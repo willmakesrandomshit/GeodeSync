@@ -1,4 +1,18 @@
-# GeodeSync v2.3.13
+# GeodeSync v2.3.14
+
+## Geode detection hotfix
+
+- Detect Geode when its loader DLL is present even if the optional legacy XInput proxy is absent or named differently.
+- On macOS, detect Geode when the user selects the app bundle itself, and check the loader in the supported bundle locations.
+- Ignore leftover Geode data folders unless a loader or Geode startup log confirms an installation.
+- GeodeSync supports Geometry Dash installed through Steam. Unofficial or pirated game copies are not supported.
+
+## macOS depot recovery
+
+- A retry after Steam leaves malformed cached game metadata now clears only the validated Geometry Dash depot cache, never the installed game or saves.
+- Steam must be fully quit before GeodeSync resets that cache; the app explains this and leaves the cache untouched if the path cannot be verified.
+
+## Linux / Steam Deck compatibility
 
 ## Linux / Steam Deck compatibility
 
