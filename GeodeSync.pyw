@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.16"
+APP_VERSION = "2.3.17"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3845,28 +3845,43 @@ class GeodeSyncApp(tk.Tk):
         tools_card.pack(fill="both", expand=True, pady=(0, 8))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
-        tools_head.pack(fill="x", pady=(0, 5))
-        tk.Label(tools_head, text="TOOLS", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
-        tk.Label(tools_head, text="Mods & play  ·  Repair & saves  ·  Settings & updates", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
+        tools_head.pack(fill="x", pady=(0, 8))
+        tk.Label(tools_head, text="TOOLBOX", font=("Segoe UI", 11, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="Choose what you want to do", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
 
         # Keep a single, flat grid: some Linux Tk 8.6 builds crash when these
         # controls are constructed inside nested section frames.
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
         tool_grid.pack(fill="both", expand=True)
-        for col in range(4):
+        tool_grid.columnconfigure(0, weight=0, minsize=92)
+        for col in range(1, 5):
             tool_grid.columnconfigure(col, weight=1)
         for row in range(5):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
+        groups = (
+            ("MODS", "#a7d957", "#252b20"),
+            ("PLAY", "#c497e8", "#292333"),
+            ("REPAIR", "#e4b968", "#30281e"),
+            ("PREFERENCES", "#a99be7", "#282432"),
+            ("APP", "#63d5ce", "#202b2b"),
+        )
+        for row, (name, accent, row_bg) in enumerate(groups):
+            tk.Label(
+                tool_grid, text=name, font=("Segoe UI", 8, "bold"),
+                fg=accent, bg=UI["panel"], anchor="w", padx=5,
+            ).grid(row=row, column=0, sticky="ew", padx=(2, 5), pady=4)
+
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
+            row_bg = groups[row][2]
             button = tk.Button(
                 tool_grid, text=label, command=command,
                 font=("Segoe UI", 9, "bold" if bold else "normal"),
-                bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
-                activeforeground=UI["text"], relief="flat", padx=8, pady=7,
+                bg=row_bg, fg=color, activebackground=UI["border"],
+                activeforeground=UI["text"], relief="flat", padx=8, pady=8,
                 cursor="hand2",
             )
-            button.grid(row=row, column=column, sticky="nsew", padx=3, pady=3)
+            button.grid(row=row, column=column + 1, sticky="nsew", padx=3, pady=3)
             return button
 
         # Each row keeps related actions together: mods, play, repair, settings, system.

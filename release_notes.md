@@ -1,12 +1,19 @@
+# GeodeSync v2.3.17
+
+## Dashboard toolbox redesign
+
+- Rebuilds the toolbox as five clearly labeled lanes: Mods, Play, Repair, Preferences, and App.
+- Adds a restrained color accent to each lane and increases button spacing for faster scanning.
+- Keeps all 20 actions directly available in the main dashboard and preserves the flat Tk layout used for Linux stability.
+- Includes the Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14 and v2.3.15.
+- Windows and Linux packages must pass release CI before distribution. macOS downloads remain withheld until a Developer ID signed and notarized build is available.
+
 # GeodeSync v2.3.16
 
-## Dashboard navigation refresh
+## Dashboard polish
 
-- Replaces the crowded 20-button wall with three clear tool groups: Mods & play, Repair & saves, and Settings & updates.
-- Keeps all 20 tools and their existing actions, with setting states shown accurately when the settings group opens.
-- Uses a single reused Tk grid for the category switcher to avoid the stacked-page layout that crashed on some Linux Tk builds.
-- Includes the verified Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14 and v2.3.15.
-- Windows and Linux downloads will be published only after their CI builds pass. macOS downloads remain withheld until a Developer ID signed and notarized build is available.
+- Reorganized the 20 existing tools into task-focused rows for mods, gameplay, repair, settings, and system actions.
+- Kept the native controls in one flat Tk grid for Linux stability.
 
 # GeodeSync v2.3.14
 

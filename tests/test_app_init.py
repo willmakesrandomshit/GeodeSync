@@ -37,7 +37,7 @@ class TestAppInit(unittest.TestCase):
             labels = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Label)}
             buttons = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Button)}
 
-            self.assertIn("Mods & play  ·  Repair & saves  ·  Settings & updates", labels)
+            self.assertTrue({"TOOLBOX", "Choose what you want to do", "MODS", "PLAY", "REPAIR", "PREFERENCES", "APP"}.issubset(labels))
             self.assertTrue({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor", "Auto-Backup: ON"}.issubset(buttons))
             tool_names = {
                 "🧩 Mod Manager", "🔄 Update Mods", "📦 Essential Mods", "🎵 NONG Songs",
