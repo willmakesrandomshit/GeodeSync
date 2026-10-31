@@ -3840,17 +3840,24 @@ class GeodeSyncApp(tk.Tk):
         )
         self.primary_btn.pack(fill="x")
 
-        # 2. QUICK COMPANION TOOLS (Clean 5x4 Grid • 20 Power Tools)
+        # 2. TOOLKIT (one shared grid keeps native Tk stable on Linux)
         tools_card = tk.Frame(body, bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         tools_card.pack(fill="both", expand=True, pady=(0, 8))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
-        tools_head.pack(fill="x", pady=(0, 9))
-        tk.Label(tools_head, text="TOOLS", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
-        tk.Label(tools_head, text="Everything, grouped by task", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
+        tools_head.pack(fill="x", pady=(0, 5))
+        tk.Label(tools_head, text="TOOLKIT", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="Choose what you need", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
+
+        # Keep the buttons as children of one grid. Creating nested packed
+        # section frames before the buttons crashes some Linux Tk 8.6 builds.
+        tool_grid = tk.Frame(tools_card, bg=UI["panel"])
+        tool_grid.pack(fill="both", expand=True)
+        for col in range(4):
+            tool_grid.columnconfigure(col, weight=1, uniform="tool-column")
 
         tool_categories = [
-            ("MODS & PLAY", [
+            ("MODS & PLAY", UI["lime"], [
                 ("🧩 Mod Manager", self.open_mod_manager, UI["lime"], True),
                 ("🔄 Update Mods", self.open_mod_updater_dialog, UI["lime"], True),
                 ("📦 Essential Mods", self.install_essential_mods, UI["amber"], True),
@@ -3860,7 +3867,7 @@ class GeodeSyncApp(tk.Tk):
                 ("📈 Demon Tracker", self.open_demon_tracker, UI["lilac"], False),
                 ("🎮 Game Profiles", self.open_game_profiles, UI["lilac"], False),
             ]),
-            ("REPAIR & SAVES", [
+            ("REPAIR & SAVES", UI["amber"], [
                 ("💾 Backup Saves", self.backup_saves, UI["lime"], True),
                 ("🩺 Save Doctor", self.run_save_doctor, UI["lilac"], True),
                 ("🩹 Crash Doctor", self.run_crash_doctor, UI["lilac"], True),
@@ -3868,7 +3875,7 @@ class GeodeSyncApp(tk.Tk):
                 ("⚠️ Restore Steam GD", self.upgrade_clicked, UI["amber"], False),
                 ("📁 Choose Game Folder", self.browse_gd_path, UI["muted"], False),
             ]),
-            ("SETTINGS & UPDATES", [
+            ("SETTINGS & UPDATES", UI["lilac"], [
                 ("Auto-Backup: ON", self.toggle_auto_backup, UI["lime"], True, "auto_backup_btn"),
                 ("🎮 Discord RPC: ON", self.toggle_rpc, UI["lilac"], False, "rpc_btn"),
                 ("🔇 GD Sounds: OFF", self.toggle_sounds, UI["muted"], False, "sounds_btn"),
@@ -3878,17 +3885,13 @@ class GeodeSyncApp(tk.Tk):
             ]),
         ]
 
-        def add_tool_section(title, entries):
-            section = tk.Frame(tools_card, bg=UI["panel"])
-            section.pack(fill="x", expand=True, pady=(3, 4))
-            heading = tk.Frame(section, bg=UI["panel"])
-            heading.pack(fill="x", pady=(0, 2))
-            tk.Label(heading, text=title, font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
-            grid = tk.Frame(section, bg=UI["panel"])
-            grid.pack(fill="x", expand=True)
-            for col in range(4):
-                grid.columnconfigure(col, weight=1, uniform=f"{title}-column")
-
+        row = 0
+        for section_title, section_color, entries in tool_categories:
+            tk.Label(
+                tool_grid, text=section_title, font=("Segoe UI", 8, "bold"),
+                fg=section_color, bg=UI["panel"], anchor="w",
+            ).grid(row=row, column=0, columnspan=4, sticky="ew", padx=3, pady=(5, 1))
+            row += 1
             for index, entry in enumerate(entries):
                 label, command, color, bold, *attribute = entry
                 if attribute:
@@ -3907,18 +3910,16 @@ class GeodeSyncApp(tk.Tk):
                             label = f"{name}: {'ON' if enabled else 'OFF'}"
                         color = active_color if enabled else UI["muted"]
                 button = tk.Button(
-                    grid, text=label, command=command,
+                    tool_grid, text=label, command=command,
                     font=("Segoe UI", 8, "bold" if bold else "normal"),
                     bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
                     activeforeground=UI["text"], relief="flat", padx=7, pady=4,
                     cursor="hand2", wraplength=170,
                 )
-                button.grid(row=index // 4, column=index % 4, sticky="nsew", padx=2, pady=2)
+                button.grid(row=row + index // 4, column=index % 4, sticky="nsew", padx=2, pady=2)
                 if attribute:
                     setattr(self, attribute[0], button)
-
-        for section_title, entries in tool_categories:
-            add_tool_section(section_title, entries)
+            row += (len(entries) + 3) // 4
 
         # Backward compatibility references
         self.player_card = self.guide_card
