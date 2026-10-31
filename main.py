@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.15"
+APP_VERSION = "2.3.16"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3845,79 +3845,102 @@ class GeodeSyncApp(tk.Tk):
         tools_card.pack(fill="both", expand=True, pady=(0, 8))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
-        tools_head.pack(fill="x", pady=(0, 6))
+        tools_head.pack(fill="x", pady=(0, 9))
+        tk.Label(tools_head, text="TOOLBOX", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="20 tools, grouped by what you want to do", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
 
-        tk.Label(tools_head, text="COMPANION TOOLS & POWER MODS (20 TOOLS)", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
-
+        # One small, conventional Tk grid is reused when switching categories.
+        # Avoid stacked/raised widget pages: some Linux Tk 8.6 builds segfault
+        # while destroying those during startup under a virtual display.
+        tool_tabs = tk.Frame(tools_card, bg=UI["panel"])
+        tool_tabs.pack(fill="x", pady=(0, 8))
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
         tool_grid.pack(fill="both", expand=True)
         for col in range(4):
-            tool_grid.columnconfigure(col, weight=1)
-        for row in range(5):
+            tool_grid.columnconfigure(col, weight=1, uniform="tool-column")
+        for row in range(2):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
-        def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
-            button = tk.Button(
-                tool_grid, text=label, command=command,
-                font=("Segoe UI", 8, "bold" if bold else "normal"),
-                bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
-                activeforeground=UI["text"], relief="flat", padx=8, pady=6,
-                cursor="hand2"
-            )
-            button.grid(row=row, column=column, sticky="nsew", padx=2, pady=2)
-            return button
+        tool_categories = {
+            "Mods & play": [
+                ("🧩 Mod Manager", self.open_mod_manager, UI["lime"], True),
+                ("🔄 Update Mods", self.open_mod_updater_dialog, UI["lime"], True),
+                ("📦 Essential Mods", self.install_essential_mods, UI["amber"], True),
+                ("🎵 NONG Songs", self.open_nong_manager, UI["lime"], False),
+                ("🎨 Texture Packs", self.open_texture_pack_hub, UI["lime"], False),
+                ("⚡ FPS Unlocker", self.open_fps_unlocker, UI["lime"], False),
+                ("📈 Demon Tracker", self.open_demon_tracker, UI["lilac"], False),
+                ("🎮 Game Profiles", self.open_game_profiles, UI["lilac"], False),
+            ],
+            "Repair & saves": [
+                ("💾 Backup Saves", self.backup_saves, UI["lime"], True),
+                ("🩺 Save Doctor", self.run_save_doctor, UI["lilac"], True),
+                ("🩹 Crash Doctor", self.run_crash_doctor, UI["lilac"], True),
+                ("🧹 Cache Cleaner", self.open_cache_cleaner, UI["muted"], False),
+                ("⚠️ Restore Steam GD", self.upgrade_clicked, UI["amber"], False),
+                ("📁 Choose Game Folder", self.browse_gd_path, UI["muted"], False),
+            ],
+            "Settings & updates": [
+                ("Auto-Backup: ON", self.toggle_auto_backup, UI["lime"], True, "auto_backup_btn"),
+                ("🎮 Discord RPC: ON", self.toggle_rpc, UI["lilac"], False, "rpc_btn"),
+                ("🔇 GD Sounds: OFF", self.toggle_sounds, UI["muted"], False, "sounds_btn"),
+                ("🌙 Close to System Tray: ON", self.toggle_bg_mode, UI["lime"], False, "bg_mode_btn"),
+                ("🔄 Check for Updates", self.manual_check_updates, UI["lime"], True),
+                ("📌 Desktop Shortcut", self.create_desktop_shortcut, UI["muted"], False),
+            ],
+        }
+        tool_tab_buttons = {}
 
-        def _fit_tool_labels(event=None):
-            available = event.width if event is not None else tool_grid.winfo_width()
-            if available <= 1:
-                return
-            wrap_width = max(92, (available - 28) // 4)
+        def select_tool_category(category):
             for child in tool_grid.winfo_children():
-                if isinstance(child, tk.Button):
-                    child.configure(wraplength=wrap_width)
+                child.destroy()
+            for col in range(4):
+                tool_grid.columnconfigure(col, weight=1, uniform="tool-column")
+            for row in range(2):
+                tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
+            for tab_name, tab_button in tool_tab_buttons.items():
+                selected = tab_name == category
+                tab_button.configure(
+                    bg=UI["lime_dark"] if selected else UI["panel_alt"],
+                    fg=UI["lime"] if selected else UI["muted"],
+                )
+            entries = tool_categories[category]
+            for index, entry in enumerate(entries):
+                label, command, color, bold, *attribute = entry
+                if attribute:
+                    if attribute[0] == "auto_backup_btn":
+                        label = f"Auto-Backup: {'ON' if self.auto_backup_enabled else 'OFF'}"
+                        color = UI["lime"] if self.auto_backup_enabled else UI["muted"]
+                    elif attribute[0] == "rpc_btn":
+                        label = f"🎮 Discord RPC: {'ON' if self.discord_rpc_enabled else 'OFF'}"
+                        color = UI["lilac"] if self.discord_rpc_enabled else UI["muted"]
+                    elif attribute[0] == "sounds_btn":
+                        label = f"{'🔊' if self.sounds_enabled else '🔇'} GD Sounds: {'ON' if self.sounds_enabled else 'OFF'}"
+                        color = UI["lime"] if self.sounds_enabled else UI["muted"]
+                    elif attribute[0] == "bg_mode_btn":
+                        label = f"🌙 Close to System Tray: {'ON' if self.run_in_bg_enabled else 'OFF'}"
+                        color = UI["lime"] if self.run_in_bg_enabled else UI["muted"]
+                button = tk.Button(
+                    tool_grid, text=label, command=command,
+                    font=("Segoe UI", 9, "bold" if bold else "normal"),
+                    bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
+                    activeforeground=UI["text"], relief="flat", padx=9, pady=9,
+                    cursor="hand2", wraplength=170,
+                )
+                button.grid(row=index // 4, column=index % 4, sticky="nsew", padx=3, pady=3)
+                if attribute:
+                    setattr(self, attribute[0], button)
 
-        tool_grid.bind("<Configure>", _fit_tool_labels)
-
-        # Row 0: Essential Mods & Game Controls
-        add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
-        add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
-        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=2)
-        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=3)
-
-        # Row 1: Progression, Tweaks & Content
-        add_tool("📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=1, column=0, bold=True)
-        add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=1, column=1)
-        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=2)
-        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=3, bold=True)
-
-        # Row 2: Customization & System Doctors
-        add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=2, column=0)
-        add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=2, column=1)
-        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=2)
-        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=3)
-
-        # Row 3: Profiles, Toggles & Settings
-        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
-        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
-        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=2)
-        sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
-        sounds_color = UI["lime"] if self.sounds_enabled else UI["muted"]
-        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
-
-        # Row 4: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
-        add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
-        add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
-        add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
-
-        if not self.auto_backup_enabled:
-            self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
-        if not self.sounds_enabled:
-            self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
-        if not self.discord_rpc_enabled:
-            self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
-        if not self.run_in_bg_enabled:
-            self.bg_mode_btn.config(text="🌙 Close to System Tray: OFF", fg=UI["muted"])
+        for category in tool_categories:
+            button = tk.Button(
+                tool_tabs, text=category, command=lambda name=category: select_tool_category(name),
+                font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"],
+                activebackground=UI["border"], activeforeground=UI["text"],
+                relief="flat", bd=0, padx=12, pady=7, cursor="hand2",
+            )
+            button.pack(side="left", padx=(0, 6))
+            tool_tab_buttons[category] = button
+        select_tool_category("Mods & play")
 
         # Backward compatibility references
         self.player_card = self.guide_card

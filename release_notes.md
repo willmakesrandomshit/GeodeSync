@@ -1,9 +1,11 @@
-# GeodeSync v2.3.15
+# GeodeSync v2.3.16
 
-## Stability hotfix
+## Dashboard navigation refresh
 
-- Restores the compact tool layout that passed Linux CI after the newer tab redesign caused a Tk startup crash on Linux.
-- Keeps the verified Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14.
+- Replaces the crowded 20-button wall with three clear tool groups: Mods & play, Repair & saves, and Settings & updates.
+- Keeps all 20 tools and their existing actions, with setting states shown accurately when the settings group opens.
+- Uses a single reused Tk grid for the category switcher to avoid the stacked-page layout that crashed on some Linux Tk builds.
+- Includes the verified Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14 and v2.3.15.
 - Windows and Linux downloads will be published only after their CI builds pass. macOS downloads remain withheld until a Developer ID signed and notarized build is available.
 
 # GeodeSync v2.3.14
