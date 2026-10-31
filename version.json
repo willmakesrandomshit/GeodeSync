@@ -5,5 +5,5 @@
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.15 improves startup reliability on Linux and organizes the tools screen into clearer task groups. Windows and Linux packages are verified release assets; macOS downloads remain withheld until an Apple-signed, notarized build is ready."
+  "announcement": "GeodeSync v2.3.15 restores the Linux-tested tool layout and includes the verified Geode detection and recovery fixes from v2.3.14. macOS downloads remain withheld until an Apple-signed, notarized build is ready."
 }

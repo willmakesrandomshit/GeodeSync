@@ -1,12 +1,10 @@
 # GeodeSync v2.3.15
 
-## Reliability and UI hotfix
+## Stability hotfix
 
-- Replaced the custom themed task-tab widget with stable native Tk controls to address a Linux/Xvfb startup crash during interface initialization.
-- Grouped tools by task and refreshed spacing, colors, and labels for a clearer main screen.
-- Windows and Linux packages are built and verified by release CI. macOS packages remain unavailable until a Developer ID signed and notarized build can be produced.
-
-Previous release notes:
+- Restores the compact tool layout that passed Linux CI after the newer tab redesign caused a Tk startup crash on Linux.
+- Keeps the verified Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14.
+- Windows and Linux downloads will be published only after their CI builds pass. macOS downloads remain withheld until a Developer ID signed and notarized build is available.
 
 # GeodeSync v2.3.14
 
