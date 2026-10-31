@@ -324,23 +324,23 @@ class DiscordRPC:
 
 
 UI = {
-    "background": "#121013",
-    "header": "#19161b",
-    "panel": "#201c22",
-    "panel_alt": "#29242c",
-    "inset": "#171419",
-    "border": "#3c3440",
-    "text": "#f6f0e8",
-    "muted": "#b8adb9",
-    "quiet": "#897e8b",
-    "lime": "#c2e66b",
-    "lime_hover": "#a8ce50",
-    "lime_dark": "#27351b",
-    "lilac": "#c497e8",
-    "lilac_dark": "#34233f",
-    "amber": "#e4b968",
-    "red": "#f08087",
-    "red_dark": "#46242a",
+    "background": "#0b1014",
+    "header": "#10171d",
+    "panel": "#141e25",
+    "panel_alt": "#1c2931",
+    "inset": "#0d151a",
+    "border": "#2a3b43",
+    "text": "#f3f8f7",
+    "muted": "#b2c3c5",
+    "quiet": "#81979a",
+    "lime": "#43e0d0",
+    "lime_hover": "#28c7b8",
+    "lime_dark": "#123a3b",
+    "lilac": "#bd9cff",
+    "lilac_dark": "#302744",
+    "amber": "#f1c477",
+    "red": "#ff8794",
+    "red_dark": "#47252f",
 }
 
 APP_ID = "322170"
@@ -3285,8 +3285,8 @@ class GeodeSyncApp(tk.Tk):
         self.title(f"GeodeSync v{APP_VERSION} • Geometry Dash companion")
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        w = min(840, max(740, screen_w - 40))
-        h = min(740, max(620, screen_h - 80))
+        w = max(760, min(1000, screen_w - 36))
+        h = max(600, min(780, screen_h - 80))
         self.geometry(f"{w}x{h}")
         self.minsize(760, 600)
         self.configure(bg=UI["background"])
@@ -3721,16 +3721,16 @@ class GeodeSyncApp(tk.Tk):
         self.update_action_btn.pack(side="right")
 
         # Header banner
-        self.header_frame = tk.Frame(self, bg=UI["header"], padx=24, pady=14)
+        self.header_frame = tk.Frame(self, bg=UI["header"], padx=26, pady=17, highlightbackground=UI["border"], highlightthickness=0)
         self.header_frame.pack(fill="x")
 
         title_box = tk.Frame(self.header_frame, bg=UI["header"])
         title_box.pack(side="left")
 
-        title = tk.Label(title_box, text=f"⚡  GeodeSync  ·  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg=UI["text"], bg=UI["header"])
+        title = tk.Label(title_box, text=f"◈  GeodeSync  ·  v{APP_VERSION}", font=("Segoe UI", 19, "bold"), fg=UI["text"], bg=UI["header"])
         title.pack(anchor="w")
 
-        subtitle = tk.Label(title_box, text="High-Performance Companion & Mod Manager for Geometry Dash", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"])
+        subtitle = tk.Label(title_box, text="A safer, clearer home for Geometry Dash and Geode", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"])
         subtitle.pack(anchor="w")
 
         badge_box = tk.Frame(self.header_frame, bg=UI["header"])
@@ -3740,12 +3740,12 @@ class GeodeSyncApp(tk.Tk):
         help_btn.pack(side="right", padx=(4, 0))
 
         # Main Body
-        body = tk.Frame(self, bg=UI["background"], padx=20, pady=12)
+        body = tk.Frame(self, bg=UI["background"], padx=22, pady=16)
         body.pack(fill="both", expand=True)
 
         # 1. CONSOLIDATED HERO DASHBOARD (Player Profile + Game Setup + Primary Action)
-        self.guide_card = tk.Frame(body, bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
-        self.guide_card.pack(fill="x", pady=(0, 10))
+        self.guide_card = tk.Frame(body, bg=UI["panel"], padx=20, pady=17, highlightbackground=UI["border"], highlightthickness=1)
+        self.guide_card.pack(fill="x", pady=(0, 14))
 
         hero_top = tk.Frame(self.guide_card, bg=UI["panel"])
         hero_top.pack(fill="x", pady=(0, 10))
@@ -3758,7 +3758,7 @@ class GeodeSyncApp(tk.Tk):
         p_name_row.pack(anchor="w")
 
         tk.Label(p_name_row, text="PLAYER", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
-        self.player_name_lbl = tk.Label(p_name_row, text="Reading save...", font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["panel"])
+        self.player_name_lbl = tk.Label(p_name_row, text="Reading save...", font=("Segoe UI", 11, "bold"), fg=UI["lime"], bg=UI["panel"])
         self.player_name_lbl.pack(side="left", padx=(6, 0))
 
         self.refresh_stats_btn = tk.Label(p_name_row, text="🔄", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], cursor="hand2")
@@ -3769,10 +3769,10 @@ class GeodeSyncApp(tk.Tk):
         self.stats_chips_frame.pack(anchor="w", pady=(3, 0))
 
         def _make_stat_chip(parent, icon, text_val, fg_color):
-            f = tk.Frame(parent, bg=UI["panel_alt"], padx=6, pady=2, highlightbackground=UI["border"], highlightthickness=1)
-            f.pack(side="left", padx=(0, 3))
-            tk.Label(f, text=icon, font=("Segoe UI", 8), fg=fg_color, bg=UI["panel_alt"]).pack(side="left", padx=(0, 2))
-            lbl = tk.Label(f, text=text_val, font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel_alt"])
+            f = tk.Frame(parent, bg=UI["panel_alt"], padx=8, pady=4, highlightbackground=UI["border"], highlightthickness=1)
+            f.pack(side="left", padx=(0, 5), pady=2)
+            tk.Label(f, text=icon, font=("Segoe UI", 9), fg=fg_color, bg=UI["panel_alt"]).pack(side="left", padx=(0, 3))
+            lbl = tk.Label(f, text=text_val, font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"])
             lbl.pack(side="left")
             return lbl
 
@@ -3811,15 +3811,15 @@ class GeodeSyncApp(tk.Tk):
         self.guide_badge = tk.Label(self.guide_card, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=2)
         self.guide_badge.pack(anchor="w", pady=(0, 2))
 
-        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["panel"])
-        self.guide_title.pack(anchor="w", pady=(0, 1))
+        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 16, "bold"), fg=UI["text"], bg=UI["panel"])
+        self.guide_title.pack(anchor="w", pady=(2, 3))
 
-        self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is ready.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=780, justify="left")
-        self.guide_desc.pack(anchor="w", pady=(0, 8))
+        self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is ready.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"], wraplength=920, justify="left")
+        self.guide_desc.pack(anchor="w", pady=(0, 11))
 
         # Real-time progress bar frame
         self.progress_frame = tk.Frame(self.guide_card, bg=UI["panel"])
-        self.progress_lbl = tk.Label(self.progress_frame, text="Working...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel"])
+        self.progress_lbl = tk.Label(self.progress_frame, text="Working...", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"])
         self.progress_lbl.pack(anchor="w", pady=(0, 2))
         style = ttk.Style()
         style.theme_use('default')
@@ -3835,80 +3835,83 @@ class GeodeSyncApp(tk.Tk):
             bg=UI["lime"],
             hover_bg=UI["lime_hover"],
             fg=UI["background"],
-            height=44,
-            font=("Segoe UI", 11, "bold")
+            height=50,
+            font=("Segoe UI", 12, "bold")
         )
         self.primary_btn.pack(fill="x")
 
-        # 2. QUICK COMPANION TOOLS (Clean 5x4 Grid • 20 Power Tools)
-        tools_card = tk.Frame(body, bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
-        tools_card.pack(fill="both", expand=True, pady=(0, 8))
+        # 2. TASK-BASED TOOLKIT
+        tools_card = tk.Frame(body, bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
+        tools_card.pack(fill="both", expand=True, pady=(0, 10))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
-        tools_head.pack(fill="x", pady=(0, 6))
+        tools_head.pack(fill="x", pady=(0, 9))
+        tk.Label(tools_head, text="TOOLS", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="Choose a task to see the right tools", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(9, 0))
 
-        tk.Label(tools_head, text="COMPANION TOOLS & POWER MODS (20 TOOLS)", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
+        tool_style = ttk.Style()
+        tool_style.configure("Geode.TNotebook", background=UI["panel"], borderwidth=0)
+        tool_style.configure("Geode.TNotebook.Tab", background=UI["panel_alt"], foreground=UI["muted"], padding=(13, 8), font=("Segoe UI", 8, "bold"), borderwidth=0)
+        tool_style.map("Geode.TNotebook.Tab", background=[("selected", UI["lime_dark"]), ("active", UI["border"])], foreground=[("selected", UI["lime"]), ("active", UI["text"])])
+        tool_tabs = ttk.Notebook(tools_card, style="Geode.TNotebook")
+        tool_tabs.pack(fill="both", expand=True)
 
-        tool_grid = tk.Frame(tools_card, bg=UI["panel"])
-        tool_grid.pack(fill="both", expand=True)
-        for col in range(4):
-            tool_grid.columnconfigure(col, weight=1)
-        for row in range(5):
-            tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
+        def make_tool_page(title, description):
+            page = tk.Frame(tool_tabs, bg=UI["panel"], padx=8, pady=9)
+            tool_tabs.add(page, text=title)
+            tk.Label(page, text=description, font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"], anchor="w").pack(fill="x", pady=(0, 7))
+            grid = tk.Frame(page, bg=UI["panel"])
+            grid.pack(fill="both", expand=True)
+            for col in range(2):
+                grid.columnconfigure(col, weight=1, uniform=f"{title}-tool-col")
+            return grid
 
-        def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
+        mods_grid = make_tool_page("Mods & gameplay", "Manage Geode mods, songs, visuals and progression.")
+        repair_grid = make_tool_page("Repair & saves", "Back up, diagnose and restore your Geometry Dash setup.")
+        app_grid = make_tool_page("App & preferences", "Updates, background behavior and desktop settings.")
+
+        def add_tool(parent, label, command, *, color=UI["muted"], row, column, bold=False):
             button = tk.Button(
-                tool_grid, text=label, command=command,
-                font=("Segoe UI", 8, "bold" if bold else "normal"),
+                parent, text=label, command=command,
+                font=("Segoe UI", 9, "bold" if bold else "normal"),
                 bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
-                activeforeground=UI["text"], relief="flat", padx=8, pady=6,
+                activeforeground=UI["text"], relief="flat", padx=10, pady=8,
+                bd=0, highlightthickness=1, highlightbackground=UI["panel_alt"],
                 cursor="hand2"
             )
-            button.grid(row=row, column=column, sticky="nsew", padx=2, pady=2)
+            button.grid(row=row, column=column, sticky="nsew", padx=4, pady=4)
+            button.bind("<Enter>", lambda _event, item=button: item.configure(bg=UI["border"], highlightbackground=UI["lime"]))
+            button.bind("<Leave>", lambda _event, item=button: item.configure(bg=UI["panel_alt"], highlightbackground=UI["panel_alt"]))
             return button
 
-        def _fit_tool_labels(event=None):
-            available = event.width if event is not None else tool_grid.winfo_width()
-            if available <= 1:
-                return
-            wrap_width = max(92, (available - 28) // 4)
-            for child in tool_grid.winfo_children():
-                if isinstance(child, tk.Button):
-                    child.configure(wraplength=wrap_width)
+        for grid in (mods_grid, repair_grid, app_grid):
+            for row in range(4):
+                grid.rowconfigure(row, weight=1, uniform="tool-row")
 
-        tool_grid.bind("<Configure>", _fit_tool_labels)
+        add_tool(mods_grid, "🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
+        add_tool(mods_grid, "🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
+        add_tool(mods_grid, "📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=0, bold=True)
+        add_tool(mods_grid, "🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=1)
+        add_tool(mods_grid, "⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=2, column=0)
+        add_tool(mods_grid, "🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=2, column=1)
+        add_tool(mods_grid, "📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=3, column=0, bold=True)
+        add_tool(mods_grid, "🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=1)
 
-        # Row 0: Essential Mods & Game Controls
-        add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
-        add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
-        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=2)
-        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=3)
+        add_tool(repair_grid, "💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=0)
+        add_tool(repair_grid, "🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=1)
+        add_tool(repair_grid, "🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=1, column=0)
+        add_tool(repair_grid, "🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=1, column=1)
+        add_tool(repair_grid, "⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=2, column=0)
+        add_tool(repair_grid, "⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=2, column=1)
 
-        # Row 1: Progression, Tweaks & Content
-        add_tool("📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=1, column=0, bold=True)
-        add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=1, column=1)
-        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=2)
-        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=3, bold=True)
-
-        # Row 2: Customization & System Doctors
-        add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=2, column=0)
-        add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=2, column=1)
-        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=2)
-        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=3)
-
-        # Row 3: Profiles, Toggles & Settings
-        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
-        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
-        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=2)
+        self.auto_backup_btn = add_tool(app_grid, "Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=0, column=0, bold=True)
+        self.rpc_btn = add_tool(app_grid, "🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=0, column=1)
         sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
         sounds_color = UI["lime"] if self.sounds_enabled else UI["muted"]
-        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
-
-        # Row 4: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
-        add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
-        add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
-        add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
+        self.sounds_btn = add_tool(app_grid, sounds_text, self.toggle_sounds, color=sounds_color, row=1, column=0)
+        self.bg_mode_btn = add_tool(app_grid, "🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=1, column=1)
+        add_tool(app_grid, "🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=2, column=0)
+        add_tool(app_grid, "📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=2, column=1)
 
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
