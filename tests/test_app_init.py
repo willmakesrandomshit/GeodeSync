@@ -30,30 +30,23 @@ class TestAppInit(unittest.TestCase):
         finally:
             app.destroy()
 
-    def test_tool_categories_switch_without_losing_actions(self):
+    def test_tool_sections_keep_all_actions_visible(self):
         app = GeodeSyncApp()
         try:
-            def button_named(name):
-                return next(
-                    widget for widget in self._all_widgets(app)
-                    if isinstance(widget, tk.Button) and widget.cget("text") == name
-                )
+            widgets = list(self._all_widgets(app))
+            labels = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Label)}
+            buttons = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Button)}
 
-            button_named("Mods & play").invoke()
-            visible_text = {widget.cget("text") for widget in self._all_widgets(app) if isinstance(widget, tk.Button)}
-            self.assertIn("🧩 Mod Manager", visible_text)
-            self.assertNotIn("💾 Backup Saves", visible_text)
-
-            button_named("Repair & saves").invoke()
-            visible_text = {widget.cget("text") for widget in self._all_widgets(app) if isinstance(widget, tk.Button)}
-            self.assertIn("💾 Backup Saves", visible_text)
-            self.assertIn("🩹 Crash Doctor", visible_text)
-            self.assertNotIn("🧩 Mod Manager", visible_text)
-
-            button_named("Settings & updates").invoke()
-            visible_text = {widget.cget("text") for widget in self._all_widgets(app) if isinstance(widget, tk.Button)}
-            self.assertIn("Auto-Backup: ON", visible_text)
-            self.assertIn("🔄 Check for Updates", visible_text)
+            self.assertTrue({"MODS & PLAY", "REPAIR & SAVES", "SETTINGS & UPDATES"}.issubset(labels))
+            self.assertTrue({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor", "Auto-Backup: ON"}.issubset(buttons))
+            self.assertEqual(sum(1 for widget in widgets if isinstance(widget, tk.Button) and widget.cget("text") in {
+                "🧩 Mod Manager", "🔄 Update Mods", "📦 Essential Mods", "🎵 NONG Songs",
+                "🎨 Texture Packs", "⚡ FPS Unlocker", "📈 Demon Tracker", "🎮 Game Profiles",
+                "💾 Backup Saves", "🩺 Save Doctor", "🩹 Crash Doctor", "🧹 Cache Cleaner",
+                "⚠️ Restore Steam GD", "📁 Choose Game Folder", "Auto-Backup: ON",
+                "🎮 Discord RPC: ON", "🔇 GD Sounds: OFF", "🌙 Close to System Tray: ON",
+                "🔄 Check for Updates", "📌 Desktop Shortcut",
+            }), 20)
         finally:
             app.destroy()
 

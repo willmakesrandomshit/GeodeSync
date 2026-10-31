@@ -3846,23 +3846,11 @@ class GeodeSyncApp(tk.Tk):
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
         tools_head.pack(fill="x", pady=(0, 9))
-        tk.Label(tools_head, text="TOOLBOX", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
-        tk.Label(tools_head, text="20 tools, grouped by what you want to do", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
+        tk.Label(tools_head, text="TOOLS", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="Everything, grouped by task", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
 
-        # One small, conventional Tk grid is reused when switching categories.
-        # Avoid stacked/raised widget pages: some Linux Tk 8.6 builds segfault
-        # while destroying those during startup under a virtual display.
-        tool_tabs = tk.Frame(tools_card, bg=UI["panel"])
-        tool_tabs.pack(fill="x", pady=(0, 8))
-        tool_grid = tk.Frame(tools_card, bg=UI["panel"])
-        tool_grid.pack(fill="both", expand=True)
-        for col in range(4):
-            tool_grid.columnconfigure(col, weight=1, uniform="tool-column")
-        for row in range(2):
-            tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
-
-        tool_categories = {
-            "Mods & play": [
+        tool_categories = [
+            ("MODS & PLAY", [
                 ("🧩 Mod Manager", self.open_mod_manager, UI["lime"], True),
                 ("🔄 Update Mods", self.open_mod_updater_dialog, UI["lime"], True),
                 ("📦 Essential Mods", self.install_essential_mods, UI["amber"], True),
@@ -3871,76 +3859,66 @@ class GeodeSyncApp(tk.Tk):
                 ("⚡ FPS Unlocker", self.open_fps_unlocker, UI["lime"], False),
                 ("📈 Demon Tracker", self.open_demon_tracker, UI["lilac"], False),
                 ("🎮 Game Profiles", self.open_game_profiles, UI["lilac"], False),
-            ],
-            "Repair & saves": [
+            ]),
+            ("REPAIR & SAVES", [
                 ("💾 Backup Saves", self.backup_saves, UI["lime"], True),
                 ("🩺 Save Doctor", self.run_save_doctor, UI["lilac"], True),
                 ("🩹 Crash Doctor", self.run_crash_doctor, UI["lilac"], True),
                 ("🧹 Cache Cleaner", self.open_cache_cleaner, UI["muted"], False),
                 ("⚠️ Restore Steam GD", self.upgrade_clicked, UI["amber"], False),
                 ("📁 Choose Game Folder", self.browse_gd_path, UI["muted"], False),
-            ],
-            "Settings & updates": [
+            ]),
+            ("SETTINGS & UPDATES", [
                 ("Auto-Backup: ON", self.toggle_auto_backup, UI["lime"], True, "auto_backup_btn"),
                 ("🎮 Discord RPC: ON", self.toggle_rpc, UI["lilac"], False, "rpc_btn"),
                 ("🔇 GD Sounds: OFF", self.toggle_sounds, UI["muted"], False, "sounds_btn"),
                 ("🌙 Close to System Tray: ON", self.toggle_bg_mode, UI["lime"], False, "bg_mode_btn"),
                 ("🔄 Check for Updates", self.manual_check_updates, UI["lime"], True),
                 ("📌 Desktop Shortcut", self.create_desktop_shortcut, UI["muted"], False),
-            ],
-        }
-        tool_tab_buttons = {}
+            ]),
+        ]
 
-        def select_tool_category(category):
-            for child in tool_grid.winfo_children():
-                child.destroy()
+        def add_tool_section(title, entries):
+            section = tk.Frame(tools_card, bg=UI["panel"])
+            section.pack(fill="x", expand=True, pady=(3, 4))
+            heading = tk.Frame(section, bg=UI["panel"])
+            heading.pack(fill="x", pady=(0, 2))
+            tk.Label(heading, text=title, font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
+            grid = tk.Frame(section, bg=UI["panel"])
+            grid.pack(fill="x", expand=True)
             for col in range(4):
-                tool_grid.columnconfigure(col, weight=1, uniform="tool-column")
-            for row in range(2):
-                tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
-            for tab_name, tab_button in tool_tab_buttons.items():
-                selected = tab_name == category
-                tab_button.configure(
-                    bg=UI["lime_dark"] if selected else UI["panel_alt"],
-                    fg=UI["lime"] if selected else UI["muted"],
-                )
-            entries = tool_categories[category]
+                grid.columnconfigure(col, weight=1, uniform=f"{title}-column")
+
             for index, entry in enumerate(entries):
                 label, command, color, bold, *attribute = entry
                 if attribute:
-                    if attribute[0] == "auto_backup_btn":
-                        label = f"Auto-Backup: {'ON' if self.auto_backup_enabled else 'OFF'}"
-                        color = UI["lime"] if self.auto_backup_enabled else UI["muted"]
-                    elif attribute[0] == "rpc_btn":
-                        label = f"🎮 Discord RPC: {'ON' if self.discord_rpc_enabled else 'OFF'}"
-                        color = UI["lilac"] if self.discord_rpc_enabled else UI["muted"]
-                    elif attribute[0] == "sounds_btn":
-                        label = f"{'🔊' if self.sounds_enabled else '🔇'} GD Sounds: {'ON' if self.sounds_enabled else 'OFF'}"
-                        color = UI["lime"] if self.sounds_enabled else UI["muted"]
-                    elif attribute[0] == "bg_mode_btn":
-                        label = f"🌙 Close to System Tray: {'ON' if self.run_in_bg_enabled else 'OFF'}"
-                        color = UI["lime"] if self.run_in_bg_enabled else UI["muted"]
+                    key = attribute[0]
+                    state = {
+                        "auto_backup_btn": (self.auto_backup_enabled, "Auto-Backup", UI["lime"]),
+                        "rpc_btn": (self.discord_rpc_enabled, "🎮 Discord RPC", UI["lilac"]),
+                        "sounds_btn": (self.sounds_enabled, "GD Sounds", UI["lime"]),
+                        "bg_mode_btn": (self.run_in_bg_enabled, "🌙 Close to System Tray", UI["lime"]),
+                    }.get(key)
+                    if state:
+                        enabled, name, active_color = state
+                        if key == "sounds_btn":
+                            label = f"{'🔊' if enabled else '🔇'} {name}: {'ON' if enabled else 'OFF'}"
+                        else:
+                            label = f"{name}: {'ON' if enabled else 'OFF'}"
+                        color = active_color if enabled else UI["muted"]
                 button = tk.Button(
-                    tool_grid, text=label, command=command,
-                    font=("Segoe UI", 9, "bold" if bold else "normal"),
+                    grid, text=label, command=command,
+                    font=("Segoe UI", 8, "bold" if bold else "normal"),
                     bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
-                    activeforeground=UI["text"], relief="flat", padx=9, pady=9,
+                    activeforeground=UI["text"], relief="flat", padx=7, pady=4,
                     cursor="hand2", wraplength=170,
                 )
-                button.grid(row=index // 4, column=index % 4, sticky="nsew", padx=3, pady=3)
+                button.grid(row=index // 4, column=index % 4, sticky="nsew", padx=2, pady=2)
                 if attribute:
                     setattr(self, attribute[0], button)
 
-        for category in tool_categories:
-            button = tk.Button(
-                tool_tabs, text=category, command=lambda name=category: select_tool_category(name),
-                font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"],
-                activebackground=UI["border"], activeforeground=UI["text"],
-                relief="flat", bd=0, padx=12, pady=7, cursor="hand2",
-            )
-            button.pack(side="left", padx=(0, 6))
-            tool_tab_buttons[category] = button
-        select_tool_category("Mods & play")
+        for section_title, entries in tool_categories:
+            add_tool_section(section_title, entries)
 
         # Backward compatibility references
         self.player_card = self.guide_card
