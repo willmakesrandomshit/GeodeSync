@@ -15,17 +15,13 @@ class TestAppInit(unittest.TestCase):
 
     def test_app_init_and_refresh_status(self):
         # Verify that GeodeSyncApp initializes, sets up widgets, and runs refresh_status without error
-        print("GUI init: constructing app", flush=True)
         app = GeodeSyncApp()
         try:
-            print("GUI init: app constructed", flush=True)
             self.assertIsNotNone(app.mgr)
             self.assertIsNotNone(app.geode_badge)
             self.assertIsNotNone(app.player_card)
             self.assertIsNotNone(app.launch_btn)
-            print("GUI init: refreshing status", flush=True)
             app.refresh_status()
-            print("GUI init: status refreshed", flush=True)
             stats = app.mgr.get_player_stats()
             # If user has GD saves, verify dict structure
             if stats:
@@ -35,9 +31,7 @@ class TestAppInit(unittest.TestCase):
             mods = app.mgr.get_installed_mods()
             self.assertIsInstance(mods, list)
         finally:
-            print("GUI init: destroying app", flush=True)
             app.destroy()
-            print("GUI init: app destroyed", flush=True)
 
     def test_tool_sections_keep_all_actions_visible(self):
         app = GeodeSyncApp()
