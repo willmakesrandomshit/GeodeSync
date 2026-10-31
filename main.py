@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.14"
+APP_VERSION = "2.3.15"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3849,16 +3849,39 @@ class GeodeSyncApp(tk.Tk):
         tk.Label(tools_head, text="TOOLS", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
         tk.Label(tools_head, text="Choose a task to see the right tools", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(9, 0))
 
-        tool_style = ttk.Style()
-        tool_style.configure("Geode.TNotebook", background=UI["panel"], borderwidth=0)
-        tool_style.configure("Geode.TNotebook.Tab", background=UI["panel_alt"], foreground=UI["muted"], padding=(13, 8), font=("Segoe UI", 8, "bold"), borderwidth=0)
-        tool_style.map("Geode.TNotebook.Tab", background=[("selected", UI["lime_dark"]), ("active", UI["border"])], foreground=[("selected", UI["lime"]), ("active", UI["text"])])
-        tool_tabs = ttk.Notebook(tools_card, style="Geode.TNotebook")
-        tool_tabs.pack(fill="both", expand=True)
+        # Use plain Tk frames for the task switcher. A custom ttk.Notebook style
+        # crashes Tk 8.6 on some Linux/Xvfb builds during app initialization.
+        tool_tab_bar = tk.Frame(tools_card, bg=UI["panel"])
+        tool_tab_bar.pack(fill="x")
+        tool_page_stack = tk.Frame(tools_card, bg=UI["panel"])
+        tool_page_stack.pack(fill="both", expand=True)
+        tool_pages = {}
+        tool_tab_buttons = {}
+
+        def select_tool_page(title):
+            page = tool_pages.get(title)
+            if page is None:
+                return
+            page.tkraise()
+            for tab_title, button in tool_tab_buttons.items():
+                selected = tab_title == title
+                button.configure(
+                    bg=UI["lime_dark"] if selected else UI["panel_alt"],
+                    fg=UI["lime"] if selected else UI["muted"],
+                )
 
         def make_tool_page(title, description):
-            page = tk.Frame(tool_tabs, bg=UI["panel"], padx=8, pady=9)
-            tool_tabs.add(page, text=title)
+            page = tk.Frame(tool_page_stack, bg=UI["panel"], padx=8, pady=9)
+            page.grid(row=0, column=0, sticky="nsew")
+            tool_pages[title] = page
+            tab_button = tk.Button(
+                tool_tab_bar, text=title, command=lambda name=title: select_tool_page(name),
+                font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"],
+                activebackground=UI["border"], activeforeground=UI["text"],
+                relief="flat", bd=0, padx=12, pady=7, cursor="hand2",
+            )
+            tab_button.pack(side="left", padx=(0, 5))
+            tool_tab_buttons[title] = tab_button
             tk.Label(page, text=description, font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"], anchor="w").pack(fill="x", pady=(0, 7))
             grid = tk.Frame(page, bg=UI["panel"])
             grid.pack(fill="both", expand=True)
@@ -3869,6 +3892,9 @@ class GeodeSyncApp(tk.Tk):
         mods_grid = make_tool_page("Mods & gameplay", "Manage Geode mods, songs, visuals and progression.")
         repair_grid = make_tool_page("Repair & saves", "Back up, diagnose and restore your Geometry Dash setup.")
         app_grid = make_tool_page("App & preferences", "Updates, background behavior and desktop settings.")
+        tool_page_stack.grid_rowconfigure(0, weight=1)
+        tool_page_stack.grid_columnconfigure(0, weight=1)
+        select_tool_page("Mods & gameplay")
 
         def add_tool(parent, label, command, *, color=UI["muted"], row, column, bold=False):
             button = tk.Button(

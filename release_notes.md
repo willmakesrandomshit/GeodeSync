@@ -1,3 +1,13 @@
+# GeodeSync v2.3.15
+
+## Reliability and UI hotfix
+
+- Replaced the custom themed task-tab widget with stable native Tk controls to address a Linux/Xvfb startup crash during interface initialization.
+- Grouped tools by task and refreshed spacing, colors, and labels for a clearer main screen.
+- Windows and Linux packages are built and verified by release CI. macOS packages remain unavailable until a Developer ID signed and notarized build can be produced.
+
+Previous release notes:
+
 # GeodeSync v2.3.14
 
 ## Geode detection hotfix
@@ -11,8 +21,6 @@
 
 - A retry after Steam leaves malformed cached game metadata now clears only the validated Geometry Dash depot cache, never the installed game or saves.
 - Steam must be fully quit before GeodeSync resets that cache; the app explains this and leaves the cache untouched if the path cannot be verified.
-
-## Linux / Steam Deck compatibility
 
 ## Linux / Steam Deck compatibility
 
