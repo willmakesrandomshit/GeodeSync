@@ -1,9 +1,6 @@
 import unittest
 import tkinter as tk
-import faulthandler
 from main import GeodeSyncApp
-
-faulthandler.enable(all_threads=True)
 
 
 class TestAppInit(unittest.TestCase):
@@ -33,23 +30,24 @@ class TestAppInit(unittest.TestCase):
         finally:
             app.destroy()
 
-    def test_tool_sections_keep_all_actions_visible(self):
+    def test_tool_grid_groups_all_actions_by_task(self):
         app = GeodeSyncApp()
         try:
             widgets = list(self._all_widgets(app))
             labels = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Label)}
             buttons = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Button)}
 
-            self.assertTrue({"MODS & PLAY", "REPAIR & SAVES", "SETTINGS & UPDATES"}.issubset(labels))
+            self.assertIn("Mods & play  ·  Repair & saves  ·  Settings & updates", labels)
             self.assertTrue({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor", "Auto-Backup: ON"}.issubset(buttons))
-            self.assertEqual(sum(1 for widget in widgets if isinstance(widget, tk.Button) and widget.cget("text") in {
+            tool_names = {
                 "🧩 Mod Manager", "🔄 Update Mods", "📦 Essential Mods", "🎵 NONG Songs",
-                "🎨 Texture Packs", "⚡ FPS Unlocker", "📈 Demon Tracker", "🎮 Game Profiles",
+                "📈 Demon Tracker", "⚡ FPS Unlocker", "🎨 Texture Packs", "🎮 Game Profiles",
                 "💾 Backup Saves", "🩺 Save Doctor", "🩹 Crash Doctor", "🧹 Cache Cleaner",
-                "⚠️ Restore Steam GD", "📁 Choose Game Folder", "Auto-Backup: ON",
-                "🎮 Discord RPC: ON", "🔇 GD Sounds: OFF", "🌙 Close to System Tray: ON",
-                "🔄 Check for Updates", "📌 Desktop Shortcut",
-            }), 20)
+                "Auto-Backup: ON", "🎮 Discord RPC: ON", "🔇 GD Sounds: OFF",
+                "🌙 Close to System Tray: ON", "🔄 Check for Updates", "⌨️ Keybind Doctor",
+                "⚠️ Restore Steam GD", "📌 Desktop Shortcut",
+            }
+            self.assertEqual(len(buttons.intersection(tool_names)), 20)
         finally:
             app.destroy()
 
