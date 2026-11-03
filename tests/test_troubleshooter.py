@@ -85,6 +85,21 @@ class TroubleshooterTests(unittest.TestCase):
         self.assertIn("expected Steam layout", steps)
         self.assertIn("won’t identify the crash", steps)
 
+    def test_winerror_32_locked_file_explanation(self):
+        title, steps = explain_error_text("[WinError 32] The process cannot access the file because it is being used by another process")
+        self.assertIn("locked by a background process", title)
+        self.assertIn("Auto-Fix", steps)
+
+    def test_outdated_2207_subupdate_explanation(self):
+        title, steps = explain_error_text("Detected Geometry Dash 2.2074 outdated")
+        self.assertIn("2.2074", title)
+        self.assertIn("2.2081", steps)
+
+    def test_incompatible_mod_explanation(self):
+        title, steps = explain_error_text("Crash caused by prevter.imageplus v1.1.1")
+        self.assertIn("Incompatible mod", title)
+        self.assertIn("Auto-Fix", steps)
+
     def test_steam_game_folder_detection_accepts_custom_windows_library_path(self):
         self.assertTrue(is_steam_library_game_path(
             r"C:\Program Files (x86)\Steam\steamapps\common\Geometry Dash" + "\\"

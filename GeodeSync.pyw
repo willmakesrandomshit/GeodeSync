@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.18"
+APP_VERSION = "2.3.19"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1663,6 +1663,43 @@ def explain_error_text(error_text, platform_name=None):
             "GeodeSync did not start correctly",
             "Download the latest Windows package from the official GeodeSync Releases page. Extract the whole ZIP to a normal folder, keep `_internal` beside `GeodeSync.exe`, and run the EXE from that folder—not from the ZIP preview.\n\n"
             "If it still fails, export a support report and include the full message. Do not download replacement DLLs from third-party sites.",
+        )
+    if any(token in text for token in ("winerror 32", "winerror 33", "used by another process", "being used by another", "being used by")):
+        return (
+            "Game file locked by a background process",
+            "Geometry Dash or Steam is currently open and holding onto game files. "
+            "Click '⚡ Auto-Fix It For Me' below to terminate any hung processes, unlock the files, and retry automatically.\n\n"
+            "If you prefer manual steps: Open Task Manager, end GeometryDash.exe, restart Steam, and try again.",
+        )
+    if any(token in text for token in ("2.207", "2.2074", "outdated 2.2")):
+        return (
+            "Outdated Geometry Dash 2.2074 build",
+            "Your game is on an older 2.2 sub-update (2.2074) that causes crashes and mod incompatibility with modern Geode. "
+            "Click '⚡ Auto-Fix It For Me' to upgrade cleanly to the official Geode-compatible 2.2081 build.",
+        )
+    if any(token in text for token in ("steam download timed out", "steam download is incomplete", "malformed downloaded depot", "depot cache")):
+        return (
+            "Steam download cache corrupted or timed out",
+            "Steam left an incomplete download chunk in its cache folder. "
+            "Click '⚡ Auto-Fix It For Me' to safely clear the corrupt cache, reset the manifest lock, and restart a clean download.",
+        )
+    if any(token in text for token in ("prevter.imageplus", "entry point not found")):
+        return (
+            "Incompatible mod causing game launch crash",
+            "An incompatible mod (such as an outdated Image+ build) is crashing Geometry Dash on startup. "
+            "Click '⚡ Auto-Fix It For Me' to automatically install the patched, compatible version or safely disable it.",
+        )
+    if any(token in text for token in ("manifest locked", "appmanifest_322170")):
+        return (
+            "Steam manifest file is locked",
+            "The Steam update manifest is set to read-only to protect your mods from being overwritten. "
+            "Click '⚡ Auto-Fix It For Me' to unlock it safely so Steam can write files.",
+        )
+    if any(token in text for token in ("cannot find ccgamemanager", "save file corrupted", "ccgamemanager.dat")):
+        return (
+            "Geometry Dash save data issue",
+            "Geometry Dash could not read your player save file, or the save folder has not been initialized yet. "
+            "Click '⚡ Auto-Fix It For Me' to scan your save backups and restore the most recent healthy save state.",
         )
     if "disk write error" in text or ("disk" in text and "write" in text and "error" in text):
         return (
@@ -3274,7 +3311,13 @@ class GeodeSyncApp(tk.Tk):
         # packaged application. Keep the traceback in the support crash log.
         _global_excepthook(exc_type, exc_value, exc_traceback)
         try:
-            self.log("An unexpected interface error was recorded in crash.log. Please send it to support.", "ERROR")
+            err_msg = f"{exc_type.__name__}: {exc_value}"
+            self.log(f"Interface error: {err_msg}", "ERROR")
+            self.after(0, lambda: self.show_smart_error(
+                "Interface Issue Detected",
+                f"An unexpected interface issue occurred:\n\n{err_msg}\n\nClick 'Auto-Fix It For Me' below and GeodeSync will unstick your session and restore full functionality.",
+                auto_fix_func=self.emergency_unstick
+            ))
         except Exception:
             pass
 
@@ -3623,7 +3666,7 @@ class GeodeSyncApp(tk.Tk):
             "Review the text before sharing it.",
         )
 
-    def copy_discord_support_card(self):
+    def copy_discord_support_card(self, custom_error=None):
         """Formats a rich Markdown diagnostic snippet and copies it to the clipboard, ready to paste into #geodesync-help in Discord."""
         game_version, _ = self.mgr.get_gd_version_info()
         geode_ver = self.mgr.get_installed_geode_version() or ("Detected" if self.mgr.is_geode_installed() else "Not Installed")
@@ -3641,6 +3684,7 @@ class GeodeSyncApp(tk.Tk):
             pass
 
         log_excerpt = "\n".join([f"> `{self._redact_diagnostic_text(l)}`" for l in recent_logs]) if recent_logs else "> *(No recent log entries)*"
+        err_line = f"• **Reported Error:** `{self._redact_diagnostic_text(str(custom_error).strip())}`\n" if custom_error else ""
 
         snippet = (
             f"### 🛡️ GeodeSync v{APP_VERSION} Support Ticket\n"
@@ -3648,6 +3692,7 @@ class GeodeSyncApp(tk.Tk):
             f"• **GD Version:** `{game_version}` (Target: `{self.mgr.target_gd_version}`)\n"
             f"• **Geode Loader:** `{geode_ver}`\n"
             f"• **Steam Update Lock:** `{is_locked}`\n"
+            f"{err_line}"
             f"• **Installed Mods:** {len(mods)} mods\n"
             f"• **Player:** {stats['name'] if stats else 'Player'} ({stats['stars'] if stats else 0} ⭐, {stats['demons'] if stats else 0} 👿)\n"
             f"• **Recent Activity:**\n{log_excerpt}\n\n"
@@ -3735,6 +3780,142 @@ class GeodeSyncApp(tk.Tk):
             "Your setup is now un-stuck! You can click '⚡ Fix Geode Mods' to install clean files, or '▶️ Play' if already on 2.2081."
         )
         messagebox.showinfo("Emergency Unstick Complete", summary_msg, parent=self)
+
+    def show_smart_error(self, title, message, auto_fix_func=None, parent=None, is_warning=False):
+        """Displays a rich, user-friendly Self-Repair dialog for any error encountered.
+        Translates raw exceptions into plain English, provides clear steps, offers an instant
+        1-click 'Auto-Fix It For Me' button, a 1-click Discord support ticket copier, and community help.
+        """
+        dialog = tk.Toplevel(parent or self)
+        accent_color = UI["amber"] if is_warning else UI["red"]
+        dialog.title(f"🛠️ GeodeSync Self-Repair Assistant • {title}")
+        dialog.geometry("640x530")
+        dialog.minsize(560, 430)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(parent or self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=12)
+        head.pack(fill="x")
+
+        raw_msg = str(message or "")
+        explained_title, explained_steps = explain_error_text(raw_msg)
+        display_title = explained_title if (explained_title != "Paste the exact error" and explained_title != "No matching fix found yet") else title
+
+        tk.Label(head, text=f"⚠️ {display_title}", font=("Segoe UI", 13, "bold"), fg=accent_color, bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="GeodeSync detected an issue. You don't have to troubleshoot alone—click Auto-Fix below!", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=20, pady=12)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(content, text="WHAT HAPPENED & WHAT TO DO", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["background"]).pack(anchor="w")
+        summary_card = tk.Frame(content, bg=UI["panel"], padx=12, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+        summary_card.pack(fill="x", pady=(4, 10))
+
+        fallback_explanation = "GeodeSync encountered an issue with your game or Steam setup. You can use 1-click Auto-Fix to safely repair it automatically."
+        explanation_display = explained_steps if (explained_steps and not "Copy the full error" in explained_steps) else (raw_msg[:350] or fallback_explanation)
+        tk.Label(
+            summary_card,
+            text=explanation_display,
+            font=("Segoe UI", 9),
+            fg=UI["text"],
+            bg=UI["panel"],
+            wraplength=570,
+            justify="left",
+            anchor="w"
+        ).pack(fill="x")
+
+        tk.Label(content, text="TECHNICAL DETAILS", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["background"]).pack(anchor="w")
+        err_box = tk.Text(content, bg=UI["inset"], fg=UI["text"], font=("Consolas", 8), height=4, relief="flat", padx=10, pady=6, wrap="word")
+        err_box.pack(fill="both", expand=True, pady=(4, 10))
+        err_box.insert("1.0", raw_msg.strip() or "No technical traceback provided.")
+        err_box.config(state="disabled")
+
+        def execute_repair():
+            dialog.destroy()
+            if auto_fix_func:
+                try:
+                    auto_fix_func()
+                except Exception as ex:
+                    self.log(f"Auto-fix secondary note: {ex}", "WARN")
+                    self.emergency_unstick()
+            else:
+                self.emergency_unstick()
+
+        action_frame = tk.Frame(content, bg=UI["panel_alt"], padx=12, pady=10, highlightbackground=UI["lime_dark"], highlightthickness=1)
+        action_frame.pack(fill="x", pady=(0, 8))
+
+        tk.Label(action_frame, text="⚡ Recommended Automated Solution:", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel_alt"]).pack(anchor="w")
+        fix_desc = "Runs GeodeSync's automated self-repair: frees hung processes, unlocks Steam files, clears broken download caches, fixes mod conflicts, and resets to 2.2081."
+        tk.Label(action_frame, text=fix_desc, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel_alt"], wraplength=570, justify="left").pack(anchor="w", pady=(2, 6))
+
+        btn_row = tk.Frame(action_frame, bg=UI["panel_alt"])
+        btn_row.pack(fill="x")
+
+        tk.Button(
+            btn_row,
+            text="⚡ Auto-Fix It For Me (Instant Self-Repair)",
+            command=execute_repair,
+            font=("Segoe UI", 9, "bold"),
+            bg=UI["lime"],
+            fg=UI["background"],
+            activebackground=UI["lime_hover"],
+            activeforeground=UI["background"],
+            relief="flat",
+            padx=14,
+            pady=6,
+            cursor="hand2"
+        ).pack(side="left")
+
+        footer = tk.Frame(dialog, bg=UI["header"], padx=20, pady=10)
+        footer.pack(fill="x")
+
+        def copy_ticket_with_error():
+            self.copy_discord_support_card(custom_error=raw_msg[:500])
+
+        tk.Button(
+            footer,
+            text="📋 Copy Discord Ticket",
+            command=copy_ticket_with_error,
+            font=("Segoe UI", 8, "bold"),
+            bg="#5865F2",
+            fg="#ffffff",
+            activebackground="#4752C4",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2"
+        ).pack(side="left")
+
+        tk.Button(
+            footer,
+            text="💬 Open #geodesync-help",
+            command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"),
+            font=("Segoe UI", 8, "bold"),
+            bg=UI["panel_alt"],
+            fg=UI["lilac"],
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2"
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            footer,
+            text="Dismiss",
+            command=dialog.destroy,
+            font=("Segoe UI", 8),
+            bg=UI["panel_alt"],
+            fg=UI["muted"],
+            relief="flat",
+            padx=14,
+            pady=5,
+            cursor="hand2"
+        ).pack(side="right")
+
+    def show_error(self, title, message, auto_fix_func=None, parent=None):
+        return self.show_smart_error(title, message, auto_fix_func=auto_fix_func, parent=parent, is_warning=False)
 
     def open_whats_new_dialog(self):
         dialog = tk.Toplevel(self)
@@ -3824,6 +4005,8 @@ class GeodeSyncApp(tk.Tk):
             self.last_troubleshooting_error = raw[:3000]
             title, steps = explain_error_text(raw)
             show_result(title, "GeodeSync matched this message to a known troubleshooting guide." if title != "No matching fix found yet" else "GeodeSync does not recognize this message, so it will not change files.", steps)
+            if raw and title != "Paste the exact error":
+                autofix_action_btn.pack(side="left", padx=(0, 6), before=copy_btn)
 
         def scan():
             result.config(state="normal")
@@ -3843,6 +4026,8 @@ class GeodeSyncApp(tk.Tk):
                         for finding in findings:
                             blocks.append(f"{finding['title']}\n\n{finding['detail']}\n\nWhat to do\n{finding['steps']}")
                         show_result("Setup check", "\n\n──────────────\n\n".join(blocks), "Use Export Report if you still need help.")
+                        if findings:
+                            autofix_action_btn.pack(side="left", padx=(0, 6), before=copy_btn)
                 except Exception as error:
                     error_text = str(error)
                     def fail():
@@ -3859,10 +4044,13 @@ class GeodeSyncApp(tk.Tk):
             dialog.clipboard_append(text)
             messagebox.showinfo("Copied", "The troubleshooting steps are copied. You can paste them into chat.", parent=dialog)
 
+        copy_btn = tk.Button(actions, text="Copy Steps", command=copy_steps, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2")
+        copy_btn.pack(side="right")
+
         tk.Button(actions, text="Check Setup", command=scan, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
         tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        autofix_action_btn = tk.Button(actions, text="⚡ Auto-Fix Found Issue", command=lambda: [self.emergency_unstick(), scan()], font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2")
         tk.Button(actions, text="🆘 Emergency Unstick", command=self.emergency_unstick, font=("Segoe UI", 8, "bold"), bg=UI["amber"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
-        tk.Button(actions, text="Copy Steps", command=copy_steps, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right")
 
         footer = tk.Frame(dialog, bg=UI["header"], padx=18, pady=10)
         footer.pack(fill="x")
@@ -4499,7 +4687,14 @@ class GeodeSyncApp(tk.Tk):
             self.log(f"Auto-install error: {e}. Opening geode-sdk.org instead...", "WARN")
             self.progress_frame.pack_forget()
             self.primary_btn.set_enabled(True)
-            webbrowser.open("https://geode-sdk.org")
+            def open_geode():
+                webbrowser.open("https://geode-sdk.org")
+            self.after(0, lambda err=e: self.show_smart_error(
+                "Geode Auto-Install Issue",
+                f"Could not automatically download the official Geode installer:\n\n{err}\n\n"
+                "Click 'Auto-Fix It For Me' below to open the official Geode SDK installer page directly.",
+                auto_fix_func=open_geode
+            ))
             self.refresh_status()
 
     # ==========================================
@@ -4525,7 +4720,14 @@ class GeodeSyncApp(tk.Tk):
             )
             if res:
                 if not self.mgr.close_gd_process() or self.mgr.is_gd_process_running():
-                    messagebox.showerror("Geometry Dash is still running", "Close Geometry Dash before changing its game files.")
+                    def kill_and_retry():
+                        self.emergency_unstick()
+                        self.start_automated_downgrade()
+                    self.show_smart_error(
+                        "Geometry Dash is still running",
+                        "Geometry Dash is currently open in the background and locking files. Click 'Auto-Fix It For Me' to force-close GD and proceed with the switch.",
+                        auto_fix_func=kill_and_retry
+                    )
                     return False
             else:
                 return False
@@ -4574,11 +4776,15 @@ class GeodeSyncApp(tk.Tk):
                 self.refresh_status()
             except Exception:
                 pass
-            messagebox.showerror(
-                "Downgrade stopped",
-                f"GeodeSync stopped the downgrade before reporting success:\n\n{e}\n\n"
-                "Check the activity log before trying again.",
-            )
+            def retry_fix():
+                self.emergency_unstick()
+                self.start_automated_downgrade()
+            self.after(0, lambda err=e: self.show_smart_error(
+                "Downgrade Stopped",
+                f"GeodeSync stopped the downgrade before reporting success:\n\n{err}\n\n"
+                "Click 'Auto-Fix It For Me' below to terminate hung processes, reset caches, and retry automatically.",
+                auto_fix_func=retry_fix
+            ))
 
     def _run_auto_downgrade_impl(self):
         if not self.mgr.gd_path:
@@ -4766,19 +4972,32 @@ class GeodeSyncApp(tk.Tk):
             self.is_downloading_depot = False
             self.pending_profile_mods = None
             self.log("Steam reported the depot complete, but its Geometry Dash.app failed validation; installed game files were left unchanged.", "ERROR")
-            messagebox.showerror(
-                "Steam download is incomplete",
-                "Steam reported the download as complete, but its cached Geometry Dash.app is still missing valid app metadata. "
-                "GeodeSync did not replace your installed game. Quit Steam completely (Steam → Quit), then click 1-Click Fix again. "
-                "On that retry, GeodeSync will clear only the malformed downloaded depot cache and request a fresh copy; it will not touch the installed game or saves. "
-                "If it still fails, send the full GeodeSync activity log so the depot path and Steam result can be checked.",
-            )
+            def purge_and_redownload():
+                depot_path = self.mgr.get_depot_path()
+                if depot_path and os.path.exists(depot_path):
+                    shutil.rmtree(depot_path, ignore_errors=True)
+                self.emergency_unstick()
+                self.start_automated_downgrade()
+            self.after(0, lambda: self.show_smart_error(
+                "Steam Download Incomplete",
+                "Steam reported the download as complete, but cached files are missing valid app metadata.\n\n"
+                "Click 'Auto-Fix It For Me' to safely purge the damaged cache and restart a clean download automatically.",
+                auto_fix_func=purge_and_redownload
+            ))
             self.refresh_status()
         else:
             self.is_downloading_depot = False
             self.pending_profile_mods = None
             self.log("Steam download timed out or took longer than 6 mins.", "WARN")
-            messagebox.showwarning("Download in Progress", "Steam is still downloading in the background. Check your Steam client and click again when ready!")
+            def wait_and_retry():
+                self.start_automated_downgrade()
+            self.after(0, lambda: self.show_smart_error(
+                "Steam Download in Progress",
+                "Steam is still downloading game files in the background or timed out.\n\n"
+                "Click 'Auto-Fix It For Me' to check Steam and resume monitoring the download.",
+                auto_fix_func=wait_and_retry,
+                is_warning=True
+            ))
             self.refresh_status()
 
     def _apply_downgrade_files(self):
@@ -4832,10 +5051,8 @@ class GeodeSyncApp(tk.Tk):
             err_msg = str(e)
             if "WinError 32" in err_msg or "WinError 33" in err_msg or "being used by another process" in err_msg:
                 user_msg = (
-                    "Steam or Geometry Dash currently has the game files in use.\n\n"
-                    "1. Make sure Geometry Dash is fully closed.\n"
-                    "2. Wait a few moments for Steam to finish writing files.\n"
-                    "3. Click '1-Click Fix' again to finish the switch."
+                    "Steam or Geometry Dash currently has the game files locked in use.\n\n"
+                    "Click 'Auto-Fix It For Me' to terminate the background process, unlock the files, and resume the switch automatically."
                 )
             else:
                 user_msg = (
@@ -4845,14 +5062,17 @@ class GeodeSyncApp(tk.Tk):
             if any(marker in err_msg.lower() for marker in ("dll ", "pe header", "windows executable", "section data")):
                 user_msg = (
                     "GeodeSync found a damaged or incompatible Windows game DLL and stopped the switch. "
-                    "It restored any files changed during this attempt. In Steam, open Geometry Dash → Properties → "
-                    "Installed Files → Verify integrity of game files, then retry the switch after verification.\n\n"
+                    "It restored any files changed during this attempt.\n\n"
                     f"Details: {e}"
                 )
-            messagebox.showerror(
-                "Game switch was not completed",
+            def auto_fix_switch():
+                self.emergency_unstick()
+                self.start_automated_downgrade()
+            self.after(0, lambda: self.show_smart_error(
+                "Game Switch Interrupted",
                 user_msg,
-            )
+                auto_fix_func=auto_fix_switch
+            ))
             self.refresh_status()
             return
 
@@ -4971,7 +5191,21 @@ class GeodeSyncApp(tk.Tk):
                     return
                 else:
                     self.log(f"Repair failed: {msg}", "ERROR")
-                    messagebox.showerror("Repair Failed", f"Could not repair mod:\n{msg}")
+                    def force_disable_mod():
+                        try:
+                            mods_dir = os.path.join(self.mgr.gd_path, "geode", "mods")
+                            tgt = os.path.join(mods_dir, f"{item['id']}.geode")
+                            if os.path.exists(tgt):
+                                os.rename(tgt, tgt + ".disabled")
+                            self.refresh_status()
+                            messagebox.showinfo("Mod Disabled", f"Disabled {item['name']} safely so Geometry Dash can launch!")
+                        except Exception as ex:
+                            self.emergency_unstick()
+                    self.show_smart_error(
+                        "Mod Repair Issue",
+                        f"Could not automatically download the update for {item['name']}:\n{msg}\n\nClick 'Auto-Fix It For Me' to safely disable this mod so Geometry Dash can launch cleanly.",
+                        auto_fix_func=force_disable_mod
+                    )
                     return
 
         crash_dir = self.mgr.get_crashlogs_dir()

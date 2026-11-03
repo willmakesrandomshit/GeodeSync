@@ -1,3 +1,14 @@
+# GeodeSync v2.3.19
+
+## Smart Self-Repair Assistant & Universal Auto-Fix System
+
+- **Universal Smart Self-Repair Assistant (`show_smart_error`):** Every error dialog across GeodeSync now explains *exactly* what happened in human-readable English, outlines concrete steps, and features a prominent 1-click **`⚡ Auto-Fix It For Me (Instant Self-Repair)`** button that executes the fix automatically.
+- **Global Interface Exception Recovery:** Unhandled Tkinter callbacks and UI glitches no longer freeze or leave users in stuck loops. The Smart Self-Repair Assistant intercepts them and provides instant session unsticking.
+- **Troubleshooter Interactive Auto-Fix:** Running `Check Setup` or `Explain Error` now exposes a 1-click **`⚡ Auto-Fix Found Issue`** button to resolve detected issues immediately.
+- **Deep Diagnostics & Recovery for File Locks:** Automatically detects `WinError 32` / `33` (files locked by running `GeometryDash.exe` or Steam) and automatically terminates hung processes before retrying.
+- **Automated Steam Cache & Download Recovery:** Detects corrupt or stalled Steam depot downloads and provides automatic cache purging and clean re-downloading.
+- **Direct Discord Ticket Integration:** Diagnostic tickets now include pre-formatted error tracebacks, player stats, and installed mod lists ready to paste into `#geodesync-help`.
+
 # GeodeSync v2.3.18
 
 ## Emergency Unstick, 10s Auto-Sync & Discord Community Integration
