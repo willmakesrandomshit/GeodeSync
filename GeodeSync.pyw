@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.22"
+APP_VERSION = "2.4.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -3621,6 +3621,417 @@ class GDManager:
         except Exception as e:
             return False, str(e)
 
+    # ==================== v2.4.0 ENGINES ====================
+
+    def fetch_geode_store_mods(self, query="", page=1, per_page=20, sort="downloads"):
+        """
+        Fetches official Geode mods from https://api.geode-sdk.org/v1/mods.
+        Returns (success: bool, mods_or_error: list|str).
+        """
+        import urllib.request
+        import urllib.parse
+        params = {"page": page, "per_page": per_page, "sort": sort}
+        if query:
+            params["query"] = query
+        url = f"https://api.geode-sdk.org/v1/mods?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"User-Agent": f"GeodeSync/{APP_VERSION}"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            raw_mods = data.get("payload", {}).get("data", [])
+            mods = []
+            for item in raw_mods:
+                v0 = item.get("versions", [{}])[0] if item.get("versions") else {}
+                devs = item.get("developers", [])
+                dev_names = ", ".join(d.get("display_name", d.get("username", "Unknown")) for d in devs) if devs else "Unknown"
+                mods.append({
+                    "id": item.get("id"),
+                    "name": v0.get("name") or item.get("id"),
+                    "version": v0.get("version", "v1.0.0"),
+                    "description": v0.get("description") or item.get("about", ""),
+                    "developer": dev_names,
+                    "downloads": item.get("download_count", 0),
+                    "tags": item.get("tags", []),
+                    "download_link": v0.get("download_link", ""),
+                })
+            return True, mods
+        except Exception as e:
+            return False, str(e)
+
+    def install_mod_from_store(self, mod_id, download_url=None, progress_callback=None):
+        """
+        Downloads and installs a .geode mod package from the Geode Mod Store into geode/mods.
+        Validates zip integrity and mod.json.
+        """
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        os.makedirs(mods_dir, exist_ok=True)
+
+        if not download_url:
+            ok, mods = self.fetch_geode_store_mods(query=mod_id, per_page=5)
+            if not ok or not mods:
+                return False, f"Could not find download URL for {mod_id}"
+            matched = next((m for m in mods if m["id"].lower() == mod_id.lower()), mods[0])
+            download_url = matched.get("download_link")
+            if not download_url:
+                return False, f"No download link found for {mod_id}"
+
+        target_file = os.path.join(mods_dir, f"{mod_id}.geode")
+        temp_file = target_file + ".part"
+
+        import urllib.request
+        req = urllib.request.Request(download_url, headers={"User-Agent": f"GeodeSync/{APP_VERSION}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp, open(temp_file, "wb") as f:
+                total_size = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                chunk_size = 16384
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        try:
+                            progress_callback(downloaded, total_size)
+                        except Exception:
+                            pass
+
+            with zipfile.ZipFile(temp_file, "r") as zf:
+                if "mod.json" not in zf.namelist():
+                    os.remove(temp_file)
+                    return False, "Downloaded file is corrupted or not a valid Geode mod (missing mod.json)."
+
+            if os.path.exists(target_file):
+                os.remove(target_file)
+            os.rename(temp_file, target_file)
+            return True, f"Installed {mod_id}.geode successfully!"
+        except Exception as e:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+            return False, f"Failed to download/install {mod_id}: {e}"
+
+    def fetch_pointercrate_demons(self, limit=100):
+        """
+        Fetches the official Pointercrate Top Demonlist via public API.
+        Returns (success: bool, demons_or_error: list|str).
+        """
+        import urllib.request
+        url = f"https://pointercrate.com/api/v2/demons/listed/?limit={limit}"
+        req = urllib.request.Request(url, headers={"User-Agent": f"GeodeSync/{APP_VERSION}"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            demons = []
+            for item in data:
+                demons.append({
+                    "position": item.get("position", 0),
+                    "name": item.get("name", "Unknown"),
+                    "requirement": item.get("requirement", 100),
+                    "video": item.get("video", ""),
+                    "publisher": item.get("publisher", {}).get("name", "Unknown") if isinstance(item.get("publisher"), dict) else "Unknown",
+                    "verifier": item.get("verifier", {}).get("name", "Unknown") if isinstance(item.get("verifier"), dict) else "Unknown",
+                })
+            return True, demons
+        except Exception as e:
+            return False, str(e)
+
+    def get_practice_music_status(self):
+        """
+        Checks whether custom practice music is active by checking Resources/StayInsideMe.mp3.bak.
+        """
+        if not self.gd_path:
+            return False, "No GD folder set"
+        res_dir = os.path.join(self.gd_path, "Resources")
+        bak_file = os.path.join(res_dir, "StayInsideMe.mp3.bak")
+        curr_file = os.path.join(res_dir, "StayInsideMe.mp3")
+        if not os.path.exists(curr_file):
+            return False, "StayInsideMe.mp3 not found"
+        if os.path.exists(bak_file):
+            return True, "Custom Practice Music Active"
+        return False, "Vanilla StayInsideMe.mp3"
+
+    def set_custom_practice_music(self, source_audio_path):
+        """
+        Replaces StayInsideMe.mp3 with a custom audio file, backing up the original.
+        """
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        if not os.path.isfile(source_audio_path):
+            return False, f"Source audio file not found: {source_audio_path}"
+        res_dir = os.path.join(self.gd_path, "Resources")
+        if not os.path.isdir(res_dir):
+            return False, "Resources directory not found in GD folder."
+
+        orig_file = os.path.join(res_dir, "StayInsideMe.mp3")
+        bak_file = os.path.join(res_dir, "StayInsideMe.mp3.bak")
+
+        try:
+            if os.path.exists(orig_file) and not os.path.exists(bak_file):
+                shutil.copy2(orig_file, bak_file)
+            shutil.copy2(source_audio_path, orig_file)
+            return True, "Successfully set custom practice music!"
+        except Exception as e:
+            return False, f"Failed to swap practice music: {e}"
+
+    def restore_vanilla_practice_music(self):
+        """
+        Restores StayInsideMe.mp3 from StayInsideMe.mp3.bak.
+        """
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        res_dir = os.path.join(self.gd_path, "Resources")
+        orig_file = os.path.join(res_dir, "StayInsideMe.mp3")
+        bak_file = os.path.join(res_dir, "StayInsideMe.mp3.bak")
+
+        if not os.path.exists(bak_file):
+            return True, "Already using vanilla practice music."
+        try:
+            shutil.copy2(bak_file, orig_file)
+            os.remove(bak_file)
+            return True, "Restored original vanilla practice music."
+        except Exception as e:
+            return False, f"Failed to restore vanilla music: {e}"
+
+    def get_local_audio_tracks(self):
+        """
+        Scans save directory for downloaded custom songs (*.mp3).
+        Returns list of dicts: [{'song_id': '12345', 'path': '...', 'size_mb': 4.2}]
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir or not os.path.isdir(save_dir):
+            return []
+        songs = []
+        try:
+            for f in os.listdir(save_dir):
+                if f.endswith(".mp3"):
+                    full_p = os.path.join(save_dir, f)
+                    if os.path.isfile(full_p):
+                        song_id = os.path.splitext(f)[0]
+                        size_mb = round(os.path.getsize(full_p) / (1024 * 1024), 2)
+                        songs.append({"song_id": song_id, "path": full_p, "size_mb": size_mb})
+        except Exception:
+            pass
+        return sorted(songs, key=lambda s: s["song_id"])
+
+    def export_geodesync_bundle(self, dest_path, include_saves=True, include_mods=True, include_configs=True):
+        """
+        Packages saves, geode mods, configs into a compressed .geodesync portable archive.
+        """
+        try:
+            save_dir = self.get_save_data_dir()
+            mods_dir = os.path.join(self.gd_path, "geode", "mods") if self.gd_path else None
+            config_dir = os.path.join(self.gd_path, "geode", "config") if self.gd_path else None
+
+            stats = self.get_player_stats() or {}
+            manifest = {
+                "format_version": "1.0",
+                "created_at": time.time(),
+                "geodesync_version": APP_VERSION,
+                "player_name": stats.get("name", "Player"),
+                "stars": stats.get("stars", 0),
+                "demons": stats.get("demons", 0),
+                "contents": []
+            }
+
+            temp_dest = dest_path + ".tmp"
+            with zipfile.ZipFile(temp_dest, "w", zipfile.ZIP_DEFLATED) as zf:
+                if include_saves and save_dir and os.path.isdir(save_dir):
+                    for save_name in ("CCGameManager.dat", "CCLocalLevels.dat", "CCGameManager2.dat", "CCLocalLevels2.dat"):
+                        sp = os.path.join(save_dir, save_name)
+                        if os.path.exists(sp):
+                            zf.write(sp, arcname=f"saves/{save_name}")
+                            manifest["contents"].append(f"saves/{save_name}")
+
+                if include_mods and mods_dir and os.path.isdir(mods_dir):
+                    for m in os.listdir(mods_dir):
+                        if m.endswith((".geode", ".geode.disabled")):
+                            mp = os.path.join(mods_dir, m)
+                            if os.path.isfile(mp):
+                                zf.write(mp, arcname=f"mods/{m}")
+                                manifest["contents"].append(f"mods/{m}")
+
+                if include_configs and config_dir and os.path.isdir(config_dir):
+                    for root, _, files in os.walk(config_dir):
+                        for file in files:
+                            cfg_path = os.path.join(root, file)
+                            rel_p = os.path.relpath(cfg_path, config_dir).replace("\\", "/")
+                            zf.write(cfg_path, arcname=f"configs/{rel_p}")
+                            manifest["contents"].append(f"configs/{rel_p}")
+
+                zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            os.rename(temp_dest, dest_path)
+            size_mb = round(os.path.getsize(dest_path) / (1024 * 1024), 2)
+            return True, f"Created {os.path.basename(dest_path)} ({size_mb} MB, {len(manifest['contents'])} items bundled)"
+        except Exception as e:
+            if os.path.exists(dest_path + ".tmp"):
+                try:
+                    os.remove(dest_path + ".tmp")
+                except Exception:
+                    pass
+            return False, f"Failed to export bundle: {e}"
+
+    def backup_save_files_snapshot(self, tag="auto"):
+        """
+        Creates an atomic timestamped snapshot of all *.dat and *.dat.bak save files.
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir or not os.path.isdir(save_dir):
+            return False, "No save directory found"
+        bak_dir = os.path.join(save_dir, "GeodeSync_Save_Backups", f"{tag}_{int(time.time())}")
+        try:
+            os.makedirs(bak_dir, exist_ok=True)
+            copied = 0
+            for f in os.listdir(save_dir):
+                if f.endswith((".dat", ".dat.bak")):
+                    src = os.path.join(save_dir, f)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, os.path.join(bak_dir, f))
+                        copied += 1
+            return True, f"Backed up {copied} save files."
+        except Exception as e:
+            return False, str(e)
+
+    def import_geodesync_bundle(self, bundle_path, overwrite_saves=True, overwrite_mods=True):
+        """
+        Unpacks and restores saves, mods, and configs from a .geodesync bundle.
+        Always takes a pre-import safety backup of current saves first!
+        """
+        if not os.path.isfile(bundle_path):
+            return False, "Bundle file not found."
+        try:
+            self.backup_save_files_snapshot(tag="pre_bundle_import")
+
+            save_dir = self.get_save_data_dir()
+            mods_dir = os.path.join(self.gd_path, "geode", "mods") if self.gd_path else None
+            config_dir = os.path.join(self.gd_path, "geode", "config") if self.gd_path else None
+
+            restored_saves = 0
+            restored_mods = 0
+            restored_configs = 0
+
+            with zipfile.ZipFile(bundle_path, "r") as zf:
+                names = zf.namelist()
+                for name in names:
+                    if name.startswith("saves/") and overwrite_saves and save_dir:
+                        dest_f = os.path.join(save_dir, os.path.basename(name))
+                        with zf.open(name) as src, open(dest_f, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        restored_saves += 1
+                    elif name.startswith("mods/") and overwrite_mods and mods_dir:
+                        os.makedirs(mods_dir, exist_ok=True)
+                        dest_f = os.path.join(mods_dir, os.path.basename(name))
+                        with zf.open(name) as src, open(dest_f, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        restored_mods += 1
+                    elif name.startswith("configs/") and config_dir:
+                        rel = name[len("configs/"):]
+                        dest_f = os.path.join(config_dir, rel)
+                        os.makedirs(os.path.dirname(dest_f), exist_ok=True)
+                        with zf.open(name) as src, open(dest_f, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        restored_configs += 1
+
+            return True, f"Successfully imported bundle! Restored {restored_saves} saves, {restored_mods} mods, and {restored_configs} configs."
+        except Exception as e:
+            return False, f"Failed to import bundle: {e}"
+
+    def analyze_save_bloat(self):
+        """
+        Analyzes CCLocalLevels.dat to inspect total size, level count, and downloaded online levels bloat.
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return False, "Save directory not found"
+        ll_path = os.path.join(save_dir, "CCLocalLevels.dat")
+        if not os.path.exists(ll_path):
+            return False, "CCLocalLevels.dat does not exist"
+        try:
+            raw_size = os.path.getsize(ll_path)
+            with open(ll_path, "rb") as f:
+                raw_bytes = f.read()
+            dec = decode_geometry_dash_save(raw_bytes).decode("utf-8", errors="ignore")
+
+            online_cached = len(re.findall(r"<k>k1</k><i>[0-9]+</i>", dec))
+            total_levels = len(re.findall(r"<k>k2</k><s>", dec))
+
+            return True, {
+                "file_size_mb": round(raw_size / (1024 * 1024), 2),
+                "total_levels": total_levels,
+                "online_cached": online_cached,
+                "user_created": max(0, total_levels - online_cached),
+            }
+        except Exception as e:
+            return False, str(e)
+
+    def clean_save_bloat(self, remove_online_cache=True):
+        """
+        Cleans downloaded online level caches from CCLocalLevels.dat while preserving user-created levels.
+        Creates a timestamped backup before writing changes.
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return False, "Save directory not found"
+        ll_path = os.path.join(save_dir, "CCLocalLevels.dat")
+        if not os.path.exists(ll_path):
+            return False, "CCLocalLevels.dat does not exist"
+        try:
+            bak_path = ll_path + f".bak_{int(time.time())}"
+            shutil.copy2(ll_path, bak_path)
+
+            old_size = os.path.getsize(ll_path)
+            with open(ll_path, "rb") as f:
+                raw_bytes = f.read()
+            dec = decode_geometry_dash_save(raw_bytes).decode("utf-8", errors="ignore")
+
+            llm_m = re.search(r"(<k>LLM_01</k><d>)(.*?)(</d><k>LLM_02</k>)", dec, re.DOTALL)
+            if not llm_m:
+                return False, "Could not locate local level map (LLM_01) in save data."
+
+            prefix, body, suffix = llm_m.group(1), llm_m.group(2), llm_m.group(3)
+            entries = re.findall(r"(<k>k_\d+</k><d>.*?</d>)", body, re.DOTALL)
+            cleaned_entries = []
+            removed_count = 0
+            for idx, entry in enumerate(entries):
+                is_online_cache = ("<k>k1</k><i>" in entry) and ("<k>k21</k><i>1</i>" in entry or "<k>k21</k>" not in entry)
+                if remove_online_cache and is_online_cache:
+                    removed_count += 1
+                else:
+                    renumbered = re.sub(r"^<k>k_\d+</k>", f"<k>k_{len(cleaned_entries)}</k>", entry)
+                    cleaned_entries.append(renumbered)
+
+            new_body = "".join(cleaned_entries)
+            if not new_body.startswith("<k>_isArr</k><t/>"):
+                new_body = "<k>_isArr</k><t/>" + new_body
+
+            new_dec = dec[:llm_m.start(2)] + new_body + dec[llm_m.end(2):]
+            encoded_bytes = encode_geometry_dash_save(new_dec.encode("utf-8"))
+
+            with open(ll_path, "wb") as f:
+                f.write(encoded_bytes)
+
+            new_size = os.path.getsize(ll_path)
+            saved_mb = round((old_size - new_size) / (1024 * 1024), 2)
+            return True, {
+                "removed_levels": removed_count,
+                "old_size_bytes": old_size,
+                "new_size_bytes": new_size,
+                "saved_bytes": max(0, old_size - new_size),
+                "old_size_mb": round(old_size / (1024 * 1024), 2),
+                "new_size_mb": round(new_size / (1024 * 1024), 2),
+                "saved_mb": max(0.0, saved_mb),
+            }
+        except Exception as e:
+            return False, f"Optimization failed: {e}"
+
 
 
 class ModernButton(tk.Canvas):
@@ -4753,6 +5164,10 @@ class GeodeSyncApp(tk.Tk):
         self.saves_badge = tk.Label(setup_chips_row, text="Saves", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=3)
         self.saves_badge.pack(side="left", padx=2)
 
+        self.opt_badge = tk.Label(setup_chips_row, text="🧹 Optimizer", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.opt_badge.pack(side="left", padx=2)
+        self.opt_badge.bind("<Button-1>", lambda e: self.open_save_optimizer_dialog())
+
         # Hero Center: Status badge & description
         self.guide_badge = tk.Label(self.guide_card, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=2)
         self.guide_badge.pack(anchor="w", pady=(0, 2))
@@ -4815,7 +5230,7 @@ class GeodeSyncApp(tk.Tk):
         tool_grid.columnconfigure(0, weight=0, minsize=92)
         for col in range(1, 5):
             tool_grid.columnconfigure(col, weight=1)
-        for row in range(5):
+        for row in range(6):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
         groups = (
@@ -4824,6 +5239,7 @@ class GeodeSyncApp(tk.Tk):
             ("REPAIR", "#e4b968", "#30281e"),
             ("PREFERENCES", "#a99be7", "#282432"),
             ("APP", "#63d5ce", "#202b2b"),
+            ("POWER", "#f39c12", "#2e2417"),
         )
         for row, (name, accent, row_bg) in enumerate(groups):
             tk.Label(
@@ -4844,7 +5260,7 @@ class GeodeSyncApp(tk.Tk):
             self.tool_buttons.append((button, label, color, row_bg))
             return button
 
-        # Each row keeps related actions together: mods, play, repair, settings, system.
+        # Each row keeps related actions together: mods, play, repair, settings, system, power.
         add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
         add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
         add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=0, column=2, bold=True)
@@ -4870,6 +5286,12 @@ class GeodeSyncApp(tk.Tk):
         add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=4, column=1)
         add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
         add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
+
+        # v2.4.0 Power Tools
+        add_tool("🛍️ Mod Store", self.open_mod_store_dialog, color=UI["lime"], row=5, column=0, bold=True)
+        add_tool("🏆 Top Demonlist", self.open_demonlist_browser, color=UI["lilac"], row=5, column=1, bold=True)
+        add_tool("🎵 Jukebox & Practice", self.open_jukebox_dialog, color=UI["lime"], row=5, column=2, bold=True)
+        add_tool("☁️ Sync Archive", self.open_bundle_manager_dialog, color=UI["amber"], row=5, column=3, bold=True)
 
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
@@ -6381,6 +6803,9 @@ class GeodeSyncApp(tk.Tk):
 
         open_folder_btn = tk.Button(search_frame, text="📁 Open Folder", command=self.open_mods_folder, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=10, pady=4, cursor="hand2")
         open_folder_btn.pack(side="right", padx=(8, 0))
+
+        store_btn = tk.Button(search_frame, text="🛍️ Mod Store", command=self.open_mod_store_dialog, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=10, pady=4, cursor="hand2")
+        store_btn.pack(side="right", padx=(8, 0))
 
         list_container = tk.Frame(dialog, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
         list_container.pack(fill="both", expand=True, padx=20, pady=(0, 12))
@@ -8051,7 +8476,11 @@ class GeodeSyncApp(tk.Tk):
 
         head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
         head.pack(fill="x")
-        tk.Label(head, text="📈 Demon & Grind Progress Tracker", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        head_top = tk.Frame(head, bg=UI["header"])
+        head_top.pack(fill="x")
+        tk.Label(head_top, text="📈 Demon & Grind Progress Tracker", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(side="left")
+        top_list_btn = tk.Button(head_top, text="🏆 Top 150 Demonlist", command=self.open_demonlist_browser, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=3, cursor="hand2")
+        top_list_btn.pack(side="right")
         tk.Label(head, text="Live progress extracted directly from your decrypted Geometry Dash save data.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
 
         content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=12)
@@ -8333,6 +8762,576 @@ class GeodeSyncApp(tk.Tk):
                 tk.Label(row, text=f"[{k}]", font=("Segoe UI", 9, "bold"), fg=k_color, bg=UI["panel_alt"], width=8, anchor="w").pack(side="left")
                 desc = ", ".join([f"{item['mod']} ({item['action']})" for item in items])
                 tk.Label(row, text=desc, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+
+    # ==================== v2.4.0 MODAL DIALOGS ====================
+
+    def open_mod_store_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Geode Mod Store & Browser")
+        dialog.geometry("680x560")
+        dialog.minsize(600, 460)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🛍️ Geode Mod Store & Browser", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Discover, search, and 1-click install official mods directly from the Geode SDK Index.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 8))
+
+        search_bar = tk.Frame(head, bg=UI["header"])
+        search_bar.pack(fill="x")
+
+        search_var = tk.StringVar()
+        tk.Label(search_bar, text="🔍", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["header"]).pack(side="left", padx=(0, 6))
+        search_entry = tk.Entry(search_bar, textvariable=search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        search_entry.pack(side="left", fill="x", expand=True, ipady=4)
+
+        sort_var = tk.StringVar(value="downloads")
+        sort_box = ttk.Combobox(search_bar, textvariable=sort_var, values=["downloads", "recent", "name"], state="readonly", width=12)
+        sort_box.pack(side="right", padx=(8, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=10)
+        content.pack(fill="both", expand=True)
+
+        status_lbl = tk.Label(content, text="Fetching mods from Geode Index API...", font=("Segoe UI", 9), fg=UI["quiet"], bg=UI["background"])
+        status_lbl.pack(anchor="w", pady=(0, 6))
+
+        list_container = tk.Frame(content, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(list_container, bg=UI["panel"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_canvas_resize(event):
+            canvas.itemconfig(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_resize)
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        def _cleanup():
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            dialog.destroy()
+        dialog.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        all_mods = []
+
+        def render_cards():
+            for w in scrollable.winfo_children():
+                w.destroy()
+
+            query = search_var.get().strip().lower()
+            filtered = [
+                m for m in all_mods
+                if not query or query in m["name"].lower() or query in m["id"].lower() or query in m.get("developer", "").lower()
+            ]
+
+            installed_ids = {m["id"].lower() for m in self.mgr.get_installed_mods()}
+            status_lbl.config(text=f"Showing {len(filtered)} mods (from {len(all_mods)} indexed)")
+
+            if not filtered:
+                tk.Label(scrollable, text="No mods found matching your query.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["panel"]).pack(pady=40)
+                return
+
+            for mod in filtered:
+                m_id = mod["id"]
+                is_installed = m_id.lower() in installed_ids
+
+                card = tk.Frame(scrollable, bg=UI["panel_alt"], padx=12, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+                card.pack(fill="x", padx=6, pady=4)
+
+                top_r = tk.Frame(card, bg=UI["panel_alt"])
+                top_r.pack(fill="x")
+
+                tk.Label(top_r, text=mod["name"], font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["panel_alt"]).pack(side="left")
+                tk.Label(top_r, text=f"v{mod['version']}", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel_alt"]).pack(side="left", padx=(6, 0))
+                tk.Label(top_r, text=f"by {mod['developer']}", font=("Segoe UI", 8, "italic"), fg=UI["muted"], bg=UI["panel_alt"]).pack(side="left", padx=(8, 0))
+
+                dl_k = f"{round(mod['downloads'] / 1000, 1)}K" if mod['downloads'] >= 1000 else str(mod['downloads'])
+                tk.Label(top_r, text=f"⬇ {dl_k}", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel_alt"]).pack(side="right")
+
+                desc = mod.get("description", "").strip() or "No description provided."
+                tk.Label(card, text=desc, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel_alt"], wraplength=520, justify="left").pack(anchor="w", pady=(4, 6))
+
+                action_row = tk.Frame(card, bg=UI["panel_alt"])
+                action_row.pack(fill="x")
+
+                if mod.get("tags"):
+                    tags_str = "  ".join([f"#{t}" for t in mod["tags"][:3]])
+                    tk.Label(action_row, text=tags_str, font=("Segoe UI", 7), fg=UI["lilac"], bg=UI["panel_alt"]).pack(side="left")
+
+                def make_install_action(target_mod, target_btn):
+                    def do_install():
+                        target_btn.config(text="Installing...", state="disabled")
+                        def worker():
+                            ok, msg = self.mgr.install_mod_from_store(target_mod["id"], target_mod.get("download_link"))
+                            def on_done():
+                                if ok:
+                                    target_btn.config(text="✅ Installed", fg=UI["lime"], bg=UI["inset"])
+                                    self.log(f"Installed mod {target_mod['name']} from store.", "SUCCESS")
+                                    self.play_ding()
+                                else:
+                                    target_btn.config(text="Retry", state="normal", fg=UI["amber"])
+                                    messagebox.showerror("Install Failed", msg)
+                            dialog.after(0, on_done)
+                        threading.Thread(target=worker, daemon=True).start()
+                    return do_install
+
+                btn_text = "✅ Installed" if is_installed else "⬇️ Install"
+                btn_fg = UI["lime"] if is_installed else UI["background"]
+                btn_bg = UI["inset"] if is_installed else UI["lime"]
+                btn_state = "disabled" if is_installed else "normal"
+
+                inst_btn = tk.Button(
+                    action_row, text=btn_text, font=("Segoe UI", 8, "bold"),
+                    fg=btn_fg, bg=btn_bg, relief="flat", padx=10, pady=3,
+                    cursor="hand2" if not is_installed else "arrow", state=btn_state
+                )
+                inst_btn.pack(side="right")
+                if not is_installed:
+                    inst_btn.config(command=make_install_action(mod, inst_btn))
+
+                geode_url_lbl = tk.Label(action_row, text="🌐 Geode", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["panel_alt"], cursor="hand2")
+                geode_url_lbl.pack(side="right", padx=(0, 10))
+                geode_url_lbl.bind("<Button-1>", lambda e, mid=m_id: webbrowser.open(f"https://geode-sdk.org/mods/{mid}"))
+
+        def fetch_data():
+            sort_val = sort_var.get()
+            ok, mods = self.mgr.fetch_geode_store_mods(per_page=50, sort=sort_val)
+            def on_fetched():
+                nonlocal all_mods
+                if ok:
+                    all_mods = mods
+                    render_cards()
+                else:
+                    status_lbl.config(text=f"⚠️ Failed to connect to Geode Index: {mods}", fg=UI["amber"])
+            dialog.after(0, on_fetched)
+
+        threading.Thread(target=fetch_data, daemon=True).start()
+        search_var.trace_add("write", lambda *a: render_cards())
+        sort_var.trace_add("write", lambda *a: threading.Thread(target=fetch_data, daemon=True).start())
+
+    def open_demonlist_browser(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Pointercrate Top 150 Demonlist")
+        dialog.geometry("700x560")
+        dialog.minsize(620, 460)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🏆 Pointercrate Top 150 Demonlist", font=("Segoe UI", 14, "bold"), fg=UI["lilac"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Live official rankings, verifiers, requirements, and local save progress.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 8))
+
+        search_bar = tk.Frame(head, bg=UI["header"])
+        search_bar.pack(fill="x")
+
+        search_var = tk.StringVar()
+        tk.Label(search_bar, text="🔍", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["header"]).pack(side="left", padx=(0, 6))
+        search_entry = tk.Entry(search_bar, textvariable=search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        search_entry.pack(side="left", fill="x", expand=True, ipady=4)
+
+        refresh_btn = tk.Button(search_bar, text="🔄 Refresh", font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=4, cursor="hand2")
+        refresh_btn.pack(side="right", padx=(8, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=10)
+        content.pack(fill="both", expand=True)
+
+        status_lbl = tk.Label(content, text="Querying Pointercrate Demonlist API...", font=("Segoe UI", 9), fg=UI["quiet"], bg=UI["background"])
+        status_lbl.pack(anchor="w", pady=(0, 6))
+
+        list_container = tk.Frame(content, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(list_container, bg=UI["panel"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_canvas_resize(event):
+            canvas.itemconfig(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_resize)
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        def _cleanup():
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            dialog.destroy()
+        dialog.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        all_demons = []
+        demon_grinds = {}
+        beaten_names = set()
+
+        def parse_local_progress():
+            nonlocal demon_grinds, beaten_names
+            data = self.mgr.get_demon_and_grind_data()
+            if data:
+                beaten_names = {d["name"].lower() for d in data.get("demons", []) if isinstance(d, dict) and "name" in d}
+                demon_grinds = {g["name"].lower(): g for g in data.get("grinds", []) if isinstance(g, dict) and "name" in g}
+
+        def render_demons():
+            for w in scrollable.winfo_children():
+                w.destroy()
+
+            query = search_var.get().strip().lower()
+            filtered = [
+                d for d in all_demons
+                if not query or query in d["name"].lower() or query in d["verifier"].lower() or query in d["publisher"].lower()
+            ]
+
+            status_lbl.config(text=f"Loaded {len(filtered)} demons (from {len(all_demons)} on Pointercrate)")
+
+            if not filtered:
+                tk.Label(scrollable, text="No demons match your query.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["panel"]).pack(pady=40)
+                return
+
+            for d in filtered:
+                pos = d["position"]
+                name = d["name"]
+                name_l = name.lower()
+
+                card = tk.Frame(scrollable, bg=UI["panel_alt"], padx=12, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+                card.pack(fill="x", padx=6, pady=3)
+
+                rank_color = UI["amber"] if pos <= 10 else (UI["lilac"] if pos <= 75 else UI["quiet"])
+                tk.Label(card, text=f"#{pos}", font=("Segoe UI", 11, "bold"), fg=rank_color, bg=UI["panel_alt"], width=4, anchor="w").pack(side="left")
+
+                info_col = tk.Frame(card, bg=UI["panel_alt"])
+                info_col.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+                title_row = tk.Frame(info_col, bg=UI["panel_alt"])
+                title_row.pack(anchor="w")
+                tk.Label(title_row, text=name, font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+
+                # Local Progress Badge
+                if name_l in beaten_names:
+                    tk.Label(title_row, text="🏆 100% BEATEN", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=4, pady=1).pack(side="left", padx=(8, 0))
+                elif name_l in demon_grinds:
+                    grind = demon_grinds[name_l]
+                    tk.Label(title_row, text=f"🎯 {grind['percent']}% ({grind['attempts']:,} att)", font=("Segoe UI", 7, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=4, pady=1).pack(side="left", padx=(8, 0))
+
+                meta_row = tk.Frame(info_col, bg=UI["panel_alt"])
+                meta_row.pack(anchor="w", pady=(2, 0))
+                tk.Label(meta_row, text=f"by {d['publisher']}  •  Verified by {d['verifier']}  •  Req: {d['requirement']}%", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel_alt"]).pack(side="left")
+
+                btn_col = tk.Frame(card, bg=UI["panel_alt"])
+                btn_col.pack(side="right")
+
+                if d.get("video"):
+                    vid_btn = tk.Button(btn_col, text="▶️ Video", command=lambda v=d["video"]: webbrowser.open(v), font=("Segoe UI", 8), bg=UI["inset"], fg=UI["lime"], relief="flat", padx=8, pady=2, cursor="hand2")
+                    vid_btn.pack(side="left", padx=2)
+
+                def copy_name(text_to_copy):
+                    self.clipboard_clear()
+                    self.clipboard_append(text_to_copy)
+                    self.log(f"Copied '{text_to_copy}' to clipboard.", "INFO")
+
+                copy_btn = tk.Button(btn_col, text="📋 Copy", command=lambda n=name: copy_name(n), font=("Segoe UI", 8), bg=UI["inset"], fg=UI["quiet"], relief="flat", padx=6, pady=2, cursor="hand2")
+                copy_btn.pack(side="left", padx=2)
+
+        def fetch_demons():
+            parse_local_progress()
+            ok, demons = self.mgr.fetch_pointercrate_demons(limit=100)
+            def on_done():
+                nonlocal all_demons
+                if ok:
+                    all_demons = demons
+                    render_demons()
+                else:
+                    status_lbl.config(text=f"⚠️ Failed to connect to Pointercrate: {demons}", fg=UI["amber"])
+            dialog.after(0, on_done)
+
+        refresh_btn.config(command=lambda: threading.Thread(target=fetch_demons, daemon=True).start())
+        threading.Thread(target=fetch_demons, daemon=True).start()
+        search_var.trace_add("write", lambda *a: render_demons())
+
+    def open_jukebox_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Universal Jukebox & Practice Music Customizer")
+        dialog.geometry("640x520")
+        dialog.minsize(580, 440)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🎵 Universal Jukebox & Practice Music", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="1-click practice music replacer and local GD soundtrack manager.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        body_frame = tk.Frame(dialog, bg=UI["background"], padx=18, pady=12)
+        body_frame.pack(fill="both", expand=True)
+
+        # 1. Practice Music Status Card
+        prac_card = tk.Frame(body_frame, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        prac_card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(prac_card, text="PRACTICE MUSIC HACK (CRASH-PROOF)", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(prac_card, text="Replaces Geometry Dash's StayInsideMe.mp3 with any song of your choice without DLL hooks.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 8))
+
+        is_custom, desc = self.mgr.get_practice_music_status()
+        status_lbl = tk.Label(prac_card, text=f"Status: {desc}", font=("Segoe UI", 9, "bold"), fg=UI["lime"] if is_custom else UI["quiet"], bg=UI["panel"])
+        status_lbl.pack(anchor="w", pady=(0, 8))
+
+        btn_row = tk.Frame(prac_card, bg=UI["panel"])
+        btn_row.pack(fill="x")
+
+        def choose_custom_audio():
+            file_path = filedialog.askopenfilename(
+                parent=dialog,
+                title="Select Custom Practice Audio File",
+                filetypes=[("Audio Files (*.mp3;*.wav;*.ogg)", "*.mp3;*.wav;*.ogg"), ("All Files", "*.*")]
+            )
+            if not file_path:
+                return
+            ok, msg = self.mgr.set_custom_practice_music(file_path)
+            if ok:
+                status_lbl.config(text="Status: Custom Practice Music Active", fg=UI["lime"])
+                self.log(f"Custom practice music enabled: {os.path.basename(file_path)}", "SUCCESS")
+                self.play_ding()
+                messagebox.showinfo("Practice Music Updated", f"Successfully activated custom practice music!\n\nSource: {os.path.basename(file_path)}")
+            else:
+                messagebox.showerror("Failed", msg)
+
+        def restore_vanilla():
+            ok, msg = self.mgr.restore_vanilla_practice_music()
+            if ok:
+                status_lbl.config(text="Status: Vanilla StayInsideMe.mp3", fg=UI["quiet"])
+                self.log("Restored vanilla StayInsideMe.mp3.", "SUCCESS")
+                self.play_ding()
+                messagebox.showinfo("Restored", "Restored original vanilla StayInsideMe.mp3 practice music.")
+            else:
+                messagebox.showerror("Failed", msg)
+
+        tk.Button(btn_row, text="📁 Choose Any MP3 File...", command=choose_custom_audio, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="left", padx=(0, 8))
+        tk.Button(btn_row, text="🔄 Restore Vanilla Song", command=restore_vanilla, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+
+        # 2. Local Audio Library Card
+        lib_card = tk.Frame(body_frame, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        lib_card.pack(fill="both", expand=True)
+
+        tk.Label(lib_card, text="DOWNLOADED GD AUDIO LIBRARY", font=("Segoe UI", 9, "bold"), fg=UI["lilac"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(lib_card, text="Songs cached on your system from levels you've played:", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 6))
+
+        canvas = tk.Canvas(lib_card, bg=UI["panel_alt"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(lib_card, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel_alt"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_c_resize(event):
+            canvas.itemconfig(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _on_c_resize)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        tracks = self.mgr.get_local_audio_tracks()
+        if not tracks:
+            tk.Label(scrollable, text="No cached level songs found in your Geometry Dash directory.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel_alt"]).pack(pady=20)
+        else:
+            for t in tracks[:60]:
+                r = tk.Frame(scrollable, bg=UI["panel_alt"], padx=10, pady=5, highlightbackground=UI["border"], highlightthickness=1)
+                r.pack(fill="x", padx=4, pady=2)
+
+                tk.Label(r, text=f"🎵 Song #{t['song_id']}", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+                tk.Label(r, text=f"({t['size_mb']} MB)", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel_alt"]).pack(side="left", padx=(6, 0))
+
+                def make_use_prac(target_track):
+                    def do_use():
+                        ok, msg = self.mgr.set_custom_practice_music(target_track["path"])
+                        if ok:
+                            status_lbl.config(text=f"Status: Custom Practice Music (Song #{target_track['song_id']})", fg=UI["lime"])
+                            self.log(f"Practice music set to Song #{target_track['song_id']}", "SUCCESS")
+                            self.play_ding()
+                            messagebox.showinfo("Practice Music Updated", f"Set practice music to Song #{target_track['song_id']}!")
+                        else:
+                            messagebox.showerror("Error", msg)
+                    return do_use
+
+                use_btn = tk.Button(r, text="Set as Practice Song", command=make_use_prac(t), font=("Segoe UI", 7, "bold"), bg=UI["inset"], fg=UI["lime"], relief="flat", padx=6, pady=2, cursor="hand2")
+                use_btn.pack(side="right")
+
+    def open_bundle_manager_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Portable Archive & Save Sync (.geodesync)")
+        dialog.geometry("640x520")
+        dialog.minsize(580, 440)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="☁️ Portable Archive & Save Sync", font=("Segoe UI", 14, "bold"), fg=UI["amber"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Export or restore your complete Geometry Dash setup in a single portable .geodesync bundle.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        body_frame = tk.Frame(dialog, bg=UI["background"], padx=18, pady=12)
+        body_frame.pack(fill="both", expand=True)
+
+        # 1. Export Card
+        exp_card = tk.Frame(body_frame, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        exp_card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(exp_card, text="📤 EXPORT COMPLETE SETUP BUNDLE", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(exp_card, text="Packages your saves, active mods, and mod configs into a shareable .geodesync zip archive.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 8))
+
+        inc_saves = tk.BooleanVar(value=True)
+        inc_mods = tk.BooleanVar(value=True)
+        inc_cfgs = tk.BooleanVar(value=True)
+
+        chk_row = tk.Frame(exp_card, bg=UI["panel"])
+        chk_row.pack(anchor="w", pady=(0, 8))
+
+        tk.Checkbutton(chk_row, text="Save Files (CCGameManager & CCLocalLevels)", variable=inc_saves, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel"], selectcolor=UI["inset"], activebackground=UI["panel"]).pack(side="left", padx=(0, 10))
+        tk.Checkbutton(chk_row, text="Active Mods (.geode)", variable=inc_mods, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel"], selectcolor=UI["inset"], activebackground=UI["panel"]).pack(side="left", padx=(0, 10))
+        tk.Checkbutton(chk_row, text="Mod Configs", variable=inc_cfgs, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel"], selectcolor=UI["inset"], activebackground=UI["panel"]).pack(side="left")
+
+        def do_export():
+            dest = filedialog.asksaveasfilename(
+                parent=dialog,
+                title="Export .geodesync Bundle",
+                defaultextension=".geodesync",
+                filetypes=[("GeodeSync Bundles (*.geodesync)", "*.geodesync"), ("Zip Archives (*.zip)", "*.zip")]
+            )
+            if not dest:
+                return
+            ok, msg = self.mgr.export_geodesync_bundle(dest, include_saves=inc_saves.get(), include_mods=inc_mods.get(), include_configs=inc_cfgs.get())
+            if ok:
+                self.log(f"Exported bundle: {msg}", "SUCCESS")
+                self.play_ding()
+                messagebox.showinfo("Export Successful", f"Successfully exported setup bundle!\n\n{msg}")
+            else:
+                messagebox.showerror("Export Failed", msg)
+
+        tk.Button(exp_card, text="📦 Export to .geodesync Package...", command=do_export, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=12, pady=5, cursor="hand2").pack(anchor="w")
+
+        # 2. Import Card
+        imp_card = tk.Frame(body_frame, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        imp_card.pack(fill="x")
+
+        tk.Label(imp_card, text="📥 RESTORE / IMPORT BUNDLE", font=("Segoe UI", 9, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(imp_card, text="Restores saves, mods, and configs from another device or backup. Always creates a safety backup first!", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 8))
+
+        def do_import():
+            src = filedialog.askopenfilename(
+                parent=dialog,
+                title="Select .geodesync Bundle to Import",
+                filetypes=[("GeodeSync Bundles (*.geodesync)", "*.geodesync"), ("Zip Archives (*.zip)", "*.zip"), ("All Files", "*.*")]
+            )
+            if not src:
+                return
+            if not messagebox.askyesno("Confirm Import", "Importing will restore the contents of this bundle to your game folder.\nA safety backup of your existing saves will be taken automatically.\n\nProceed with import?"):
+                return
+            ok, msg = self.mgr.import_geodesync_bundle(src)
+            if ok:
+                self.log(f"Imported bundle: {msg}", "SUCCESS")
+                self.play_ding()
+                self.update_player_stats_ui()
+                messagebox.showinfo("Import Successful", f"Setup bundle restored successfully!\n\n{msg}")
+            else:
+                messagebox.showerror("Import Failed", msg)
+
+        tk.Button(imp_card, text="📂 Select .geodesync Bundle to Restore...", command=do_import, font=("Segoe UI", 9, "bold"), bg=UI["amber"], fg=UI["background"], relief="flat", padx=12, pady=5, cursor="hand2").pack(anchor="w")
+
+    def open_save_optimizer_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Save File Bloat Cleaner & Optimizer")
+        dialog.geometry("640x500")
+        dialog.minsize(580, 420)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🧹 Save File Bloat Cleaner & Optimizer", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Eliminate launch freezing and crash risks by safely cleaning online level caches from CCLocalLevels.dat.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        body_frame = tk.Frame(dialog, bg=UI["background"], padx=18, pady=12)
+        body_frame.pack(fill="both", expand=True)
+
+        card = tk.Frame(body_frame, bg=UI["panel"], padx=16, pady=14, highlightbackground=UI["border"], highlightthickness=1)
+        card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(card, text="ANALYZING SAVE DATA...", font=("Segoe UI", 9, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w")
+        stats_lbl = tk.Label(card, text="Scanning CCLocalLevels.dat...", font=("Segoe UI", 10), fg=UI["text"], bg=UI["panel"], justify="left")
+        stats_lbl.pack(anchor="w", pady=(6, 8))
+
+        explanation = (
+            "Why does this happen?\n"
+            "Every time you open or copy an online level in Geometry Dash, the game writes the full raw level data into "
+            "CCLocalLevels.dat. Over time, this file can grow beyond 30-60 MB, causing the game to take 30+ seconds to load, "
+            "freeze on the main menu, and fail cloud backups.\n\n"
+            "This optimizer safely purges uncompleted downloaded level caches while strictly preserving all your own created and edited levels."
+        )
+        tk.Label(card, text=explanation, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=560, justify="left").pack(anchor="w", pady=(0, 10))
+
+        def refresh_analysis():
+            ok, res = self.mgr.analyze_save_bloat()
+            if ok:
+                stats_lbl.config(
+                    text=f"• Save File Size: {res['file_size_mb']} MB\n"
+                         f"• Total Levels in Save: {res['total_levels']}\n"
+                         f"• Cached Downloaded Online Levels: {res['online_cached']}\n"
+                         f"• Preserved User-Created Levels: {res['user_created']}"
+                )
+            else:
+                stats_lbl.config(text=f"⚠️ Could not analyze save file: {res}", fg=UI["amber"])
+
+        refresh_analysis()
+
+        def do_clean():
+            if not messagebox.askyesno("Confirm Optimization", "Clean cached online level data?\n\nYour user-created levels will NOT be touched.\nA timestamped backup (.dat.bak) will be created automatically before cleaning."):
+                return
+            ok, res = self.mgr.clean_save_bloat(remove_online_cache=True)
+            if ok:
+                self.log(f"Save optimization complete: saved {res['saved_mb']} MB, cleaned {res['removed_levels']} cached levels.", "SUCCESS")
+                self.play_ding()
+                refresh_analysis()
+                messagebox.showinfo(
+                    "Optimization Complete",
+                    f"Successfully optimized your save file!\n\n"
+                    f"• Cleaned: {res['removed_levels']} cached levels\n"
+                    f"• Old Size: {res['old_size_mb']} MB\n"
+                    f"• New Size: {res['new_size_mb']} MB\n"
+                    f"• Space Saved: {res['saved_mb']} MB\n\n"
+                    f"Geometry Dash will now launch significantly faster."
+                )
+            else:
+                messagebox.showerror("Optimization Failed", str(res))
+
+        tk.Button(card, text="🚀 Optimize & Clean Save Data Now", command=do_clean, font=("Segoe UI", 10, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=14, pady=6, cursor="hand2").pack(anchor="w")
+
 
 
 

@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.22",
+  "app_version": "2.4.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.22 introduces 1-click Microsoft Visual C++ 2015-2022 Redistributable auto-installation, OneDrive storage-full / quota lock diagnostics, and Emergency Factory Reset to clean official 2.2081."
+  "announcement": "GeodeSync v2.4.0 Massive Update: In-App Geode Mod Store & Browser, Pointercrate Top 150 Demonlist with local progress tracking, Universal Jukebox & Practice Music Customizer, Portable Archive Sync (.geodesync), and Save File Bloat Cleaner & Optimizer!"
 }

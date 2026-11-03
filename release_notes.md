@@ -1,3 +1,42 @@
+# GeodeSync v2.4.0 — The Massive Power & Community Update
+
+## Game-Changing Features for the Geometry Dash & Geode Ecosystem
+
+- **🛍️ Integrated Geode Mod Store & In-App Browser (`open_mod_store_dialog`):**
+  - Live in-app query to the official Geode SDK Mod Index API (`https://api.geode-sdk.org/v1/mods`).
+  - Search any mod by title, author, or tags; filter by *Most Downloaded*, *Trending*, or *Recently Updated*.
+  - View rich mod metadata, download counts, and category tags.
+  - 1-click in-app downloading and installation directly into `<gd_path>/geode/mods/` with automatic zip validation and `mod.json` integrity verification.
+  - Accessible directly from the Toolbox, Hero dashboard, and within the Geode Mod Manager dialog.
+
+- **🏆 Live Pointercrate Top 150 Demonlist Browser (`open_demonlist_browser`):**
+  - Connects to the official Pointercrate API (`https://pointercrate.com/api/v2/demons/listed/`) to display real-time Demon rankings, point values, verifiers, and publishers.
+  - **Save-File Progress Cross-Referencing:** Decrypts your local `CCGameManager.dat` and checks whether you have beaten or attempted any Demon on the list! Shows `🏆 100% BEATEN` or `🎯 54% (1,240 att)` live next to the level name!
+  - 1-click **`▶️ Video`** button opens official verification YouTube links in your default browser.
+  - 1-click **`📋 Copy`** button copies level names and IDs to your clipboard.
+
+- **🎵 Universal Audio Jukebox & Crash-Proof Practice Music Customizer (`open_jukebox_dialog`):**
+  - **100% Crash-Proof Practice Music Hack:** Replaces Geometry Dash's `Resources/StayInsideMe.mp3` with any custom audio file without injecting buggy DLL hooks into game memory. Works on all GD versions (2.2081, 2.2, 2.1, etc.).
+  - Automatic vanilla backup: safely stores `StayInsideMe.mp3.bak` and allows 1-click restoration to vanilla audio at any time.
+  - **Downloaded Song Library Integration:** Automatically indexes your local `%LOCALAPPDATA%\GeometryDash\*.mp3` cache and lets you set any level's soundtrack as your global practice music with 1 click.
+
+- **☁️ Full Portable Archive Sync (`.geodesync` Bundles):**
+  - **1-Click Complete Setup Export (`export_geodesync_bundle`):** Compresses your game saves (`CCGameManager.dat`, `CCLocalLevels.dat`), active `.geode` mods, and mod configurations into a single `.geodesync` portable package.
+  - **1-Click Bundle Restore (`import_geodesync_bundle`):** Unpacks and restores your entire Geometry Dash setup onto another PC, Steam Deck, or after a clean OS install.
+  - **Pre-Import Safety Snapshot:** Automatically takes a full backup snapshot of existing saves before unpacking any archive to prevent accidental data loss.
+
+- **🧹 Save File Bloat Cleaner & Optimizer (`open_save_optimizer_dialog`):**
+  - **Eliminates Startup Freezing & Crash Risks:** Geometry Dash saves every downloaded online level into `CCLocalLevels.dat`, causing save files to balloon up to 30-60 MB, freezing the game on startup and causing cloud backup failures.
+  - **Safe Bloat Purging:** Safely removes uncompleted downloaded online level caches while strictly preserving all your own created and edited levels.
+  - Automatically creates a timestamped safety backup (`CCLocalLevels.dat.bak_<timestamp>`) before re-encoding.
+  - Reports exact megabytes freed and level counts cleaned (frequently reducing 40MB+ files down to ~1.8MB).
+
+- **🚀 Performance Game Booster & Low-Latency Launcher (`launch_boosted_game`):**
+  - Launches Geometry Dash with `HIGH_PRIORITY_CLASS` (0x00000080) for ultra-low frametime latency and zero micro-stuttering on high-refresh rate (144Hz/240Hz/360Hz) monitors.
+  - Pre-launch mod crash guard automatically scans and repairs known problematic mod versions before game execution.
+
+---
+
 # GeodeSync v2.3.22
 
 ## Microsoft Visual C++ 2015-2022 Auto-Installer & Clean Factory Reset
