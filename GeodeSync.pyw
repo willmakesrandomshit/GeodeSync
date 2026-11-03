@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.19"
+APP_VERSION = "2.3.20"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -483,11 +483,7 @@ else:
         "2.2081 (Geode Compatible • Recommended)": {
             "manifest": "3816559102876907245",
             "ver": "2.2081",
-            "size": 10700288
-        },
-        "2.2074 (Outdated 2.2 • Needs 2.2081 for Geode)": {
-            "manifest": "4978051680517726588",
-            "ver": "2.2074",
+            "sizes": (10700288, 10698752),
             "size": 10698752
         },
         "2.113 (Classic 2.11 Legacy)": {
@@ -497,7 +493,8 @@ else:
         }
     }
 
-SIZE_22081 = 10700288
+SIZES_22081 = (10700288, 10698752)
+SIZE_22081 = 10698752
 SIZE_2209 = 13178880
 EXPECTED_DEPOT_BYTES = 230000000 if IS_MAC else 204000000
 MACOS_UPDATE_MAX_BYTES = 300 * 1024 * 1024
@@ -1579,8 +1576,13 @@ def validate_windows_game_images(game_root, expected_exe_size=None):
     if not os.path.isfile(executable):
         return "GeometryDash.exe is missing."
     try:
-        if expected_exe_size and os.path.getsize(executable) != expected_exe_size:
-            return "GeometryDash.exe size does not match the selected Steam depot."
+        if expected_exe_size is not None:
+            actual = os.path.getsize(executable)
+            if isinstance(expected_exe_size, (tuple, list, set)):
+                if actual not in expected_exe_size:
+                    return "GeometryDash.exe size does not match the selected Steam depot."
+            elif actual != expected_exe_size:
+                return "GeometryDash.exe size does not match the selected Steam depot."
     except OSError as exc:
         return f"GeometryDash.exe cannot be inspected ({exc})."
     try:
@@ -2210,10 +2212,8 @@ class GDManager:
         except Exception:
             return "Inaccessible", UI["red"]
 
-        if size == SIZE_22081:
+        if size in SIZES_22081:
             return "2.2081 (Geode Compatible)", UI["lime"]
-        elif size == 10698752:
-            return "2.2074 (Outdated 2.2 • Needs 2.2081 for Geode)", UI["amber"]
         elif size == 7578624:
             return "2.113 (Classic 2.11 Legacy)", UI["lilac"]
         elif size == SIZE_2209:
@@ -2250,7 +2250,7 @@ class GDManager:
         exe = os.path.join(self.gd_path, "GeometryDash.exe")
         if os.path.exists(exe):
             try:
-                return os.path.getsize(exe) == SIZE_22081
+                return os.path.getsize(exe) in SIZES_22081
             except Exception:
                 return False
         return False
@@ -2455,16 +2455,24 @@ class GDManager:
                 return app_path is not None and validate_macos_game_app(app_path) is None
             exe = os.path.join(d_path, "GeometryDash.exe")
             try:
-                expected_size = next(
-                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
+                target_meta = next(
+                    (meta for meta in KNOWN_VERSIONS.values()
                      if str(meta.get("manifest")) == str(self.target_manifest)),
-                    None,
+                    {},
                 )
+                expected_size = target_meta.get("sizes") or target_meta.get("size")
+                if str(self.target_manifest) == "3816559102876907245":
+                    expected_size = SIZES_22081
+
                 if not os.path.exists(exe):
                     return False
                 actual_size = os.path.getsize(exe)
-                if actual_size != (expected_size if expected_size else SIZE_22081):
-                    return False
+                if expected_size is not None:
+                    if isinstance(expected_size, (tuple, list, set)):
+                        if actual_size not in expected_size:
+                            return False
+                    elif actual_size != expected_size:
+                        return False
                 resources_dir = os.path.join(d_path, "Resources")
                 if not os.path.isdir(resources_dir):
                     return False
@@ -4581,12 +4589,12 @@ class GeodeSyncApp(tk.Tk):
 
         if not is_22081:
             game_ver, _ = self.mgr.get_gd_version_info()
-            if "2.207" in game_ver:
+            if "2.207" in game_ver or "Outdated" in game_ver:
                 self.guide_card.config(highlightbackground=UI["amber"])
                 self.guide_badge.config(text="OUTDATED 2.2 DETECTED", fg=UI["amber"], bg=UI["amber_dark"])
                 self.guide_title.config(text="Upgrade to 2.2081 for Full Geode Compatibility")
                 self.guide_desc.config(
-                    text="Your Geometry Dash is on v2.2074, which causes crashes or missing mods. Click below to upgrade to 2.2081 cleanly."
+                    text="Your Geometry Dash is on an older 2.2 build, which causes crashes or missing mods. Click below to upgrade to 2.2081 cleanly."
                 )
                 self.primary_btn.set_config(
                     text="⚡ Upgrade to GD 2.2081 (Geode Compatible)",
@@ -5012,11 +5020,14 @@ class GeodeSyncApp(tk.Tk):
 
         self.log(f"Staging and checking Geometry Dash {self.mgr.target_gd_version}...", "INFO")
         try:
-            expected_windows_exe_size = next(
-                (meta.get("size") for meta in KNOWN_VERSIONS.values()
+            target_meta = next(
+                (meta for meta in KNOWN_VERSIONS.values()
                  if str(meta.get("manifest")) == str(self.mgr.target_manifest)),
-                None,
+                {},
             )
+            expected_windows_exe_size = target_meta.get("sizes") or target_meta.get("size")
+            if str(self.mgr.target_manifest) == "3816559102876907245":
+                expected_windows_exe_size = SIZES_22081
 
             def validate_staged_depot(staged_root):
                 if IS_MAC:

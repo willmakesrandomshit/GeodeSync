@@ -1,3 +1,12 @@
+# GeodeSync v2.3.20
+
+## Critical Hotfix: Eliminate False 2.2074 Detection & Infinite Downgrade Loop
+
+- **Fixed False 2.2074 Version Misidentification:** Steam depot `3816559102876907245` (the official Geode-compatible 2.2081 Windows depot) downloads a `GeometryDash.exe` of size `10,698,752` bytes. Previously, this exact size was erroneously labeled as `2.2074`, causing GeodeSync to immediately show an outdated warning and prompt the user to downgrade again after a clean download.
+- **Dual-Size 2.2081 Binary Recognition:** Both official Windows 2.2081 binary sizes (`10,698,752` bytes and `10,700,288` bytes) are now recognized as `2.2081 (Geode Compatible)`.
+- **Depot & Installation Verification Updated:** `has_downloaded_depot()`, `validate_staged_depot()`, and `validate_windows_game_images()` now seamlessly accept both official 2.2081 binary sizes.
+- **Removed Deprecated 2.2074 Target:** Purged the legacy `2.2074` entry from `KNOWN_VERSIONS` to guarantee downgrades always target clean 2.2081.
+
 # GeodeSync v2.3.19
 
 ## Smart Self-Repair Assistant & Universal Auto-Fix System

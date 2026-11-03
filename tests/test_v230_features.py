@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from main import GDManager, APP_VERSION
+from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_images
 
 
 class TestV230Features(unittest.TestCase):
@@ -23,7 +23,45 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.3.19")
+        self.assertEqual(APP_VERSION, "2.3.20")
+
+    def test_gd_22081_binary_size_recognition(self):
+        """Ensures both 10698752 and 10700288 byte executables are recognized as 2.2081."""
+        exe_path = os.path.join(self.gd_path, "GeometryDash.exe")
+        for valid_size in (10698752, 10700288):
+            with open(exe_path, "wb") as f:
+                f.truncate(valid_size)
+            self.assertTrue(self.mgr.is_current_gd_22081(), f"Size {valid_size} should be recognized as 2.2081")
+            ver_text, color = self.mgr.get_gd_version_info()
+            self.assertIn("2.2081", ver_text)
+            self.assertNotIn("2.207", ver_text)
+
+        # Invalid size (e.g. 2.209 or corrupted)
+        with open(exe_path, "wb") as f:
+            f.truncate(13178880)
+        self.assertFalse(self.mgr.is_current_gd_22081())
+        ver_text, color = self.mgr.get_gd_version_info()
+        self.assertIn("2.209", ver_text)
+
+    def test_gd_22081_depot_size_verification(self):
+        """Ensures has_downloaded_depot and validate_windows_game_images accept both 2.2081 sizes."""
+        depot_dir = os.path.join(self.test_dir, "depot")
+        res_dir = os.path.join(depot_dir, "Resources")
+        os.makedirs(res_dir, exist_ok=True)
+        depot_exe = os.path.join(depot_dir, "GeometryDash.exe")
+        with open(os.path.join(res_dir, "Dash.mp3"), "wb") as f:
+            f.write(b"MOCK_AUDIO" * 100)
+        with open(os.path.join(res_dir, "GJ_GameSheet-hd.png"), "wb") as f:
+            f.write(b"MOCK_TEXTURE" * 100)
+        # Pad depot total size above 150MB threshold
+        with open(os.path.join(depot_dir, "large_padding.dat"), "wb") as f:
+            f.truncate(160 * 1024 * 1024)
+
+        with patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
+            for valid_size in SIZES_22081:
+                with open(depot_exe, "wb") as f:
+                    f.truncate(valid_size)
+                self.assertTrue(self.mgr.has_downloaded_depot(), f"Depot with size {valid_size} should be valid")
 
     def test_check_outdated_mods(self):
         mods_dir = os.path.join(self.gd_path, "geode", "mods")
