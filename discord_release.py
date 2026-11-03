@@ -8,12 +8,44 @@ AVATAR_URL = "https://raw.githubusercontent.com/willmakesrandomshit/GeodeSync/re
 BRAND_COLOR = 0x7557E8
 
 
+def _format_notes_for_discord(body):
+    """
+    Format markdown notes so they render cleanly in Discord embed descriptions:
+    - Ensure headers are bolded
+    - Clean up nested bullet indentation so it doesn't run together
+    - Strip excessive heading hashtags
+    """
+    if not body:
+        return "A new GeodeSync update is available."
+
+    lines = []
+    for line in body.splitlines():
+        line_str = line.strip()
+        if not line_str:
+            lines.append("")
+            continue
+        if line_str.startswith("# "):
+            lines.append(f"**{line_str.lstrip('#').strip()}**")
+        elif line_str.startswith("## "):
+            lines.append(f"\n**{line_str.lstrip('#').strip()}**")
+        elif line_str.startswith("### "):
+            lines.append(f"\n**{line_str.lstrip('#').strip()}**")
+        elif line_str.startswith("- ") or line_str.startswith("* "):
+            lines.append(f"• {line_str[2:].strip()}")
+        else:
+            lines.append(line_str)
+
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
 def _release_notes(body, release_url, limit=3500):
-    body = (body or "A new GeodeSync update is available.").strip()
+    body = _format_notes_for_discord(body)
     if len(body) <= limit:
         return body
-    suffix = f"… [Read the full changelog]({release_url})"
-    return body[: limit - len(suffix) - 1].rstrip() + "\n" + suffix
+    suffix = f"\n… [Read the full changelog]({release_url})"
+    return body[: limit - len(suffix) - 1].rstrip() + suffix
 
 
 def build_release_payload(title, tag, body, release_url, assets=None):
@@ -22,7 +54,8 @@ def build_release_payload(title, tag, body, release_url, assets=None):
     version_tag = tag if tag.startswith("v") else f"v{tag}"
     asset_base = f"{REPOSITORY}/releases/download/{tag}"
     notes = _release_notes(body, release_url)
-    # Keep the visible title compact; the full release title is still on GitHub.
+
+    # Keep the visible title compact
     display_title = re.sub(r"\s+", " ", (title or f"GeodeSync {tag}")).strip()
     if len(display_title) > 240:
         display_title = display_title[:237].rstrip() + "…"
@@ -36,6 +69,7 @@ def build_release_payload(title, tag, body, release_url, assets=None):
         }
     else:
         assets = set(assets)
+
     downloads = []
     for label, filename in (
         ("Windows", "GeodeSync-Windows.zip"),
@@ -45,6 +79,7 @@ def build_release_payload(title, tag, body, release_url, assets=None):
     ):
         if filename in assets:
             downloads.append(f"[{label}](<{asset_base}/{filename}>)")
+
     if not downloads:
         downloads.append(f"[Open the release page]({release_url})")
 
@@ -55,7 +90,7 @@ def build_release_payload(title, tag, body, release_url, assets=None):
         "embeds": [
             {
                 "author": {
-                    "name": "GEODESYNC  •  OFFICIAL RELEASE",
+                    "name": "GEODESYNC • OFFICIAL RELEASE",
                     "icon_url": AVATAR_URL,
                 },
                 "title": f"⚡ {display_title}",
@@ -65,17 +100,17 @@ def build_release_payload(title, tag, body, release_url, assets=None):
                 "fields": [
                     {
                         "name": "⬇️ Get GeodeSync",
-                        "value": "  ·  ".join(downloads),
+                        "value": " · ".join(downloads),
                         "inline": False,
                     },
                     {
-                        "name": "🔎 Verify the download",
+                        "name": "🔍 Verify the download",
                         "value": f"[Release details, checksums, and source]({release_url})",
                         "inline": False,
                     },
                 ],
                 "thumbnail": {"url": AVATAR_URL},
-                "footer": {"text": f"GeodeSync  /  {tag}"},
+                "footer": {"text": f"GeodeSync / {tag}"},
             }
         ],
     }

@@ -50,13 +50,25 @@ def send_update(version=None, title=None, notes=None, ping=False, release_tag=No
     release_tag = release_tag or f"v{version}"
     release_url = release_url or f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/{release_tag}"
     display_title = title or f"GeodeSync v{version} Released!"
-    assets = os.environ.get("RELEASE_ASSETS")
+    assets_env = os.environ.get("RELEASE_ASSETS")
+    if assets_env is not None:
+        assets = assets_env.split(",")
+    else:
+        try:
+            url = f"https://api.github.com/repos/willmakesrandomshit/GeodeSync/releases/tags/{release_tag}"
+            req = urllib.request.Request(url, headers={"User-Agent": "GeodeSync-Release-Broadcast"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                assets = [asset["name"] for asset in data.get("assets", [])]
+        except Exception:
+            assets = None
+
     payload = build_release_payload(
         display_title,
         release_tag,
         notes,
         release_url,
-        assets=assets.split(",") if assets is not None else None,
+        assets=assets,
     )
 
     try:
@@ -81,19 +93,25 @@ if __name__ == "__main__":
         print(f"Saved webhook for channel {CHANNEL_ID} to {CONFIG_FILE}!")
         sys.exit(0)
 
-    # GitHub Actions supplies the exact published release data. Local runs fall
-    # back to the checked-in version and release notes.
-    notes_file = os.environ.get("RELEASE_BODY_FILE") or os.path.join(os.path.dirname(__file__), "release_notes.md")
-    notes = os.environ.get("RELEASE_BODY")
-    if os.path.exists(notes_file):
-        if not notes:
-            with open(notes_file, "r", encoding="utf-8") as f:
-                notes = f.read()
-
     version = current_version()
     tag = os.environ.get("RELEASE_TAG") or f"v{version}"
     title = os.environ.get("RELEASE_TITLE") or f"GeodeSync {tag} released"
     release_url = os.environ.get("RELEASE_URL") or f"https://github.com/willmakesrandomshit/GeodeSync/releases/tag/{tag}"
+
+    notes = os.environ.get("RELEASE_BODY")
+    if not notes:
+        clean_v = version.replace(".", "")
+        v_notes = os.path.join(os.path.dirname(__file__), f"release_notes_v{clean_v}.md")
+        if os.path.exists(v_notes):
+            with open(v_notes, "r", encoding="utf-8") as f:
+                notes = f.read()
+        else:
+            notes_file = os.environ.get("RELEASE_BODY_FILE") or os.path.join(os.path.dirname(__file__), "release_notes.md")
+            if os.path.exists(notes_file):
+                with open(notes_file, "r", encoding="utf-8") as f:
+                    full_notes = f.read()
+                    notes = full_notes.split("\n---")[0].strip()
+
     if not send_update(
         version=version,
         title=title,
