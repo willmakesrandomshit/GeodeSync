@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.4.2"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -373,7 +373,7 @@ def version_sort_key(version):
     return parts + (0,) * max(0, 8 - len(parts))
 
 
-def fetch_latest_published_release(timeout=8):
+def fetch_latest_published_release(timeout=8, platform_name=None):
     """Return the newest stable *published release*, never a source version manifest."""
     request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "GeodeSync-Client"})
     try:
@@ -390,6 +390,12 @@ def fetch_latest_published_release(timeout=8):
         tag = str(release.get("tag_name", "")).strip()
         key = version_sort_key(tag)
         if key is not None:
+            if platform_name:
+                try:
+                    if not release_has_app_update(release, platform_name):
+                        continue
+                except Exception:
+                    pass
             stable.append((key, release))
     if stable:
         return max(stable, key=lambda item: item[0])[1]
@@ -673,9 +679,13 @@ def select_app_update_asset(release, platform_name=None, architecture=None):
             or not release.get("published_at")):
         raise ValueError("The update is not a published stable GeodeSync release.")
     if platform_name == "windows":
-        candidates = ["GeodeSync-Windows.zip", f"GeodeSync-{tag}-Windows.zip"]
-        if not tag.startswith("v"):
-            candidates.append(f"GeodeSync-v{tag}-Windows.zip")
+        clean_tag = tag.lstrip("v")
+        candidates = [
+            "GeodeSync-Windows.zip",
+            f"GeodeSync-{tag}-Windows.zip",
+            f"GeodeSync-v{clean_tag}-Windows.zip",
+            f"GeodeSync-{clean_tag}-Windows.zip",
+        ]
     elif platform_name == "linux":
         candidates = [f"GeodeSync-{tag}-Linux.tar.gz", "GeodeSync-Linux.tar.gz"]
     elif platform_name == "macos":
@@ -704,7 +714,7 @@ def release_has_app_update(release, platform_name=None, architecture=None):
     """Whether this published release has a valid package for this platform."""
     try:
         select_app_update_asset(release, platform_name, architecture)
-    except FileNotFoundError:
+    except (FileNotFoundError, ValueError):
         return False
     return True
 
@@ -5882,8 +5892,14 @@ class GeodeSyncApp(tk.Tk):
 
         def _fetch():
             try:
-                mods = self.mgr.fetch_geode_store_mods()
-                self._cached_store_mods = mods
+                res = self.mgr.fetch_geode_store_mods()
+                if isinstance(res, tuple) and len(res) == 2:
+                    ok, mods = res
+                    self._cached_store_mods = mods if (ok and isinstance(mods, list)) else []
+                elif isinstance(res, list):
+                    self._cached_store_mods = res
+                else:
+                    self._cached_store_mods = []
                 if hasattr(self, "tk") and self.tk:
                     self.after(0, self._render_store_cards)
             except Exception:
@@ -5897,7 +5913,7 @@ class GeodeSyncApp(tk.Tk):
         query = (self.store_search_var.get() or "").lower().strip()
         filtered = [
             m for m in self._cached_store_mods
-            if not query or query in m.get("name", "").lower() or query in m.get("id", "").lower() or query in m.get("description", "").lower()
+            if isinstance(m, dict) and (not query or query in m.get("name", "").lower() or query in m.get("id", "").lower() or query in m.get("description", "").lower())
         ]
         if not filtered:
             tk.Label(self.store_cards_container, text="No mods found matching your search.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["background"], pady=20).pack()
@@ -5996,8 +6012,14 @@ class GeodeSyncApp(tk.Tk):
 
         def _fetch():
             try:
-                demons = self.mgr.fetch_pointercrate_demons()
-                self._cached_demons = demons
+                res = self.mgr.fetch_pointercrate_demons()
+                if isinstance(res, tuple) and len(res) == 2:
+                    ok, demons = res
+                    self._cached_demons = demons if (ok and isinstance(demons, list)) else []
+                elif isinstance(res, list):
+                    self._cached_demons = res
+                else:
+                    self._cached_demons = []
                 if hasattr(self, "tk") and self.tk:
                     self.after(0, self._render_demonlist_cards)
             except Exception:
@@ -6011,7 +6033,7 @@ class GeodeSyncApp(tk.Tk):
         query = (self.demon_search_var.get() or "").lower().strip()
         filtered = [
             d for d in self._cached_demons
-            if not query or query in d.get("name", "").lower() or query in d.get("creator", "").lower() or query in d.get("verifier", "").lower()
+            if isinstance(d, dict) and (not query or query in d.get("name", "").lower() or query in d.get("creator", "").lower() or query in d.get("verifier", "").lower())
         ]
         if not filtered:
             tk.Label(self.demon_cards_container, text="No demons found matching your search.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["background"], pady=20).pack()
@@ -6112,7 +6134,9 @@ class GeodeSyncApp(tk.Tk):
                 fg=UI["lime"] if is_custom else UI["quiet"]
             )
         if hasattr(self, "jukebox_sfx_status_lbl"):
-            is_custom_sfx, sfx_desc = self.mgr.get_custom_sfx_status()
+            sfx_res = self.mgr.get_custom_sfx_status()
+            is_custom_sfx = sfx_res.get("death_sfx_custom", False) if isinstance(sfx_res, dict) else False
+            sfx_desc = "Custom Death SFX Active" if is_custom_sfx else "Vanilla Death Sound (explode_11.ogg)"
             self.jukebox_sfx_status_lbl.config(
                 text=f"Current Status: {sfx_desc}",
                 fg=UI["lilac"] if is_custom_sfx else UI["quiet"]
@@ -8047,7 +8071,8 @@ class GeodeSyncApp(tk.Tk):
             pass
 
         try:
-            rel = fetch_latest_published_release(timeout=8)
+            platform_target = "windows" if IS_WIN else "macos" if IS_MAC else "linux"
+            rel = fetch_latest_published_release(timeout=8, platform_name=platform_target)
             tag = str(rel.get("tag_name", "")).lstrip("v")
             if is_newer_app_version(tag, APP_VERSION):
                 self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
@@ -8082,7 +8107,8 @@ class GeodeSyncApp(tk.Tk):
         self.log("Checking for GeodeSync updates...", "INFO")
         def _check():
             try:
-                rel = fetch_latest_published_release(timeout=6)
+                platform_target = "windows" if IS_WIN else "macos" if IS_MAC else "linux"
+                rel = fetch_latest_published_release(timeout=6, platform_name=platform_target)
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")

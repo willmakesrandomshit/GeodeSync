@@ -1,9 +1,9 @@
 {
-  "app_version": "2.4.1",
+  "app_version": "2.4.2",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.4.1 AAA Gaming UI Overhaul: Modern Tabbed Navigation (Dashboard, Mod Store, Demonlist, Jukebox & SFX, Save Hub, Toolbox), High-Contrast Cyberpunk UI, Embedded Store & Demonlist, and Zero Clutter!"
+  "announcement": "GeodeSync v2.4.2 Hotfix & Power Polish: Fixed embedded Mod Store and Demonlist tuple unpacking crash, resolved custom SFX status inspection, and boosted updater package verification reliability!"
 }

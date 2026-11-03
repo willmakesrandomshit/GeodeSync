@@ -48,5 +48,8 @@ Copy-Item $exePath (Join-Path $repoRoot 'dist\GeodeSync.exe') -Force
 if (Test-Path 'C:\Users\Owner\Downloads') {
     Copy-Item $exePath 'C:\Users\Owner\Downloads\GeodeSync.exe' -Force
 }
+if (Test-Path 'C:\Users\Owner\Downloads\GeodeSync-Windows') {
+    Get-ChildItem -Force $buildDir | Copy-Item -Destination 'C:\Users\Owner\Downloads\GeodeSync-Windows' -Recurse -Force
+}
 Copy-Item $zipPath (Join-Path $repoRoot 'dist\GeodeSync-Windows.zip') -Force
 Write-Output "Built $zipPath"
