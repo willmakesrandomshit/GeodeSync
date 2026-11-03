@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.12"
+APP_VERSION = "2.3.17"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1090,6 +1090,42 @@ def validate_macos_game_app(app_path):
     if not os.access(executable, os.X_OK):
         return "Geometry Dash.app's main executable is not marked executable. Use Steam's Verify integrity action to restore it."
     return None
+
+
+def reset_invalid_macos_depot_cache(depot_path, installed_game_path=None):
+    """Remove only a malformed Geometry Dash Steam depot cache for a clean retry.
+
+    The installed game is never a valid target: the path must be Steam's exact
+    app_322170/depot_322172 content-cache directory, and the cached app bundle
+    must exist but fail structural validation.
+    """
+    if not depot_path or os.path.islink(depot_path) or not os.path.isdir(depot_path):
+        return False
+
+    target = os.path.realpath(os.path.abspath(depot_path))
+    normalized = os.path.normcase(target).replace("\\", "/").rstrip("/")
+    expected_suffix = f"/steamapps/content/app_{APP_ID}/depot_322172"
+    if not normalized.endswith(expected_suffix):
+        raise ValueError("Refusing to reset a path that is not the Geometry Dash Steam depot cache.")
+
+    installed = os.path.realpath(os.path.abspath(installed_game_path)) if installed_game_path else None
+    if installed and (target == installed or target.startswith(installed + os.sep)):
+        raise ValueError("Refusing to reset the installed Geometry Dash folder.")
+
+    app_path = find_macos_game_app(target)
+    if not app_path:
+        return False
+    problem = validate_macos_game_app(app_path)
+    if not problem:
+        return False
+
+    # Do not follow a bundle symlink, even though the parent cache path was
+    # checked above. Steam's cache contents are disposable; the live install
+    # and save directory are outside this narrowly validated path.
+    if os.path.islink(app_path):
+        raise ValueError("Refusing to reset a symlinked Geometry Dash.app cache.")
+    shutil.rmtree(target)
+    return True
 
 
 def inspect_macos_app_security(app_path=None, runner=None):
@@ -2431,17 +2467,56 @@ class GDManager:
         return False
 
     def is_geode_installed(self):
-        if not self.gd_path:
+        if not self.gd_path or not os.path.exists(self.gd_path):
             return False
         if IS_MAC:
-            app_dir = os.path.join(self.gd_path, "Geometry Dash.app")
+            app_dir = find_macos_game_app(self.gd_path)
             mac_geode_dir = os.path.expanduser("~/Library/Application Support/GeometryDash/geode")
-            in_app_geode = os.path.join(app_dir, "Contents", "Frameworks", "Geode.dylib")
-            return os.path.exists(mac_geode_dir) or os.path.exists(in_app_geode)
-        dll = os.path.join(self.gd_path, "Geode.dll")
-        proxy = os.path.join(self.gd_path, "XInput1_4.dll")
-        geode_dir = os.path.join(self.gd_path, "geode")
-        return (os.path.exists(dll) and os.path.exists(proxy)) or os.path.exists(geode_dir)
+            if app_dir:
+                bundle = os.path.join(app_dir, "Contents")
+                loader_candidates = (
+                    os.path.join(bundle, "Frameworks", "Geode.dylib"),
+                    os.path.join(bundle, "MacOS", "Geode.dylib"),
+                    os.path.join(bundle, "Frameworks", "Geode.framework", "Geode"),
+                )
+                if any(os.path.isfile(path) for path in loader_candidates):
+                    return True
+            # A data directory alone can survive an uninstall, so require
+            # evidence that Geode has actually started before treating it as
+            # an installed loader.
+            return self._has_geode_startup_log(mac_geode_dir)
+
+        # Geode's loader DLL is the authoritative Windows/Proton marker. Some
+        # valid installs do not have the legacy XInput proxy (or use a
+        # different proxy name), so requiring that second file caused false
+        # negatives. Ignore a leftover data folder unless it has a Geode log.
+        game_path = os.path.abspath(self.gd_path)
+        loader_candidates = (
+            os.path.join(game_path, "Geode.dll"),
+            os.path.join(game_path, "geode", "Geode.dll"),
+        )
+        if any(os.path.isfile(path) for path in loader_candidates):
+            return True
+        return self._has_geode_startup_log(os.path.join(game_path, "geode"))
+
+    @staticmethod
+    def _has_geode_startup_log(geode_dir):
+        log_dir = os.path.join(geode_dir, "logs")
+        if not os.path.isdir(log_dir):
+            return False
+        try:
+            files = [
+                os.path.join(log_dir, name)
+                for name in os.listdir(log_dir)
+                if name.lower().endswith(".log") and os.path.isfile(os.path.join(log_dir, name))
+            ]
+            if not files:
+                return False
+            latest = max(files, key=os.path.getmtime)
+            with open(latest, "r", encoding="utf-8", errors="ignore") as stream:
+                return any(re.search(r"\bRunning Geode\s+v?\d+\.\d+\.\d+", line, re.IGNORECASE) for line in stream)
+        except OSError:
+            return False
 
     def get_installed_geode_version(self):
         if not self.gd_path or not os.path.isdir(self.gd_path):
@@ -3642,7 +3717,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["background"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
         # Header banner
@@ -3765,82 +3840,83 @@ class GeodeSyncApp(tk.Tk):
         )
         self.primary_btn.pack(fill="x")
 
-        # 2. QUICK COMPANION TOOLS (Clean 5x4 Grid • 20 Power Tools)
+        # 2. TOOLKIT (one shared grid keeps native Tk stable on Linux)
         tools_card = tk.Frame(body, bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
         tools_card.pack(fill="both", expand=True, pady=(0, 8))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
-        tools_head.pack(fill="x", pady=(0, 6))
+        tools_head.pack(fill="x", pady=(0, 8))
+        tk.Label(tools_head, text="TOOLBOX", font=("Segoe UI", 11, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+        tk.Label(tools_head, text="Choose what you want to do", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
 
-        tk.Label(tools_head, text="COMPANION TOOLS & POWER MODS (20 TOOLS)", font=("Segoe UI", 8, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
-
+        # Keep a single, flat grid: some Linux Tk 8.6 builds crash when these
+        # controls are constructed inside nested section frames.
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
         tool_grid.pack(fill="both", expand=True)
-        for col in range(4):
+        tool_grid.columnconfigure(0, weight=0, minsize=92)
+        for col in range(1, 5):
             tool_grid.columnconfigure(col, weight=1)
         for row in range(5):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
+        groups = (
+            ("MODS", "#a7d957", "#252b20"),
+            ("PLAY", "#c497e8", "#292333"),
+            ("REPAIR", "#e4b968", "#30281e"),
+            ("PREFERENCES", "#a99be7", "#282432"),
+            ("APP", "#63d5ce", "#202b2b"),
+        )
+        for row, (name, accent, row_bg) in enumerate(groups):
+            tk.Label(
+                tool_grid, text=name, font=("Segoe UI", 8, "bold"),
+                fg=accent, bg=UI["panel"], anchor="w", padx=5,
+            ).grid(row=row, column=0, sticky="ew", padx=(2, 5), pady=4)
+
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
+            row_bg = groups[row][2]
             button = tk.Button(
                 tool_grid, text=label, command=command,
-                font=("Segoe UI", 8, "bold" if bold else "normal"),
-                bg=UI["panel_alt"], fg=color, activebackground=UI["border"],
-                activeforeground=UI["text"], relief="flat", padx=8, pady=6,
-                cursor="hand2"
+                font=("Segoe UI", 9, "bold" if bold else "normal"),
+                bg=row_bg, fg=color, activebackground=UI["border"],
+                activeforeground=UI["text"], relief="flat", padx=8, pady=8,
+                cursor="hand2",
             )
-            button.grid(row=row, column=column, sticky="nsew", padx=2, pady=2)
+            button.grid(row=row, column=column + 1, sticky="nsew", padx=3, pady=3)
             return button
 
-        def _fit_tool_labels(event=None):
-            available = event.width if event is not None else tool_grid.winfo_width()
-            if available <= 1:
-                return
-            wrap_width = max(92, (available - 28) // 4)
-            for child in tool_grid.winfo_children():
-                if isinstance(child, tk.Button):
-                    child.configure(wraplength=wrap_width)
-
-        tool_grid.bind("<Configure>", _fit_tool_labels)
-
-        # Row 0: Essential Mods & Game Controls
+        # Each row keeps related actions together: mods, play, repair, settings, system.
         add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
         add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
-        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=0, column=2)
-        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=0, column=3)
+        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=0, column=2, bold=True)
+        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=0, column=3)
 
-        # Row 1: Progression, Tweaks & Content
         add_tool("📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=1, column=0, bold=True)
         add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=1, column=1)
-        add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=1, column=2)
-        add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=1, column=3, bold=True)
+        add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=1, column=2)
+        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=1, column=3)
 
-        # Row 2: Customization & System Doctors
-        add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=2, column=0)
-        add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=2, column=1)
-        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=2)
-        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=3)
+        add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=2, column=0, bold=True)
+        add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=2, column=1)
+        add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=2)
+        add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=3)
 
-        # Row 3: Profiles, Toggles & Settings
-        add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=3, column=0)
-        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=1, bold=True)
-        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=2)
+        self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=0, bold=True)
+        self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=1)
         sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
-        sounds_color = UI["lime"] if self.sounds_enabled else UI["muted"]
-        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=sounds_color, row=3, column=3)
+        self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=UI["lime"] if self.sounds_enabled else UI["muted"], row=3, column=2)
+        self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=3, column=3)
 
-        # Row 4: App, Steam & Desktop
-        self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=4, column=0)
-        add_tool("🔄 Check Updates", self.manual_check_updates, color=UI["lime"], row=4, column=1)
+        add_tool("🔄 Check for Updates", self.manual_check_updates, color=UI["lime"], row=4, column=0, bold=True)
+        add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=4, column=1)
         add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
         add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
 
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
-        if not self.sounds_enabled:
-            self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
         if not self.discord_rpc_enabled:
             self.rpc_btn.config(text="🎮 Discord RPC: OFF", fg=UI["muted"])
+        if not self.sounds_enabled:
+            self.sounds_btn.config(text="🔇 GD Sounds: OFF", fg=UI["muted"])
         if not self.run_in_bg_enabled:
             self.bg_mode_btn.config(text="🌙 Close to System Tray: OFF", fg=UI["muted"])
 
@@ -3858,8 +3934,11 @@ class GeodeSyncApp(tk.Tk):
         footer = tk.Frame(self, bg=UI["header"], padx=20, pady=7)
         footer.pack(fill="x", side="bottom")
 
+        footer_actions = tk.Frame(footer, bg=UI["header"])
+        footer_actions.pack(fill="x")
+
         self.status_ticker_lbl = tk.Label(
-            footer,
+            footer_actions,
             text="● Ready to play Geometry Dash",
             font=("Segoe UI", 8),
             fg=UI["lime"],
@@ -3870,38 +3949,48 @@ class GeodeSyncApp(tk.Tk):
         )
         self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        choose_path_btn = tk.Button(footer, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
+        choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         choose_path_btn.pack(side="right", padx=(4, 0))
 
-        view_log_btn = tk.Button(footer, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
+        view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         view_log_btn.pack(side="right", padx=(4, 0))
 
-        fix_problem_btn = tk.Button(footer, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
+        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
         fix_problem_btn.pack(side="right", padx=(4, 0))
 
-        discord_link = tk.Label(footer, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
+        discord_link = tk.Label(footer_actions, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
         discord_link.pack(side="right", padx=6)
         discord_link.bind("<Button-1>", lambda e: webbrowser.open("https://discord.gg/tyQG5xNGCx"))
 
-        repo_link = tk.Label(footer, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["header"], cursor="hand2")
+        repo_link = tk.Label(footer_actions, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["header"], cursor="hand2")
         repo_link.pack(side="right", padx=6)
         repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
 
-        self.path_lbl = tk.Label(footer, text=f"{self.mgr.gd_path or 'Not found'}", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["header"])
-        self.path_lbl.configure(wraplength=180, justify="right", anchor="e")
-        self.path_lbl.pack(side="right", padx=(0, 8))
+        self.path_lbl = tk.Label(
+            footer,
+            text=f"Game folder: {self.mgr.gd_path or 'Not found'}",
+            font=("Segoe UI", 7),
+            fg=UI["quiet"],
+            bg=UI["header"],
+            wraplength=900,
+            justify="left",
+            anchor="w",
+        )
+        self.path_lbl.pack(fill="x", anchor="w", pady=(4, 0))
 
         def _fit_footer_status(event=None):
-            available = event.width if event is not None else footer.winfo_width()
+            available = event.width if event is not None else footer_actions.winfo_width()
             if available <= 1:
                 return
             fixed_width = sum(
                 child.winfo_reqwidth()
-                for child in footer.winfo_children()
+                for child in footer_actions.winfo_children()
                 if child is not self.status_ticker_lbl
             )
             self.status_ticker_lbl.configure(wraplength=max(110, available - fixed_width - 40))
+            self.path_lbl.configure(wraplength=max(240, footer.winfo_width() - 40))
 
+        footer_actions.bind("<Configure>", _fit_footer_status)
         footer.bind("<Configure>", _fit_footer_status)
 
     def open_log_viewer(self):
@@ -4285,6 +4374,41 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror("Error", "Steam installation not found.")
             return
 
+        # Steam can log “Depot download complete” while leaving a truncated
+        # Geometry Dash.app in its content cache. On the next attempt, recover
+        # that exact cache before starting another Steam download; otherwise
+        # Steam may keep reusing the malformed bundle indefinitely. Steam must
+        # be fully closed before touching its cache.
+        if IS_MAC:
+            depot_path = self.mgr.get_depot_path()
+            cached_app = find_macos_game_app(depot_path)
+            if cached_app and validate_macos_game_app(cached_app):
+                if self.mgr.is_steam_running():
+                    self.is_downloading_depot = False
+                    self.pending_profile_mods = None
+                    self.primary_btn.set_enabled(True)
+                    self.log("Invalid Geometry Dash depot cache found; Steam must be fully quit before it can be safely reset.", "WARN")
+                    messagebox.showwarning(
+                        "Quit Steam to repair the download",
+                        "Steam left an incomplete Geometry Dash download in its cache. Quit Steam completely (Steam → Quit), then click 1-Click Fix again. GeodeSync will remove only that damaged downloaded cache and fetch it again. Your installed game and save files will not be touched.",
+                    )
+                    self.refresh_status()
+                    return
+                try:
+                    if reset_invalid_macos_depot_cache(depot_path, self.mgr.gd_path):
+                        self.log("Removed the malformed Geometry Dash Steam download cache; requesting a clean depot download.", "WARN")
+                except (OSError, ValueError) as error:
+                    self.is_downloading_depot = False
+                    self.pending_profile_mods = None
+                    self.primary_btn.set_enabled(True)
+                    self.log(f"Could not safely reset the invalid Steam download cache: {error}", "ERROR")
+                    messagebox.showerror(
+                        "Steam cache could not be repaired",
+                        "GeodeSync could not safely clear the damaged downloaded cache. The installed game was not changed. Quit Steam, then send support the full activity log so the exact cache path can be checked.",
+                    )
+                    self.refresh_status()
+                    return
+
         if not self.mgr.is_steam_running():
             self.log("Steam is not currently running. Launching Steam...", "INFO")
             try:
@@ -4404,7 +4528,8 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showerror(
                 "Steam download is incomplete",
                 "Steam reported the download as complete, but its cached Geometry Dash.app is still missing valid app metadata. "
-                "GeodeSync did not replace your installed game. Quit Steam fully, reopen it, and retry 1-Click Fix once. "
+                "GeodeSync did not replace your installed game. Quit Steam completely (Steam → Quit), then click 1-Click Fix again. "
+                "On that retry, GeodeSync will clear only the malformed downloaded depot cache and request a fresh copy; it will not touch the installed game or saves. "
                 "If it still fails, send the full GeodeSync activity log so the depot path and Steam result can be checked.",
             )
             self.refresh_status()

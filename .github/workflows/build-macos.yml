@@ -121,13 +121,27 @@ jobs:
 
   build-linux:
     name: Build Linux release assets
-    runs-on: ubuntu-latest
+    # Build against Ubuntu 22.04 (glibc 2.35), which is compatible with SteamOS
+    # on Steam Deck. Building on ubuntu-latest can bundle newer Tcl/Tk libraries
+    # that fail to load on SteamOS (for example, requiring GLIBC_2.42).
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip python3-venv python3-tk xvfb xauth
+      - name: Verify Steam Deck-compatible glibc build baseline
+        run: |
+          python3 - <<'PY'
+          import platform
+          import re
+          version = platform.libc_ver()[1]
+          match = re.match(r"^(\d+)\.(\d+)", version)
+          if not match or tuple(map(int, match.groups())) > (2, 35):
+              raise SystemExit(f"Expected glibc <= 2.35 for SteamOS compatibility; found {version!r}")
+          print(f"Building against glibc {version} for SteamOS compatibility")
+          PY
       - name: Create build environment with the system Tk runtime
         run: |
           python3 -m venv --system-site-packages .venv
@@ -175,7 +189,9 @@ jobs:
   attach-to-release:
     name: Attach platform builds to GitHub Release
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
-    needs: [build-macos, build-windows, build-linux]
+    # Keep optional macOS packaging from blocking the verified Windows/Linux release.
+    # macOS assets remain withheld until a notarized package is explicitly attached.
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -188,11 +204,6 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        if: ${{ env.APPLE_CERTIFICATE_P12_BASE64 != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' }}
-        with:
-          pattern: GeodeSync-macOS-*
-          merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: GeodeSync-Windows

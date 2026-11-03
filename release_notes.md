@@ -1,4 +1,38 @@
-# GeodeSync v2.3.12
+# GeodeSync v2.3.17
+
+## Dashboard toolbox redesign
+
+- Rebuilds the toolbox as five clearly labeled lanes: Mods, Play, Repair, Preferences, and App.
+- Adds a restrained color accent to each lane and increases button spacing for faster scanning.
+- Keeps all 20 actions directly available in the main dashboard and preserves the flat Tk layout used for Linux stability.
+- Includes the Geode detection, Steam recovery, and Linux packaging fixes from v2.3.14 and v2.3.15.
+- Windows and Linux packages must pass release CI before distribution. macOS downloads remain withheld until a Developer ID signed and notarized build is available.
+
+# GeodeSync v2.3.16
+
+## Dashboard polish
+
+- Reorganized the 20 existing tools into task-focused rows for mods, gameplay, repair, settings, and system actions.
+- Kept the native controls in one flat Tk grid for Linux stability.
+
+# GeodeSync v2.3.14
+
+## Geode detection hotfix
+
+- Detect Geode when its loader DLL is present even if the optional legacy XInput proxy is absent or named differently.
+- On macOS, detect Geode when the user selects the app bundle itself, and check the loader in the supported bundle locations.
+- Ignore leftover Geode data folders unless a loader or Geode startup log confirms an installation.
+- GeodeSync supports Geometry Dash installed through Steam. Unofficial or pirated game copies are not supported.
+
+## macOS depot recovery
+
+- A retry after Steam leaves malformed cached game metadata now clears only the validated Geometry Dash depot cache, never the installed game or saves.
+- Steam must be fully quit before GeodeSync resets that cache; the app explains this and leaves the cache untouched if the path cannot be verified.
+
+## Linux / Steam Deck compatibility
+
+- Rebuild the Linux package on Ubuntu 22.04 (glibc 2.35) so bundled Tcl/Tk does not require GLIBC_2.42, which is unavailable on SteamOS. The package still needs to pass the Linux CI launch check before distribution.
+- Linux support is for Steam Deck Desktop Mode; do not modify SteamOS system libraries to work around an older package.
 
 ## macOS packaging status
 
