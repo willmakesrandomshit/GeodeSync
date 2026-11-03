@@ -106,6 +106,16 @@ class TroubleshooterTests(unittest.TestCase):
         self.assertIn("Auto-Fix", steps)
         self.assertIn("Always keep on this device", steps)
 
+    def test_visual_c_outdated_explanation(self):
+        title, steps = explain_error_text("Your Microsoft Visual C++ is outdated!")
+        self.assertIn("Visual C++", title)
+        self.assertIn("Auto-Fix", steps)
+
+    def test_storage_full_explanation(self):
+        title, steps = explain_error_text("There is not enough space on the disk (storage full quota)")
+        self.assertIn("storage", title.lower())
+        self.assertIn("Auto-Fix", steps)
+
     def test_steam_game_folder_detection_accepts_alternate_folder_names(self):
         self.assertTrue(is_steam_library_game_path(r"D:\Steam\steamapps\common\GeometryDash"))
         self.assertTrue(is_steam_library_game_path(r"D:\Steam\steamapps\common\GD"))

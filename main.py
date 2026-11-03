@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.21"
+APP_VERSION = "2.3.22"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1221,6 +1221,86 @@ def ensure_local_onedrive_files(folder_path):
         return False, str(e)
 
 
+def check_vc_redist_installed():
+    """Checks if Microsoft Visual C++ 2015-2022 (x86) Redistributable is installed and up to date."""
+    if not IS_WIN:
+        return True, "Not required on this platform", None
+    if not winreg:
+        return True, "Registry unavailable", None
+    try:
+        flags = winreg.KEY_READ
+        if hasattr(winreg, "KEY_WOW64_32KEY"):
+            flags |= winreg.KEY_WOW64_32KEY
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X86", 0, flags) as key:
+            installed, _ = winreg.QueryValueEx(key, "Installed")
+            version, _ = winreg.QueryValueEx(key, "Version")
+            ver_clean = str(version).lstrip("v").split(".")
+            major = int(ver_clean[0]) if len(ver_clean) > 0 and ver_clean[0].isdigit() else 0
+            minor = int(ver_clean[1]) if len(ver_clean) > 1 and ver_clean[1].isdigit() else 0
+            if installed == 1 and (major > 14 or (major == 14 and minor >= 30)):
+                return True, f"Installed ({version})", version
+            return False, f"Outdated ({version})", version
+    except Exception:
+        syswow = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "SysWOW64", "msvcp140.dll")
+        sys32 = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "msvcp140.dll")
+        if os.path.exists(syswow) or os.path.exists(sys32):
+            return True, "Detected via system DLL", None
+        return False, "Not installed or missing", None
+
+
+def install_vc_redist(log_func=None):
+    """Downloads and launches the official Microsoft Visual C++ 2015-2022 (x86) Redistributable installer."""
+    if not IS_WIN:
+        return False, "Microsoft Visual C++ is only required on Windows."
+    url = "https://aka.ms/vs/17/release/vc_redist.x86.exe"
+    temp_dir = tempfile.gettempdir()
+    dest = os.path.join(temp_dir, "vc_redist.x86.exe")
+    if log_func:
+        log_func("Downloading official Microsoft Visual C++ 2015-2022 (x86) from aka.ms...", "INFO")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "GeodeSync-VCRedist"})
+        with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        if log_func:
+            log_func("Running Visual C++ setup (accept Windows UAC prompt if shown)...", "INFO")
+        subprocess.Popen([dest, "/install", "/passive", "/norestart"])
+        return True, "Visual C++ installer started! Complete the setup prompt on your screen."
+    except Exception as e:
+        webbrowser.open("https://aka.ms/vs/17/release/vc_redist.x86.exe")
+        return False, f"Automatic download failed ({e}). Opened official Microsoft download link in your browser."
+
+
+def check_folder_writable_and_space(folder_path):
+    """Verifies that folder_path is writable and has adequate free space.
+    Detects OneDrive quota locks (storage full) and permission blocks.
+    """
+    if not folder_path or not os.path.isdir(folder_path):
+        return False, "Directory does not exist", 0
+    try:
+        usage = shutil.disk_usage(folder_path)
+        free_mb = round(usage.free / (1024 * 1024), 1)
+
+        test_file = os.path.join(folder_path, f".geodesync-write-test-{os.getpid()}.tmp")
+        try:
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+        except OSError as exc:
+            err_str = str(exc).lower()
+            if "112" in err_str or "not enough space" in err_str or "quota" in err_str:
+                return False, "Drive or OneDrive storage is completely full! Cannot write files.", free_mb
+            if "onedrive" in folder_path.lower():
+                return False, f"OneDrive is blocking write access (quota full or locked): {exc}", free_mb
+            return False, f"Directory is not writable: {exc}", free_mb
+
+        if free_mb < 500:
+            return False, f"Critically low disk space ({free_mb} MB remaining). At least 500 MB is required.", free_mb
+
+        return True, "OK", free_mb
+    except Exception as exc:
+        return False, str(exc), 0
+
+
 def find_linux_geometry_dash_pids(proc_root="/proc"):
     """Return only processes whose argv contains GeometryDash.exe (Proton)."""
     pids = []
@@ -1721,6 +1801,24 @@ def explain_error_text(error_text, platform_name=None):
             "The Steam update manifest is set to read-only to protect your mods from being overwritten. "
             "Click '⚡ Auto-Fix It For Me' to unlock it safely so Steam can write files.",
         )
+    if any(token in text for token in ("visual c++", "visual c", "vc++", "vcredist", "msvcp140", "vcruntime140")):
+        return (
+            "Microsoft Visual C++ Redistributable is outdated or missing",
+            "Geode and Geometry Dash require the official Microsoft Visual C++ 2015-2022 Redistributable (x86).\n\n"
+            "Click '⚡ Auto-Fix It For Me' to download and install the official Microsoft package automatically.",
+        )
+    if any(token in text for token in ("storage full", "quota", "not enough space on disk", "winerror 112")):
+        return (
+            "Disk or OneDrive storage quota full",
+            "Your hard drive or Microsoft OneDrive cloud storage is completely out of space, which blocks Windows from creating or updating game files.\n\n"
+            "Click '⚡ Auto-Fix It For Me' to switch to a drive with free space or relocate out of OneDrive, or free up storage in your OneDrive account.",
+        )
+    if any(token in text for token in ("tampered", "renamed", "clean install", "factory reset", "mangled")):
+        return (
+            "Geometry Dash files tampered or damaged",
+            "Your game files have been moved, renamed, or corrupted across multiple sub-updates.\n\n"
+            "Click '⚡ Auto-Fix It For Me' to run a clean Factory Reset: your saves will be preserved while clean, official 2.2081 game files are installed.",
+        )
     if any(token in text for token in ("onedrive", "0x8007016a", "reparse point", "cloud file provider", "cloud-only", "offline attribute", "winerror 392")):
         return (
             "OneDrive cloud sync or placeholder conflict",
@@ -1811,6 +1909,21 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
                 "detail": problem,
                 "steps": "Close the game, then in Steam open Library → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Do not replace individual DLLs from download sites. Run this check again after Steam finishes.",
             })
+        vc_ok, vc_status, _ = check_vc_redist_installed()
+        if not vc_ok:
+            findings.append({
+                "title": "Microsoft Visual C++ Redistributable is outdated or missing",
+                "detail": f"Status: {vc_status}\nGeode and Geometry Dash require the official Microsoft Visual C++ 2015-2022 Redistributable (x86). Without it, Geode crashes on launch with MSVCP140.dll / VCRUNTIME140.dll or outdated C++ errors.",
+                "steps": "Click '📥 Install Visual C++' in the Troubleshooter to automatically install the official Microsoft package.",
+            })
+        if game_path and os.path.isdir(game_path):
+            writable, write_err, free_mb = check_folder_writable_and_space(game_path)
+            if not writable:
+                findings.append({
+                    "title": "Game folder is locked or out of storage",
+                    "detail": f"Path: {game_path}\nStatus: {write_err}\nFree storage: {free_mb} MB",
+                    "steps": "If this folder is in OneDrive, your cloud storage quota may be full. Relocate your game into your official Steam library (C:\\Program Files (x86)\\Steam\\steamapps\\common\\Geometry Dash) or free up storage.",
+                })
     elif is_macos:
         if is_steam_library_game_path(game_path):
             findings.append({
@@ -3988,6 +4101,121 @@ class GeodeSyncApp(tk.Tk):
             "Head to the Discord server, open the #geodesync-help channel, and press Ctrl+V to paste your setup details so the team can help you immediately."
         )
 
+    def trigger_install_vc_redist(self):
+        """Downloads and installs the official Microsoft Visual C++ 2015-2022 Redistributable."""
+        self.log("Installing Microsoft Visual C++ 2015-2022 (x86)...", "INFO")
+        threading.Thread(target=self._run_install_vc_redist, daemon=True).start()
+
+    def _run_install_vc_redist(self):
+        ok, msg = install_vc_redist(log_func=self.log)
+        if ok:
+            self.log(f"Visual C++: {msg}", "SUCCESS")
+            messagebox.showinfo("Visual C++ Installer", msg, parent=self)
+        else:
+            self.log(f"Visual C++: {msg}", "ERROR")
+            messagebox.showwarning("Visual C++ Setup", msg, parent=self)
+
+    def factory_reset_clean_install(self):
+        """Emergency Nuclear Reset:
+        Backs up player saves safely, clears corrupt/tampered game files, relocates out of OneDrive if applicable,
+        and cleanly installs official 2.2081 with Geode.
+        """
+        if self.is_downloading_depot:
+            messagebox.showinfo("Busy", "A download or installation is currently in progress.", parent=self)
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Clean Factory Reset",
+            "⚠️ FACTORY RESET & CLEAN INSTALL\n\n"
+            "This will completely reset and repair your Geometry Dash installation:\n\n"
+            "1. Your player save files (stars, demons, progress) will be SAFELY BACKED UP first.\n"
+            "2. Any custom .geode mods will be preserved.\n"
+            "3. Tampered, renamed, or corrupted game files will be wiped.\n"
+            "4. Official Geometry Dash 2.2081 (Geode Compatible) will be cleanly installed from Steam.\n"
+            "5. The latest stable Geode will be installed and verified.\n\n"
+            "If your game is currently located in OneDrive, GeodeSync will offer to move it to your official Steam library to fix storage full / write errors.\n\n"
+            "Do you want to proceed with the clean factory reset?",
+            parent=self
+        )
+        if not confirm:
+            return
+
+        self.log("🧹 Starting Clean Factory Reset & 2.2081 Reinstallation...", "WARNING")
+        threading.Thread(target=self._run_factory_reset_clean_install, daemon=True).start()
+
+    def _run_factory_reset_clean_install(self):
+        try:
+            # 1. Close running processes
+            if self.mgr.is_gd_process_running():
+                self.log("Terminating running Geometry Dash processes...", "INFO")
+                self.mgr.close_gd_process()
+
+            # 2. Backup saves safely
+            save_dir = self.mgr.get_save_data_dir()
+            if save_dir and os.path.isdir(save_dir):
+                self.log(f"Safely archiving player save files from {save_dir}...", "INFO")
+                backup_dst = os.path.join(self.data_dir, "emergency_pre_reset_backup")
+                os.makedirs(backup_dst, exist_ok=True)
+                for f in os.listdir(save_dir):
+                    if f.lower().endswith((".dat", ".dat.bak")):
+                        try:
+                            shutil.copy2(os.path.join(save_dir, f), os.path.join(backup_dst, f))
+                        except Exception:
+                            pass
+
+            # 3. Handle OneDrive / Target folder relocation
+            target_dir = self.mgr.gd_path
+            all_installs = self.mgr.find_all_gd_installations()
+            steam_inst = next((i for i in all_installs if i["is_steam"]), None)
+
+            if target_dir and "onedrive" in target_dir.casefold():
+                if steam_inst:
+                    target_dir = steam_inst["path"]
+                    self.mgr.gd_path = target_dir
+                    self._save_settings()
+                    self.log(f"Relocated game path out of OneDrive to Steam: {target_dir}", "SUCCESS")
+                elif self.mgr.steam_path:
+                    target_dir = os.path.join(self.mgr.steam_path, "steamapps", "common", "Geometry Dash")
+                    os.makedirs(target_dir, exist_ok=True)
+                    self.mgr.gd_path = target_dir
+                    self._save_settings()
+                    self.log(f"Created clean destination in Steam library: {target_dir}", "SUCCESS")
+
+            # 4. Clean out corrupt/tampered DLLs and EXEs from target_dir
+            if target_dir and os.path.isdir(target_dir):
+                for fname in os.listdir(target_dir):
+                    fpath = os.path.join(target_dir, fname)
+                    if fname.lower() in ("geometrydash.exe", "xinput9_1_0.dll", "geode.dll", "steam_api.dll", "fmod.dll") or fname.lower().endswith(".dll"):
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+
+            # 5. Clear depot cache and run automated downgrade to 2.2081
+            depot_path = self.mgr.get_depot_path()
+            if depot_path and os.path.exists(depot_path):
+                shutil.rmtree(depot_path, ignore_errors=True)
+
+            self.mgr.set_manifest_locked(False)
+            self.mgr.target_gd_version = "2.2081"
+            self.mgr.target_manifest = "8780295549609362522" if IS_MAC else "3816559102876907245"
+            self.settings["target_manifest"] = self.mgr.target_manifest
+            self._save_settings()
+
+            self.is_downloading_depot = True
+            self.primary_btn.set_enabled(False)
+            self.log("Requesting fresh, clean Geometry Dash 2.2081 depot from Steam...", "INFO")
+            self._run_auto_downgrade_impl()
+        except Exception as e:
+            self.is_downloading_depot = False
+            self.primary_btn.set_enabled(True)
+            self.log(f"Factory reset failed: {e}", "ERROR")
+            self.after(0, lambda: self.show_smart_error(
+                "Factory Reset Issue",
+                f"Factory reset ran into an issue:\n{e}\n\nClick 'Auto-Fix It For Me' to retry with Emergency Unstick.",
+                auto_fix_func=self.emergency_unstick
+            ))
+
     def emergency_unstick(self):
         """All-in-One Emergency Fix for when users are stuck.
         Kills hung GD processes, unlocks Steam manifest, clears corrupted depot cache,
@@ -4152,13 +4380,20 @@ class GeodeSyncApp(tk.Tk):
 
         def execute_repair():
             dialog.destroy()
-            if auto_fix_func:
-                try:
-                    auto_fix_func()
-                except Exception as ex:
-                    self.log(f"Auto-fix secondary note: {ex}", "WARN")
-                    self.emergency_unstick()
-            else:
+            target_fix = auto_fix_func
+            if target_fix is None:
+                err_low = raw_msg.lower()
+                if any(t in err_low for t in ("visual c", "vc++", "vcredist", "msvcp140", "vcruntime140")):
+                    target_fix = self.trigger_install_vc_redist
+                elif any(t in err_low for t in ("tamper", "corrupt", "clean install", "factory reset", "2.207")):
+                    target_fix = self.factory_reset_clean_install
+                else:
+                    target_fix = self.emergency_unstick
+
+            try:
+                target_fix()
+            except Exception as ex:
+                self.log(f"Auto-fix secondary note: {ex}", "WARN")
                 self.emergency_unstick()
 
         action_frame = tk.Frame(content, bg=UI["panel_alt"], padx=12, pady=10, highlightbackground=UI["lime_dark"], highlightthickness=1)
@@ -4369,7 +4604,9 @@ class GeodeSyncApp(tk.Tk):
         tk.Button(actions, text="Check Setup", command=scan, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
         tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
         autofix_action_btn = tk.Button(actions, text="⚡ Auto-Fix Found Issue", command=lambda: [self.emergency_unstick(), scan()], font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2")
-        tk.Button(actions, text="🆘 Emergency Unstick", command=self.emergency_unstick, font=("Segoe UI", 8, "bold"), bg=UI["amber"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(actions, text="🆘 Emergency Unstick", command=self.emergency_unstick, font=("Segoe UI", 8, "bold"), bg=UI["amber"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        tk.Button(actions, text="📥 Install Visual C++", command=self.trigger_install_vc_redist, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        tk.Button(actions, text="🧹 Factory Reset GD", command=self.factory_reset_clean_install, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["red"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
 
         footer = tk.Frame(dialog, bg=UI["header"], padx=18, pady=10)
         footer.pack(fill="x")

@@ -1,3 +1,12 @@
+# GeodeSync v2.3.22
+
+## Microsoft Visual C++ 2015-2022 Auto-Installer & Clean Factory Reset
+
+- **1-Click Microsoft Visual C++ Auto-Installer (`trigger_install_vc_redist`):** Geode requires the official Microsoft Visual C++ 2015-2022 Redistributable (x86). If your C++ runtimes are outdated or missing (causing MSVCP140.dll / VCRUNTIME140.dll errors or Geode outdated alerts), GeodeSync now downloads and installs the official Microsoft runtime package with 1 click.
+- **Factory Reset & Clean 2.2081 Reinstall (`factory_reset_clean_install`):** For players with completely mangled, tampered, or corrupted Geometry Dash directories stuck on v2.2074: safely backs up all player progress, clears corrupt binaries, relocates out of broken OneDrive folders into the official Steam library, and transactionally installs a verified 2.2081 build.
+- **OneDrive Storage Full & Lockout Diagnostics:** Detects when hard drives or Microsoft OneDrive accounts exceed their 5GB quota, explaining why files cannot be written or updated and offering automatic relocation into the local Steam library.
+- **Smart Error Self-Repair Auto-Routing:** Intelligently maps Visual C++ errors, OneDrive full errors, and tampered files to their corresponding automated 1-click self-repair routines.
+
 # GeodeSync v2.3.21
 
 ## Universal Multi-Install & OneDrive Detection + Custom Save Linking

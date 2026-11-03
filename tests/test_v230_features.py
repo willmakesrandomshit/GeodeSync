@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_images
+from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_images, check_vc_redist_installed, check_folder_writable_and_space
 
 
 class TestV230Features(unittest.TestCase):
@@ -23,7 +23,18 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.3.21")
+        self.assertEqual(APP_VERSION, "2.3.22")
+
+    def test_check_vc_redist_installed(self):
+        ok, status, ver = check_vc_redist_installed()
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(status, str)
+
+    def test_check_folder_writable_and_space(self):
+        writable, status, free_mb = check_folder_writable_and_space(self.test_dir)
+        self.assertTrue(writable)
+        self.assertEqual(status, "OK")
+        self.assertGreater(free_mb, 0)
 
     def test_custom_save_path_override(self):
         custom_save = os.path.join(self.test_dir, "CustomSaves")
