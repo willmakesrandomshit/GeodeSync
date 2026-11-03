@@ -156,7 +156,10 @@ class SecurityHardeningTests(unittest.TestCase):
             outside = root / "outside"
             outside.mkdir()
             link = root / "linked"
-            link.symlink_to(outside, target_is_directory=True)
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except OSError as e:
+                raise unittest.SkipTest(f"Creating symlinks not permitted: {e}")
             with tempfile_zip() as archive:
                 archive.writestr("linked/payload.dll", b"bad")
                 with self.assertRaises(ValueError):

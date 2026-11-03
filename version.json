@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.17",
+  "app_version": "2.3.18",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.17 redesigns the dashboard toolbox with labeled task groups, category colors, and clearer spacing while keeping all 20 tools one click away."
+  "announcement": "GeodeSync v2.3.18 adds 1-click Emergency Unstick & Self-Repair, fixes v2.207 stuck states with 2.2081 targeting, brings 10-second background auto-sync, live Demon & Grind Discord RPC, Discord community integration, and real-time toolbox search."
 }

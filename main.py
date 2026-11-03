@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.17"
+APP_VERSION = "2.3.18"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -485,7 +485,7 @@ else:
             "ver": "2.2081",
             "size": 10700288
         },
-        "2.2074 (Previous 2.2 Sub-update)": {
+        "2.2074 (Outdated 2.2 • Needs 2.2081 for Geode)": {
             "manifest": "4978051680517726588",
             "ver": "2.2074",
             "size": 10698752
@@ -2173,11 +2173,14 @@ class GDManager:
         except Exception:
             return "Inaccessible", UI["red"]
 
-        for meta in KNOWN_VERSIONS.values():
-            if meta.get("size") and size == meta["size"]:
-                return f"{meta['ver']} (supported depot)", UI["lime"]
-        if size == SIZE_2209:
-            return "2.209 (Incompatible with Geode)", UI["amber"]
+        if size == SIZE_22081:
+            return "2.2081 (Geode Compatible)", UI["lime"]
+        elif size == 10698752:
+            return "2.2074 (Outdated 2.2 • Needs 2.2081 for Geode)", UI["amber"]
+        elif size == 7578624:
+            return "2.113 (Classic 2.11 Legacy)", UI["lilac"]
+        elif size == SIZE_2209:
+            return "2.209 (Incompatible with Geode)", UI["red"]
         mb = round(size / (1024 * 1024), 2)
         return f"Custom Build ({mb} MB)", UI["muted"]
 
@@ -2210,12 +2213,7 @@ class GDManager:
         exe = os.path.join(self.gd_path, "GeometryDash.exe")
         if os.path.exists(exe):
             try:
-                expected_size = next(
-                    (meta.get("size") for meta in KNOWN_VERSIONS.values()
-                     if str(meta.get("manifest")) == str(self.target_manifest)),
-                    None,
-                )
-                return os.path.getsize(exe) == (expected_size or SIZE_22081)
+                return os.path.getsize(exe) == SIZE_22081
             except Exception:
                 return False
         return False
@@ -3354,7 +3352,25 @@ class GeodeSyncApp(tk.Tk):
 
         threading.Thread(target=self._remote_update_monitor_thread, daemon=True).start()
         threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
+        self._start_auto_sync_loop()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _start_auto_sync_loop(self):
+        """Starts a periodic 10-second background auto-sync loop to keep status, save progress, and steam lock updated."""
+        self.after(10000, self._auto_sync_tick)
+
+    def _auto_sync_tick(self):
+        try:
+            if not getattr(self, "is_downloading_depot", False):
+                self._apply_silent_refresh()
+        except Exception:
+            pass
+        finally:
+            self.after(10000, self._auto_sync_tick)
+
+    def _apply_silent_refresh(self):
+        """Silently re-reads versions, locks, and progress without disrupting active operations."""
+        self.refresh_status()
 
     def on_close(self):
         # Keep the RPC connection alive after the dashboard is closed.
@@ -3475,11 +3491,20 @@ class GeodeSyncApp(tk.Tk):
 
     def _restore_selected_version(self):
         manifest = str(self.settings.get("target_manifest", ""))
+        # Auto-migrate away from outdated 2.2074 manifest to ensure 2.2081 is the default
+        if manifest == "4978051680517726588" or not manifest:
+            manifest = DEFAULT_MANIFEST
+            self.settings["target_manifest"] = manifest
+            self._save_settings()
+
         choice = next((item for item in KNOWN_VERSIONS.values() if str(item["manifest"]) == manifest), None)
         self.user_selected_target = bool(choice)
         if choice:
             self.mgr.target_manifest = choice["manifest"]
             self.mgr.target_gd_version = choice["ver"]
+        else:
+            self.mgr.target_manifest = DEFAULT_MANIFEST
+            self.mgr.target_gd_version = DEFAULT_TARGET_GD
 
     def _save_settings(self):
         self.settings.update({
@@ -3598,6 +3623,164 @@ class GeodeSyncApp(tk.Tk):
             "Review the text before sharing it.",
         )
 
+    def copy_discord_support_card(self):
+        """Formats a rich Markdown diagnostic snippet and copies it to the clipboard, ready to paste into #geodesync-help in Discord."""
+        game_version, _ = self.mgr.get_gd_version_info()
+        geode_ver = self.mgr.get_installed_geode_version() or ("Detected" if self.mgr.is_geode_installed() else "Not Installed")
+        is_locked = "Locked (Protected)" if self.mgr.is_manifest_locked() else "Unlocked (Normal)"
+        mods = self.mgr.get_installed_mods()
+        stats = self.mgr.get_player_stats()
+
+        recent_logs = []
+        try:
+            if os.path.exists(self.activity_log_path):
+                with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = [l.strip() for l in f.readlines() if l.strip()]
+                    recent_logs = lines[-5:]
+        except Exception:
+            pass
+
+        log_excerpt = "\n".join([f"> `{self._redact_diagnostic_text(l)}`" for l in recent_logs]) if recent_logs else "> *(No recent log entries)*"
+
+        snippet = (
+            f"### 🛡️ GeodeSync v{APP_VERSION} Support Ticket\n"
+            f"• **Platform:** {platform.system()} {platform.release()} ({platform.machine()})\n"
+            f"• **GD Version:** `{game_version}` (Target: `{self.mgr.target_gd_version}`)\n"
+            f"• **Geode Loader:** `{geode_ver}`\n"
+            f"• **Steam Update Lock:** `{is_locked}`\n"
+            f"• **Installed Mods:** {len(mods)} mods\n"
+            f"• **Player:** {stats['name'] if stats else 'Player'} ({stats['stars'] if stats else 0} ⭐, {stats['demons'] if stats else 0} 👿)\n"
+            f"• **Recent Activity:**\n{log_excerpt}\n\n"
+            f"*Generated via GeodeSync 1-Click Support*"
+        )
+
+        self.clipboard_clear()
+        self.clipboard_append(snippet)
+        self.play_ding()
+        messagebox.showinfo(
+            "Copied to Clipboard!",
+            "🎉 Diagnostic summary copied to clipboard!\n\n"
+            "Head to the Discord server, open the #geodesync-help channel, and press Ctrl+V to paste your setup details so the team can help you immediately."
+        )
+
+    def emergency_unstick(self):
+        """All-in-One Emergency Fix for when users are stuck.
+        Kills hung GD processes, unlocks Steam manifest, clears corrupted depot cache,
+        resets target to 2.2081, fixes incompatible mods, and prompts clean repair.
+        """
+        self.log("🆘 Running Emergency Unstick & Self-Repair routine...", "WARNING")
+
+        killed_count = 0
+        if IS_WIN:
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                out = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe"], startupinfo=si).decode(errors="ignore")
+                if "GeometryDash.exe" in out:
+                    subprocess.run(["taskkill", "/F", "/IM", "GeometryDash.exe"], startupinfo=si, capture_output=True)
+                    killed_count += 1
+            except Exception:
+                pass
+        elif IS_MAC:
+            try:
+                subprocess.run(["pkill", "-9", "-f", "Geometry Dash"])
+                killed_count += 1
+            except Exception:
+                pass
+
+        self.mgr.target_gd_version = "2.2081"
+        self.mgr.target_manifest = "8780295549609362522" if IS_MAC else "3816559102876907245"
+        self.settings["target_manifest"] = self.mgr.target_manifest
+        self._save_settings()
+
+        try:
+            self.mgr.set_manifest_locked(False)
+            self.log("Emergency: Unlocked Steam manifest (read-only removed).", "INFO")
+        except Exception as e:
+            self.log(f"Emergency note: {e}", "WARN")
+
+        depot_path = self.mgr.get_depot_path()
+        cleared_cache = False
+        if depot_path and os.path.exists(depot_path):
+            try:
+                if "steamapps" in depot_path and "content" in depot_path:
+                    shutil.rmtree(depot_path, ignore_errors=True)
+                    cleared_cache = True
+                    self.log("Emergency: Cleared stale Steam download depot cache.", "INFO")
+            except Exception:
+                pass
+
+        incompat = self.mgr.check_incompatible_mods()
+        fixed_mods = []
+        for inc in incompat:
+            ok, msg = self.mgr.fix_incompatible_mod(inc)
+            if ok:
+                fixed_mods.append(inc["name"])
+
+        self.is_downloading_depot = False
+        self.pending_profile_mods = None
+        self.progress_frame.pack_forget()
+        self.primary_btn.set_enabled(True)
+        self.refresh_status()
+        self.play_ding()
+
+        summary_msg = (
+            "🎉 Emergency Unstick Completed!\n\n"
+            "The following auto-repairs were applied:\n"
+            f"• Frozen Game Processes: {'Terminated' if killed_count else 'None running'}\n"
+            f"• Target Version: Reset to 2.2081 (Official Geode Baseline)\n"
+            f"• Steam Update Lock: Unlocked & Cleared\n"
+            f"• Corrupt Download Cache: {'Purged for fresh retry' if cleared_cache else 'Clean'}\n"
+            f"• Incompatible Mods Repaired: {', '.join(fixed_mods) if fixed_mods else 'None found (Clean)'}\n\n"
+            "Your setup is now un-stuck! You can click '⚡ Fix Geode Mods' to install clean files, or '▶️ Play' if already on 2.2081."
+        )
+        messagebox.showinfo("Emergency Unstick Complete", summary_msg, parent=self)
+
+    def open_whats_new_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title(f"What's New in GeodeSync v{APP_VERSION}")
+        dialog.geometry("580x480")
+        dialog.minsize(500, 380)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text=f"🚀 What's New in v{APP_VERSION}", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Latest companion features, unstick safeguards & stability polish.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=20, pady=16)
+        content.pack(fill="both", expand=True)
+
+        text_widget = tk.Text(content, bg=UI["panel"], fg=UI["text"], font=("Segoe UI", 9), padx=14, pady=14, relief="flat", highlightbackground=UI["border"], highlightthickness=1, wrap="word")
+        text_widget.pack(fill="both", expand=True)
+
+        notes = (
+            f"⚡ GEODESYNC v{APP_VERSION} CHANGELOG\n"
+            "───────────────────────────────────────────────\n\n"
+            "🆘 1. Emergency Unstick & Auto-Repair Wizard:\n"
+            "• Fixed users getting stuck on v2.207 or failed Steam downloads!\n"
+            "• In 1 click, terminates frozen game processes, resets target to 2.2081, unlocks Steam manifest, clears corrupted download caches, and repairs broken mods.\n\n"
+            "🔄 2. Live 10-Second Auto-Sync:\n"
+            "• GeodeSync automatically checks your game status, running state, and save files every 10 seconds.\n"
+            "• Real-time updates without having to reopen or refresh the app.\n\n"
+            "🎮 3. Live Demon & Level Grind on Discord RPC:\n"
+            "• When you're playing Geometry Dash, Discord Rich Presence now shows your live level name and progress (e.g. 'Dead Device (99%) · 42 Demons')!\n\n"
+            "💬 4. Official Discord Community & 1-Click Ticket Copier:\n"
+            "• Added a Discord Community button directly in the header.\n"
+            "• 1-Click 'Copy Discord Ticket' copies a redacted diagnostics card ready to paste into #geodesync-help.\n\n"
+            "🔍 5. Toolbox Quick Search Bar:\n"
+            "• Instantly filter any of the 20 companion tools and mods in real time."
+        )
+        text_widget.insert("1.0", notes)
+        text_widget.config(state="disabled")
+
+        btn_row = tk.Frame(dialog, bg=UI["header"], padx=20, pady=10)
+        btn_row.pack(fill="x")
+        tk.Button(btn_row, text="💬 Discord Community", command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"), font=("Segoe UI", 8, "bold"), bg="#5865F2", fg="#ffffff", relief="flat", padx=12, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(btn_row, text="Close", command=dialog.destroy, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=14, pady=5, cursor="hand2").pack(side="right")
+
     def open_troubleshooter(self, prefill=""):
         dialog = tk.Toplevel(self)
         dialog.title("GeodeSync · Fix a problem")
@@ -3677,15 +3860,17 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showinfo("Copied", "The troubleshooting steps are copied. You can paste them into chat.", parent=dialog)
 
         tk.Button(actions, text="Check Setup", command=scan, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
-        tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
+        tk.Button(actions, text="🆘 Emergency Unstick", command=self.emergency_unstick, font=("Segoe UI", 8, "bold"), bg=UI["amber"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
         tk.Button(actions, text="Copy Steps", command=copy_steps, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right")
 
         footer = tk.Frame(dialog, bg=UI["header"], padx=18, pady=10)
         footer.pack(fill="x")
         tk.Button(footer, text="Export Report", command=self.export_support_report, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left")
+        tk.Button(footer, text="📋 Copy Discord Ticket", command=self.copy_discord_support_card, font=("Segoe UI", 8, "bold"), bg="#5865F2", fg="#ffffff", relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(8, 0))
         tk.Button(
             footer,
-            text="Ask WilBot",
+            text="💬 Discord Help",
             command=lambda: self.open_wilbot_support(),
             font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"],
             relief="flat", padx=10, pady=5, cursor="hand2",
@@ -3735,6 +3920,22 @@ class GeodeSyncApp(tk.Tk):
 
         badge_box = tk.Frame(self.header_frame, bg=UI["header"])
         badge_box.pack(side="right")
+
+        discord_hdr_btn = tk.Button(
+            badge_box,
+            text="💬 Discord Community",
+            command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"),
+            font=("Segoe UI", 8, "bold"),
+            bg="#5865F2",
+            fg="#ffffff",
+            activebackground="#4752C4",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+        )
+        discord_hdr_btn.pack(side="right", padx=(6, 0))
 
         help_btn = tk.Button(badge_box, text="How it works", command=self.show_help_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=6, cursor="hand2")
         help_btn.pack(side="right", padx=(4, 0))
@@ -3790,8 +3991,9 @@ class GeodeSyncApp(tk.Tk):
         setup_chips_row = tk.Frame(p_right, bg=UI["panel"])
         setup_chips_row.pack(anchor="w")
 
-        self.ver_badge = tk.Label(setup_chips_row, text="GD ...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=3)
+        self.ver_badge = tk.Label(setup_chips_row, text="GD ...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=3, cursor="hand2")
         self.ver_badge.pack(side="left", padx=2)
+        self.ver_badge.bind("<Button-1>", lambda e: self.open_whats_new_dialog())
 
         self.geode_badge = tk.Label(setup_chips_row, text="Geode ...", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=6, pady=3, cursor="hand2")
         self.geode_badge.pack(side="left", padx=2)
@@ -3849,6 +4051,19 @@ class GeodeSyncApp(tk.Tk):
         tk.Label(tools_head, text="TOOLBOX", font=("Segoe UI", 11, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
         tk.Label(tools_head, text="Choose what you want to do", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(10, 0))
 
+        search_wrap = tk.Frame(tools_head, bg=UI["panel_alt"], padx=6, pady=2, highlightbackground=UI["border"], highlightthickness=1)
+        search_wrap.pack(side="right")
+        tk.Label(search_wrap, text="🔍", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel_alt"]).pack(side="left", padx=(0, 4))
+        self.tool_search_var = tk.StringVar()
+        self.tool_search_entry = tk.Entry(
+            search_wrap, textvariable=self.tool_search_var,
+            font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["text"],
+            insertbackground=UI["lime"], relief="flat", width=22
+        )
+        self.tool_search_entry.pack(side="left")
+        self.tool_buttons = []
+        self.tool_search_var.trace_add("write", lambda *a: self._filter_tools())
+
         # Keep a single, flat grid: some Linux Tk 8.6 builds crash when these
         # controls are constructed inside nested section frames.
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
@@ -3882,6 +4097,7 @@ class GeodeSyncApp(tk.Tk):
                 cursor="hand2",
             )
             button.grid(row=row, column=column + 1, sticky="nsew", padx=3, pady=3)
+            self.tool_buttons.append((button, label, color, row_bg))
             return button
 
         # Each row keeps related actions together: mods, play, repair, settings, system.
@@ -3992,6 +4208,14 @@ class GeodeSyncApp(tk.Tk):
 
         footer_actions.bind("<Configure>", _fit_footer_status)
         footer.bind("<Configure>", _fit_footer_status)
+
+    def _filter_tools(self):
+        query = self.tool_search_var.get().strip().lower()
+        for btn, label, orig_fg, row_bg in getattr(self, "tool_buttons", []):
+            if not query or query in label.lower():
+                btn.config(bg=UI["lime_dark"] if query else row_bg, fg=UI["lime"] if query else orig_fg)
+            else:
+                btn.config(bg=UI["panel"], fg=UI["quiet"])
 
     def open_log_viewer(self):
         dialog = tk.Toplevel(self)
@@ -4168,6 +4392,23 @@ class GeodeSyncApp(tk.Tk):
             return
 
         if not is_22081:
+            game_ver, _ = self.mgr.get_gd_version_info()
+            if "2.207" in game_ver:
+                self.guide_card.config(highlightbackground=UI["amber"])
+                self.guide_badge.config(text="OUTDATED 2.2 DETECTED", fg=UI["amber"], bg=UI["amber_dark"])
+                self.guide_title.config(text="Upgrade to 2.2081 for Full Geode Compatibility")
+                self.guide_desc.config(
+                    text="Your Geometry Dash is on v2.2074, which causes crashes or missing mods. Click below to upgrade to 2.2081 cleanly."
+                )
+                self.primary_btn.set_config(
+                    text="⚡ Upgrade to GD 2.2081 (Geode Compatible)",
+                    bg=UI["lime"],
+                    hover_bg=UI["lime_hover"],
+                    fg=UI["background"],
+                    command=self.start_automated_downgrade
+                )
+                return
+
             self.guide_card.config(highlightbackground=UI["lime"])
             self.guide_badge.config(text="1-CLICK FIX", fg=UI["lime"], bg=UI["lime_dark"])
             self.guide_title.config(text="Fix Geode Mods • Downgrade to 2.2081")
@@ -6228,12 +6469,27 @@ class GeodeSyncApp(tk.Tk):
                 player_tag = f"{stats['stars']} ⭐ · {stats['demons']} 👿" if stats else None
 
                 if is_running:
-                    if player_tag:
+                    grind_text = None
+                    try:
+                        prog_data = self.mgr.get_demon_and_grind_data()
+                        if prog_data and prog_data.get("grinds"):
+                            top_grind = prog_data["grinds"][0]
+                            grind_text = f"Grinding {top_grind['name']} ({top_grind['percent']}%)"
+                    except Exception:
+                        pass
+
+                    if grind_text:
+                        details_text = f"GD {ver_text} · {grind_text}"
+                        status_desc = f"{player_tag} · Geode {geode_ver} 🛡️" if is_locked else f"{player_tag} · Playing GD"
+                    elif player_tag:
+                        details_text = DiscordRPC.PLAYING_DETAILS
                         status_desc = f"{player_tag} · Geode {geode_ver} 🛡️" if is_locked else f"{player_tag} · Playing GD"
                     else:
+                        details_text = DiscordRPC.PLAYING_DETAILS
                         status_desc = f"GD {ver_text} · Geode {geode_ver} 🛡️" if is_locked else f"GD {ver_text} · In Game"
+
                     if hasattr(self, "discord_rpc"):
-                        self.discord_rpc.update_presence(DiscordRPC.PLAYING_DETAILS, status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
+                        self.discord_rpc.update_presence(details_text, status_desc, reset_timer=(was_running is False), geode_ver=geode_ver)
                 else:
                     if player_tag:
                         idle_desc = f"{stats['name']} ({player_tag})"
