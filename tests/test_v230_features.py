@@ -23,7 +23,35 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.3.20")
+        self.assertEqual(APP_VERSION, "2.3.21")
+
+    def test_custom_save_path_override(self):
+        custom_save = os.path.join(self.test_dir, "CustomSaves")
+        os.makedirs(custom_save, exist_ok=True)
+        self.mgr.custom_save_path = custom_save
+        self.assertEqual(self.mgr.get_save_data_dir(), custom_save)
+
+    def test_portable_save_discovery(self):
+        self.mgr.custom_save_path = None
+        portable_save = os.path.join(self.gd_path, "save")
+        os.makedirs(portable_save, exist_ok=True)
+        with open(os.path.join(portable_save, "CCGameManager.dat"), "wb") as f:
+            f.write(b"MOCK_SAVE")
+        with patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(self.test_dir, "EmptyAppData")}):
+            found = self.mgr.get_save_data_dir()
+            self.assertEqual(found, portable_save)
+
+    def test_find_all_gd_installations(self):
+        # Create a mock secondary GD installation
+        alt_root = os.path.join(self.test_dir, "OneDrive", "Games", "GD")
+        os.makedirs(alt_root, exist_ok=True)
+        with open(os.path.join(alt_root, "GeometryDash.exe"), "wb") as f:
+            f.truncate(10698752)
+
+        with patch.dict(os.environ, {"OneDrive": os.path.join(self.test_dir, "OneDrive")}):
+            installs = self.mgr.find_all_gd_installations()
+            paths = [i["path"].lower() for i in installs]
+            self.assertTrue(any("gd" in p for p in paths))
 
     def test_gd_22081_binary_size_recognition(self):
         """Ensures both 10698752 and 10700288 byte executables are recognized as 2.2081."""

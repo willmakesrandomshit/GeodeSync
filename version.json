@@ -1,9 +1,9 @@
 {
-  "app_version": "2.3.20",
+  "app_version": "2.3.21",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.3.20 hotfix: Fixed binary size verification for Steam depot 3816559102876907245 (10,698,752 bytes). Eliminates false 2.2074 detection and prevents infinite downgrade loops."
+  "announcement": "GeodeSync v2.3.21 adds Universal Multi-Install & OneDrive Detection: automatically discovers Geometry Dash across OneDrive, portable, and non-standard folders, detects conflicting multi-installs, resolves OneDrive cloud-only stub locks, and adds 1-click Custom Save Folder linking."
 }

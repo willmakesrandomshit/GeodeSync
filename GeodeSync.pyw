@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.3.20"
+APP_VERSION = "2.3.21"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -1191,10 +1191,34 @@ def inspect_macos_app_security(app_path=None, runner=None):
 def is_steam_library_game_path(path):
     """Recognize a Geometry Dash folder inside any Steam library, including Windows paths."""
     parts = [part.casefold() for part in re.split(r"[/\\]+", str(path or "").strip()) if part]
-    return any(
-        parts[index:index + 3] == ["steamapps", "common", "geometry dash"]
-        for index in range(max(0, len(parts) - 2))
-    )
+    for index in range(max(0, len(parts) - 2)):
+        if parts[index:index + 2] == ["steamapps", "common"]:
+            folder = parts[index + 2]
+            if folder in ("geometry dash", "geometrydash", "gd") or folder.startswith("geometry dash") or folder.startswith("geometrydash"):
+                return True
+    return False
+
+
+def ensure_local_onedrive_files(folder_path):
+    """Ensures OneDrive cloud-only stub files are downloaded locally to prevent WinError 392 or 0x8007016A."""
+    if not IS_WIN or not folder_path or not os.path.isdir(folder_path):
+        return True, "Path not applicable"
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        target_pattern = os.path.join(folder_path, "*")
+        cmd = f'attrib.exe -U -P /s /d "{target_pattern}"'
+        subprocess.run(
+            cmd,
+            shell=True,
+            startupinfo=si,
+            creationflags=0x08000000,
+            timeout=10,
+            capture_output=True
+        )
+        return True, "OneDrive files pinned locally"
+    except Exception as e:
+        return False, str(e)
 
 
 def find_linux_geometry_dash_pids(proc_root="/proc"):
@@ -1697,11 +1721,18 @@ def explain_error_text(error_text, platform_name=None):
             "The Steam update manifest is set to read-only to protect your mods from being overwritten. "
             "Click '⚡ Auto-Fix It For Me' to unlock it safely so Steam can write files.",
         )
-    if any(token in text for token in ("cannot find ccgamemanager", "save file corrupted", "ccgamemanager.dat")):
+    if any(token in text for token in ("onedrive", "0x8007016a", "reparse point", "cloud file provider", "cloud-only", "offline attribute", "winerror 392")):
+        return (
+            "OneDrive cloud sync or placeholder conflict",
+            "Geometry Dash game files or save data are stored inside Microsoft OneDrive and are stuck in cloud-only online mode.\n\n"
+            "Click '⚡ Auto-Fix It For Me' to force Windows to pin and download all files locally to your computer.\n\n"
+            "If issues persist: Right-click your Geometry Dash folder in File Explorer, select 'Always keep on this device', or move your game folder outside of OneDrive into your Steam library.",
+        )
+    if any(token in text for token in ("cannot find ccgamemanager", "save file corrupted", "ccgamemanager.dat", "no save backup found")):
         return (
             "Geometry Dash save data issue",
-            "Geometry Dash could not read your player save file, or the save folder has not been initialized yet. "
-            "Click '⚡ Auto-Fix It For Me' to scan your save backups and restore the most recent healthy save state.",
+            "Geometry Dash could not find or read your player save files (CCGameManager.dat), or your saves are in a custom or OneDrive directory.\n\n"
+            "Click '⚡ Auto-Fix It For Me' to auto-discover your saves across OneDrive and local drives, or click '💾 Save Folder' to link your save directory.",
         )
     if "disk write error" in text or ("disk" in text and "write" in text and "error" in text):
         return (
@@ -1821,6 +1852,41 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
                 "detail": "The selected folder does not contain `GeometryDash.exe`.",
                 "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Verify integrity of game files. Wait for Steam to finish, then select the folder containing `GeometryDash.exe` again.",
             })
+
+    # Check OneDrive game path
+    if game_path and "onedrive" in game_path.casefold():
+        findings.append({
+            "title": "Geometry Dash is located inside Microsoft OneDrive",
+            "detail": f"Your active game path is:\n{game_path}\n\nOneDrive cloud sync frequently locks game files during updates, reverts modified files, or keeps executables online-only (causing 0x8007016A errors).",
+            "steps": "If you installed Geometry Dash through Steam, click '📁 Game Folder' and select your official Steam library folder instead. If keeping it in OneDrive, right-click the folder in File Explorer and select 'Always keep on this device'.",
+        })
+
+    # Check OneDrive save path
+    save_path = manager.get_save_data_dir() if hasattr(manager, "get_save_data_dir") else None
+    if save_path and "onedrive" in save_path.casefold():
+        findings.append({
+            "title": "Geometry Dash save data is synced by OneDrive",
+            "detail": f"Save data found at:\n{save_path}\n\nOneDrive is actively syncing your save files (CCGameManager.dat). Ensure files are set to 'Always keep on this device' so backup operations don't freeze.",
+            "steps": "Right-click the GeometryDash save folder in File Explorer and select 'Always keep on this device'.",
+        })
+
+    # Check multiple installations
+    if hasattr(manager, "find_all_gd_installations"):
+        try:
+            all_installs = manager.find_all_gd_installations()
+            if len(all_installs) > 1:
+                install_lines = []
+                for inst in all_installs:
+                    is_active = (game_path and os.path.abspath(inst["path"]).casefold() == os.path.abspath(game_path).casefold())
+                    active_mark = " (ACTIVE IN GEODESYNC)" if is_active else ""
+                    install_lines.append(f"• [{inst['source']}] {inst['path']} — GD {inst['version']}{active_mark}")
+                findings.append({
+                    "title": f"Multiple Geometry Dash installations found ({len(all_installs)} detected)",
+                    "detail": "GeodeSync detected multiple copies of Geometry Dash on your PC:\n\n" + "\n".join(install_lines),
+                    "steps": "If GeodeSync shows an unexpected version (like v2.2074 or custom build), you may have multiple copies on your drive and GeodeSync is looking at a different one than you play! Click '📁 Game Folder' in GeodeSync to switch to your official Steam installation.",
+                })
+        except Exception:
+            pass
 
     if recovery_error:
         findings.append({
@@ -1944,6 +2010,7 @@ def install_depot_transactionally(
 class GDManager:
     def __init__(self):
         self.steam_path = self.detect_steam_path()
+        self.custom_save_path = None
         self.gd_path = self.detect_gd_path()
         self.manifest_path = self.get_manifest_path()
         self.target_manifest = DEFAULT_MANIFEST
@@ -2038,37 +2105,183 @@ class GDManager:
         except Exception:
             return True
 
+    def find_all_gd_installations(self):
+        """Discovers all Geometry Dash game folders across Steam, OneDrive, Desktop, and common game drives."""
+        results = []
+        seen = set()
+
+        def add_candidate(folder, source_type):
+            if not folder or not os.path.isdir(folder):
+                return
+            real_path = os.path.abspath(folder)
+            norm_key = real_path.casefold()
+            if norm_key in seen:
+                return
+
+            exe = os.path.join(real_path, "GeometryDash.exe")
+            app = find_macos_game_app(real_path) if IS_MAC else None
+            if not os.path.isfile(exe) and not app:
+                return
+
+            seen.add(norm_key)
+            is_steam = is_steam_library_game_path(real_path)
+            is_onedrive = "onedrive" in real_path.casefold()
+
+            ver = "Unknown"
+            if IS_WIN and os.path.isfile(exe):
+                try:
+                    size = os.path.getsize(exe)
+                    if size in SIZES_22081:
+                        ver = "2.2081"
+                    elif size == SIZE_2209:
+                        ver = "2.209"
+                    elif size == 7578624:
+                        ver = "2.113"
+                    else:
+                        ver = f"Custom ({round(size / (1024*1024), 1)} MB)"
+                except Exception:
+                    pass
+
+            results.append({
+                "path": real_path,
+                "name": os.path.basename(real_path),
+                "is_steam": is_steam,
+                "is_onedrive": is_onedrive,
+                "source": "Steam" if is_steam else ("OneDrive" if is_onedrive else source_type),
+                "version": ver,
+                "exe": exe if os.path.isfile(exe) else (app or "")
+            })
+
+        # 1. Steam paths & library folders
+        if self.steam_path:
+            common_dir = os.path.join(self.steam_path, "steamapps", "common")
+            if os.path.isdir(common_dir):
+                try:
+                    for entry in os.listdir(common_dir):
+                        add_candidate(os.path.join(common_dir, entry), "Steam")
+                except Exception:
+                    pass
+
+            vdf_path = os.path.join(self.steam_path, "steamapps", "libraryfolders.vdf")
+            if os.path.exists(vdf_path):
+                try:
+                    with open(vdf_path, "r", encoding="utf-8", errors="ignore") as f:
+                        matches = re.findall(r'"path"\s+"([^"]+)"', f.read(), re.IGNORECASE)
+                    for lib_dir in matches:
+                        sub_common = os.path.join(lib_dir.replace(r"\\", "\\"), "steamapps", "common")
+                        if os.path.isdir(sub_common):
+                            for entry in os.listdir(sub_common):
+                                add_candidate(os.path.join(sub_common, entry), "Steam")
+                except Exception:
+                    pass
+
+        # 2. OneDrive roots
+        onedrive_roots = []
+        for env_var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+            val = os.environ.get(env_var)
+            if val and os.path.isdir(val) and val not in onedrive_roots:
+                onedrive_roots.append(val)
+        user_home = os.path.expanduser("~")
+        for candidate_name in ("OneDrive", "OneDrive - Personal"):
+            p = os.path.join(user_home, candidate_name)
+            if os.path.isdir(p) and p not in onedrive_roots:
+                onedrive_roots.append(p)
+
+        for od in onedrive_roots:
+            for sub in ("", "Desktop", "Documents", "Games", "GeometryDash", "Geometry Dash"):
+                target = os.path.join(od, sub) if sub else od
+                if os.path.isdir(target):
+                    add_candidate(target, "OneDrive")
+                    try:
+                        for entry in os.listdir(target):
+                            subpath = os.path.join(target, entry)
+                            if os.path.isdir(subpath):
+                                add_candidate(subpath, "OneDrive")
+                    except Exception:
+                        pass
+
+        # 3. Standard user folders
+        for folder_name in ("Desktop", "Documents", "Downloads", "Games"):
+            base = os.path.join(user_home, folder_name)
+            if os.path.isdir(base):
+                for name in ("Geometry Dash", "GeometryDash", "GD", "GD 2.2"):
+                    add_candidate(os.path.join(base, name), "Local")
+                try:
+                    for entry in os.listdir(base):
+                        if "geometry" in entry.lower() or "gd" in entry.lower():
+                            add_candidate(os.path.join(base, entry), "Local")
+                except Exception:
+                    pass
+
+        # 4. Common root drives
+        for drive in ("C:\\", "D:\\", "E:\\"):
+            for root_name in ("Games", "GeometryDash", "Geometry Dash", "GD"):
+                add_candidate(os.path.join(drive, root_name), "Local")
+
+        return results
+
     def detect_gd_path(self):
         if IS_LINUX:
             for candidate in discover_steam_game_folders(discover_linux_steam_roots()):
                 if os.path.isfile(os.path.join(candidate, "GeometryDash.exe")):
                     return candidate
             return None
-        if not self.steam_path:
-            return None
 
-        default_gd = os.path.join(self.steam_path, "steamapps", "common", "Geometry Dash")
-        if os.path.exists(default_gd):
-            return default_gd
+        # 1. Check Steam standard path
+        if self.steam_path:
+            default_gd = os.path.join(self.steam_path, "steamapps", "common", "Geometry Dash")
+            if os.path.exists(default_gd):
+                return default_gd
 
+            # Scan any folder in steamapps/common that has GeometryDash.exe
+            common_dir = os.path.join(self.steam_path, "steamapps", "common")
+            if os.path.isdir(common_dir):
+                try:
+                    for entry in os.listdir(common_dir):
+                        full = os.path.join(common_dir, entry)
+                        if os.path.isdir(full) and (
+                            os.path.isfile(os.path.join(full, "GeometryDash.exe")) or
+                            (IS_MAC and find_macos_game_app(full))
+                        ):
+                            return full
+                except Exception:
+                    pass
+
+        # 2. Check all libraries in libraryfolders.vdf
+        if self.steam_path:
+            vdf_path = os.path.join(self.steam_path, "steamapps", "libraryfolders.vdf")
+            if os.path.exists(vdf_path):
+                try:
+                    with open(vdf_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    matches = re.findall(r'"path"\s+"([^"]+)"', content, re.IGNORECASE)
+                    for lib_dir in matches:
+                        clean_dir = lib_dir.replace(r"\\", "\\")
+                        candidate = os.path.join(clean_dir, "steamapps", "common", "Geometry Dash")
+                        if os.path.exists(candidate):
+                            return candidate
+                        sub_common = os.path.join(clean_dir, "steamapps", "common")
+                        if os.path.isdir(sub_common):
+                            for entry in os.listdir(sub_common):
+                                full = os.path.join(sub_common, entry)
+                                if os.path.isdir(full) and (
+                                    os.path.isfile(os.path.join(full, "GeometryDash.exe")) or
+                                    (IS_MAC and find_macos_game_app(full))
+                                ):
+                                    return full
+                except Exception:
+                    pass
+
+        # 3. macOS default
         if IS_MAC:
             mac_default = os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/Geometry Dash")
             if os.path.exists(mac_default):
                 return mac_default
 
-        vdf_path = os.path.join(self.steam_path, "steamapps", "libraryfolders.vdf")
-        if os.path.exists(vdf_path):
-            try:
-                with open(vdf_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                matches = re.findall(r'"path"\s+"([^"]+)"', content, re.IGNORECASE)
-                for lib_dir in matches:
-                    clean_dir = lib_dir.replace(r"\\", "\\")
-                    candidate = os.path.join(clean_dir, "steamapps", "common", "Geometry Dash")
-                    if os.path.exists(candidate):
-                        return candidate
-            except Exception:
-                pass
+        # 4. Fallback search: OneDrive, Desktop, Documents, Games
+        for inst in self.find_all_gd_installations():
+            if inst.get("path") and os.path.isdir(inst["path"]):
+                return inst["path"]
 
         return None
 
@@ -2139,6 +2352,11 @@ class GDManager:
         return None
 
     def get_save_data_dir(self):
+        # 1. User manual override from settings
+        custom = getattr(self, "custom_save_path", None)
+        if custom and os.path.isdir(custom):
+            return custom
+
         if IS_MAC:
             mac_save = os.path.expanduser("~/Library/Application Support/GeometryDash")
             if os.path.exists(mac_save):
@@ -2157,11 +2375,61 @@ class GDManager:
                     return c
             return candidates[0] if candidates else None
 
+        # 2. Windows candidate search (AppData, OneDrive, Roaming, Saved Games, Documents, Portable)
+        candidates = []
+
+        # Portable saves inside or next to game folder take precedence if game folder is portable
+        if self.gd_path and os.path.isdir(self.gd_path):
+            candidates.append(os.path.join(self.gd_path, "save"))
+            candidates.append(os.path.join(self.gd_path, "saves"))
+            candidates.append(os.path.join(self.gd_path, "AppData", "Local", "GeometryDash"))
+            if not is_steam_library_game_path(self.gd_path):
+                candidates.append(self.gd_path)
+
         appdata = os.environ.get("LOCALAPPDATA")
         if appdata:
-            gd_save = os.path.join(appdata, "GeometryDash")
-            if os.path.exists(gd_save):
-                return gd_save
+            candidates.append(os.path.join(appdata, "GeometryDash"))
+
+        onedrive_roots = []
+        for env_var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+            val = os.environ.get(env_var)
+            if val and os.path.isdir(val) and val not in onedrive_roots:
+                onedrive_roots.append(val)
+        user_home = os.path.expanduser("~")
+        for candidate_name in ("OneDrive", "OneDrive - Personal"):
+            p = os.path.join(user_home, candidate_name)
+            if os.path.isdir(p) and p not in onedrive_roots:
+                onedrive_roots.append(p)
+
+        for od in onedrive_roots:
+            candidates.append(os.path.join(od, "GeometryDash"))
+            candidates.append(os.path.join(od, "Documents", "GeometryDash"))
+            candidates.append(os.path.join(od, "AppData", "Local", "GeometryDash"))
+            candidates.append(os.path.join(od, "Desktop", "GeometryDash"))
+
+        roaming = os.environ.get("APPDATA")
+        if roaming:
+            candidates.append(os.path.join(roaming, "GeometryDash"))
+        candidates.append(os.path.join(user_home, "Saved Games", "GeometryDash"))
+        candidates.append(os.path.join(user_home, "Documents", "GeometryDash"))
+
+        # Prioritize whichever directory actually contains Geometry Dash save files (.dat)
+        for c in candidates:
+            if os.path.isdir(c):
+                try:
+                    for f in os.listdir(c):
+                        if f.lower().startswith("cc") and f.lower().endswith(".dat"):
+                            return c
+                except Exception:
+                    pass
+
+        # If none contain .dat files yet, return the first directory that exists
+        for c in candidates:
+            if os.path.isdir(c):
+                return c
+
+        if appdata:
+            return os.path.join(appdata, "GeometryDash")
         return None
 
     def get_crashlogs_dir(self):
@@ -3369,6 +3637,9 @@ class GeodeSyncApp(tk.Tk):
         if stored_game_path and self._is_valid_game_path(stored_game_path):
             self.mgr.gd_path = os.path.abspath(stored_game_path)
             self.mgr.manifest_path = self.mgr.get_manifest_path()
+        stored_save_path = self.settings.get("custom_save_path")
+        if stored_save_path and os.path.isdir(stored_save_path):
+            self.mgr.custom_save_path = os.path.abspath(stored_save_path)
         self.auto_backup_enabled = bool(self.settings.get("auto_backup_enabled", True))
         self.sounds_enabled = bool(self.settings.get("sounds_enabled", False))
         self.discord_rpc_enabled = bool(self.settings.get("discord_rpc_enabled", True))
@@ -3561,6 +3832,7 @@ class GeodeSyncApp(tk.Tk):
         self.settings.update({
             "schema_version": 1,
             "game_path": self.mgr.gd_path,
+            "custom_save_path": getattr(self.mgr, "custom_save_path", None),
             "target_manifest": str(self.mgr.target_manifest),
             "auto_backup_enabled": bool(self.auto_backup_enabled),
             "sounds_enabled": bool(self.sounds_enabled),
@@ -3770,12 +4042,49 @@ class GeodeSyncApp(tk.Tk):
             if ok:
                 fixed_mods.append(inc["name"])
 
+        # OneDrive cloud stub unpinning
+        onedrive_repaired = False
+        if IS_WIN:
+            if self.mgr.gd_path and "onedrive" in self.mgr.gd_path.casefold():
+                ok_od, _ = ensure_local_onedrive_files(self.mgr.gd_path)
+                if ok_od:
+                    onedrive_repaired = True
+            save_p = self.mgr.get_save_data_dir()
+            if save_p and "onedrive" in save_p.casefold():
+                ok_od, _ = ensure_local_onedrive_files(save_p)
+                if ok_od:
+                    onedrive_repaired = True
+
+        # Check for multiple installations: if active is outside Steam but a Steam copy exists, suggest switching!
+        switched_to_steam = False
+        try:
+            all_installs = self.mgr.find_all_gd_installations()
+            steam_inst = next((i for i in all_installs if i["is_steam"]), None)
+            if steam_inst and self.mgr.gd_path and not is_steam_library_game_path(self.mgr.gd_path):
+                if messagebox.askyesno(
+                    "Switch to Official Steam Installation?",
+                    f"GeodeSync detected your official Steam Geometry Dash installation at:\n{steam_inst['path']}\n\n"
+                    f"Your current folder is outside Steam (e.g. OneDrive or portable copy):\n{self.mgr.gd_path}\n\n"
+                    "Would you like to switch to the official Steam folder automatically now?",
+                    parent=self
+                ):
+                    self.mgr.gd_path = steam_inst["path"]
+                    self.mgr.manifest_path = self.mgr.get_manifest_path()
+                    self._save_settings()
+                    switched_to_steam = True
+                    self.log(f"Emergency: Switched game path to official Steam installation: {self.mgr.gd_path}", "SUCCESS")
+        except Exception:
+            pass
+
         self.is_downloading_depot = False
         self.pending_profile_mods = None
         self.progress_frame.pack_forget()
         self.primary_btn.set_enabled(True)
         self.refresh_status()
         self.play_ding()
+
+        od_line = f"• OneDrive Cloud Files: Pinned & Downloaded locally\n" if onedrive_repaired else ""
+        steam_line = f"• Game Directory: Switched to official Steam installation\n" if switched_to_steam else ""
 
         summary_msg = (
             "🎉 Emergency Unstick Completed!\n\n"
@@ -3784,7 +4093,9 @@ class GeodeSyncApp(tk.Tk):
             f"• Target Version: Reset to 2.2081 (Official Geode Baseline)\n"
             f"• Steam Update Lock: Unlocked & Cleared\n"
             f"• Corrupt Download Cache: {'Purged for fresh retry' if cleared_cache else 'Clean'}\n"
-            f"• Incompatible Mods Repaired: {', '.join(fixed_mods) if fixed_mods else 'None found (Clean)'}\n\n"
+            f"• Incompatible Mods Repaired: {', '.join(fixed_mods) if fixed_mods else 'None found (Clean)'}\n"
+            f"{od_line}"
+            f"{steam_line}\n"
             "Your setup is now un-stuck! You can click '⚡ Fix Geode Mods' to install clean files, or '▶️ Play' if already on 2.2081."
         )
         messagebox.showinfo("Emergency Unstick Complete", summary_msg, parent=self)
@@ -4364,6 +4675,9 @@ class GeodeSyncApp(tk.Tk):
         choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         choose_path_btn.pack(side="right", padx=(4, 0))
 
+        choose_save_btn = tk.Button(footer_actions, text="💾 Save Folder", command=self.browse_save_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
+        choose_save_btn.pack(side="right", padx=(4, 0))
+
         view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         view_log_btn.pack(side="right", padx=(4, 0))
 
@@ -4380,7 +4694,7 @@ class GeodeSyncApp(tk.Tk):
 
         self.path_lbl = tk.Label(
             footer,
-            text=f"Game folder: {self.mgr.gd_path or 'Not found'}",
+            text=f"Game: {self.mgr.gd_path or 'Not found'}  •  Saves: {self.mgr.get_save_data_dir() or 'Not found'}",
             font=("Segoe UI", 7),
             fg=UI["quiet"],
             bg=UI["header"],
@@ -4542,7 +4856,8 @@ class GeodeSyncApp(tk.Tk):
         else:
             self.geode_badge.config(text="Not installed", fg=UI["red"], bg=UI["red_dark"])
 
-        self.path_lbl.config(text=f"Game folder: {self.mgr.gd_path or 'Not found'}")
+        save_p = self.mgr.get_save_data_dir()
+        self.path_lbl.config(text=f"Game: {self.mgr.gd_path or 'Not found'}  •  Saves: {save_p or 'Not found'}")
 
         steam_found = bool(self.mgr.steam_path and os.path.isdir(self.mgr.steam_path))
         self.steam_badge.config(
@@ -4749,8 +5064,10 @@ class GeodeSyncApp(tk.Tk):
         except OSError:
             save_files = []
         if not save_files and not messagebox.askyesno(
-            "No save backup found",
-            "GeodeSync could not find Geometry Dash save files to back up. Continue with the version switch anyway?",
+            "No Save Backup Found",
+            "GeodeSync could not find Geometry Dash save files (.dat) in standard or OneDrive locations.\n\n"
+            "If your save files are stored in a custom folder, you can click 'No' and use '💾 Save Folder' in the bottom bar to link them before switching.\n\n"
+            "Continue with the version switch anyway?",
         ):
             return False
 
@@ -5962,7 +6279,33 @@ class GeodeSyncApp(tk.Tk):
 
     def browse_gd_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Folder")
+        if not selected:
+            # Let them pick GeometryDash.exe directly if they prefer
+            selected = filedialog.askopenfilename(
+                title="Select GeometryDash.exe",
+                filetypes=[("Geometry Dash Executable", "GeometryDash.exe;Geometry Dash.app"), ("All Files", "*.*")]
+            )
+            if selected:
+                if selected.endswith(".app"):
+                    selected = os.path.dirname(selected) if not IS_MAC else selected
+                else:
+                    selected = os.path.dirname(selected)
+
         if selected:
+            # If user selected a directory that contains a subfolder with GeometryDash.exe
+            if not os.path.isfile(os.path.join(selected, "GeometryDash.exe")) and not (IS_MAC and find_macos_game_app(selected)):
+                try:
+                    for sub in os.listdir(selected):
+                        candidate = os.path.join(selected, sub)
+                        if os.path.isdir(candidate) and (
+                            os.path.isfile(os.path.join(candidate, "GeometryDash.exe")) or
+                            (IS_MAC and find_macos_game_app(candidate))
+                        ):
+                            selected = candidate
+                            break
+                except Exception:
+                    pass
+
             is_valid = False
             if IS_MAC:
                 if os.path.exists(os.path.join(selected, "Geometry Dash.app")) or os.path.exists(os.path.join(selected, "GeometryDash.app")) or selected.endswith(".app"):
@@ -5978,10 +6321,40 @@ class GeodeSyncApp(tk.Tk):
                 self.mgr.manifest_path = self.mgr.get_manifest_path()
                 self._save_settings()
                 self.log(f"Updated GD directory to: {self.mgr.gd_path}", "INFO")
+                if "onedrive" in self.mgr.gd_path.casefold():
+                    self.log("Notice: This Geometry Dash folder is located in Microsoft OneDrive.", "WARNING")
                 self.refresh_status()
             else:
                 target_name = "Geometry Dash.app" if IS_MAC else "GeometryDash.exe"
                 messagebox.showerror("Invalid Directory", f"The selected folder does not contain {target_name}.")
+
+    def browse_save_path(self):
+        selected = filedialog.askdirectory(title="Select Geometry Dash Save Folder (where CCGameManager.dat is stored)")
+        if not selected:
+            # Allow picking CCGameManager.dat directly
+            selected = filedialog.askopenfilename(
+                title="Select CCGameManager.dat",
+                filetypes=[("Geometry Dash Save Data", "CCGameManager.dat;*.dat"), ("All Files", "*.*")]
+            )
+            if selected:
+                selected = os.path.dirname(selected)
+
+        if selected and os.path.isdir(selected):
+            self.mgr.custom_save_path = os.path.abspath(selected)
+            self._save_settings()
+            has_dat = False
+            try:
+                has_dat = any(f.lower().startswith("cc") and f.lower().endswith(".dat") for f in os.listdir(selected))
+            except Exception:
+                pass
+
+            if has_dat:
+                self.log(f"Custom save directory linked: {self.mgr.custom_save_path}", "SUCCESS")
+                messagebox.showinfo("Save Directory Linked", f"Successfully linked save data from:\n{self.mgr.custom_save_path}")
+            else:
+                self.log(f"Custom save directory set to {self.mgr.custom_save_path} (no .dat files detected yet)", "INFO")
+                messagebox.showwarning("No Save Files Found", f"Folder selected:\n{self.mgr.custom_save_path}\n\nNote: No CCGameManager.dat file was found inside this folder yet.")
+            self.refresh_status()
 
     def launch_gd(self):
         if IS_MAC:

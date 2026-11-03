@@ -100,6 +100,17 @@ class TroubleshooterTests(unittest.TestCase):
         self.assertIn("Incompatible mod", title)
         self.assertIn("Auto-Fix", steps)
 
+    def test_onedrive_cloud_sync_explanation(self):
+        title, steps = explain_error_text("[WinError 0x8007016A] The cloud file provider is not running (OneDrive)")
+        self.assertIn("OneDrive", title)
+        self.assertIn("Auto-Fix", steps)
+        self.assertIn("Always keep on this device", steps)
+
+    def test_steam_game_folder_detection_accepts_alternate_folder_names(self):
+        self.assertTrue(is_steam_library_game_path(r"D:\Steam\steamapps\common\GeometryDash"))
+        self.assertTrue(is_steam_library_game_path(r"D:\Steam\steamapps\common\GD"))
+        self.assertTrue(is_steam_library_game_path(r"D:\Steam\steamapps\common\Geometry Dash 2.2"))
+
     def test_steam_game_folder_detection_accepts_custom_windows_library_path(self):
         self.assertTrue(is_steam_library_game_path(
             r"C:\Program Files (x86)\Steam\steamapps\common\Geometry Dash" + "\\"

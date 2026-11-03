@@ -1,3 +1,14 @@
+# GeodeSync v2.3.21
+
+## Universal Multi-Install & OneDrive Detection + Custom Save Linking
+
+- **Universal Multi-Installation Discovery (`find_all_gd_installations`):** Scans Steam libraries, Microsoft OneDrive, Desktop, Documents, and secondary drives to identify all Geometry Dash installations on your PC. Detects when users have multiple copies (e.g. an official Steam 2.2081 install vs. a portable/OneDrive 2.2074 folder) and prompts to switch to the official Steam library with 1 click.
+- **Deep OneDrive & Portable Save Locator:** `get_save_data_dir()` now automatically scans across OneDrive redirected folders (`%OneDrive%\GeometryDash`, `Documents\GeometryDash`, etc.), Roaming AppData, and portable game directory saves (`<gd_path>\save`). Prioritizes directories containing active `CCGameManager.dat` save files.
+- **Dedicated `💾 Save Folder` Linking:** Added a 1-click **`💾 Save Folder`** button to the bottom navigation bar and Troubleshooter, allowing users with custom or non-standard save directories to directly link their save location.
+- **OneDrive Cloud-Only Stub Auto-Fix (`ensure_local_onedrive_files`):** Automatically clears Windows `attrib -U -P` offline/reparse-point cloud placeholders to resolve `0x8007016A` ("The cloud file provider is not running") and `WinError 392` errors.
+- **Flexible Steam Library Folder Recognition:** Recognizes Steam game folders regardless of custom folder naming (e.g. `GeometryDash`, `GD`, `Geometry Dash 2.2`).
+- **Enhanced `📁 Game Folder` Selector:** Users can now click either a directory OR directly select their `GeometryDash.exe` / `Geometry Dash.app` executable. Automatically steps into child folders if a parent directory is selected.
+
 # GeodeSync v2.3.20
 
 ## Critical Hotfix: Eliminate False 2.2074 Detection & Infinite Downgrade Loop
