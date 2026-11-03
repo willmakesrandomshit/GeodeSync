@@ -673,19 +673,23 @@ def select_app_update_asset(release, platform_name=None, architecture=None):
             or not release.get("published_at")):
         raise ValueError("The update is not a published stable GeodeSync release.")
     if platform_name == "windows":
-        expected = "GeodeSync-Windows.zip"
+        candidates = ["GeodeSync-Windows.zip", f"GeodeSync-{tag}-Windows.zip"]
+        if not tag.startswith("v"):
+            candidates.append(f"GeodeSync-v{tag}-Windows.zip")
     elif platform_name == "linux":
-        expected = f"GeodeSync-{tag}-Linux.tar.gz"
+        candidates = [f"GeodeSync-{tag}-Linux.tar.gz", "GeodeSync-Linux.tar.gz"]
     elif platform_name == "macos":
-        expected = "GeodeSync-macOS-arm64.zip" if architecture in ("arm64", "aarch64") else "GeodeSync-macOS-x86_64.zip" if architecture in ("x86_64", "amd64") else None
-        if expected is None:
+        expected_mac = "GeodeSync-macOS-arm64.zip" if architecture in ("arm64", "aarch64") else "GeodeSync-macOS-x86_64.zip" if architecture in ("x86_64", "amd64") else None
+        if expected_mac is None:
             raise ValueError(f"Unsupported Mac architecture: {architecture}")
+        candidates = [expected_mac]
     else:
         raise ValueError(f"Unsupported platform: {platform_name}")
-    matches = [asset for asset in release.get("assets", []) if asset.get("name") == expected]
-    if len(matches) != 1:
-        raise FileNotFoundError(f"Release must contain exactly one {expected} asset.")
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") in candidates]
+    if not matches:
+        raise FileNotFoundError(f"Release must contain a valid package ({candidates[0]}).")
     asset = matches[0]
+    expected = asset.get("name")
     url = str(asset.get("browser_download_url") or "")
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname != "github.com" or parsed.path != f"/{GITHUB_REPO}/releases/download/{tag}/{expected}":
@@ -3064,10 +3068,12 @@ class GDManager:
                     results.append({
                         "filename": item,
                         "mod_id": mod_id,
+                        "id": mod_id,
                         "name": name,
                         "version": version,
                         "developer": developer,
                         "enabled": is_enabled,
+                        "is_enabled": is_enabled,
                         "path": full,
                     })
         except Exception:
@@ -4031,6 +4037,221 @@ class GDManager:
             }
         except Exception as e:
             return False, f"Optimization failed: {e}"
+
+    # ==================== SAVE SLOTS ENGINE ====================
+
+    def get_save_slots_dir(self):
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return None
+        slots_dir = os.path.join(save_dir, "GeodeSync_Save_Slots")
+        os.makedirs(slots_dir, exist_ok=True)
+        return slots_dir
+
+    def get_save_slots(self):
+        slots_dir = self.get_save_slots_dir()
+        if not slots_dir:
+            return []
+        slots = []
+        try:
+            for item in sorted(os.listdir(slots_dir)):
+                slot_path = os.path.join(slots_dir, item)
+                if os.path.isdir(slot_path):
+                    gm = os.path.join(slot_path, "CCGameManager.dat")
+                    info = {"name": item, "path": slot_path, "has_saves": os.path.exists(gm)}
+                    if os.path.exists(gm):
+                        try:
+                            with open(gm, "rb") as f:
+                                dec = decode_geometry_dash_save(f.read()).decode("utf-8", errors="ignore")
+                            m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
+                            info["player_name"] = m.group(1) if m else "Player"
+                            stars_m = re.search(r"<k>6</k><s>([0-9]+)</s>", dec)
+                            info["stars"] = int(stars_m.group(1)) if stars_m else 0
+                        except Exception:
+                            info["player_name"] = "Player"
+                            info["stars"] = 0
+                    slots.append(info)
+        except Exception:
+            pass
+        return slots
+
+    def create_save_slot(self, slot_name):
+        slots_dir = self.get_save_slots_dir()
+        if not slots_dir:
+            return False, "Save directory not found"
+        safe_name = re.sub(r'[^a-zA-Z0-9_\- ]', '', slot_name).strip()
+        if not safe_name:
+            return False, "Invalid slot name"
+        target = os.path.join(slots_dir, safe_name)
+        if os.path.exists(target):
+            return False, "A slot with this name already exists"
+        os.makedirs(target, exist_ok=True)
+        save_dir = self.get_save_data_dir()
+        for f in os.listdir(save_dir):
+            if f.endswith((".dat", ".dat.bak")):
+                shutil.copy2(os.path.join(save_dir, f), os.path.join(target, f))
+        return True, f"Created save slot '{safe_name}'"
+
+    def switch_save_slot(self, slot_name):
+        slots_dir = self.get_save_slots_dir()
+        if not slots_dir:
+            return False, "Save directory not found"
+        target = os.path.join(slots_dir, slot_name)
+        if not os.path.isdir(target):
+            return False, "Slot directory does not exist"
+        self.backup_save_files_snapshot(tag="pre_slot_switch")
+        save_dir = self.get_save_data_dir()
+        for f in os.listdir(target):
+            if f.endswith((".dat", ".dat.bak")):
+                shutil.copy2(os.path.join(target, f), os.path.join(save_dir, f))
+        return True, f"Switched to save slot '{slot_name}'"
+
+    # ==================== CUSTOM SFX ENGINE ====================
+
+    def get_custom_sfx_status(self):
+        if not self.gd_path:
+            return {}
+        res_dir = os.path.join(self.gd_path, "Resources")
+        death_bak = os.path.join(res_dir, "explode_11.ogg.bak")
+        return {
+            "death_sfx_custom": os.path.exists(death_bak),
+            "res_dir_exists": os.path.isdir(res_dir)
+        }
+
+    def set_custom_death_sfx(self, source_audio_path):
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        if not os.path.isfile(source_audio_path):
+            return False, "Source audio file not found."
+        res_dir = os.path.join(self.gd_path, "Resources")
+        if not os.path.isdir(res_dir):
+            return False, "Resources directory not found in GD folder."
+        orig_sfx = os.path.join(res_dir, "explode_11.ogg")
+        bak_sfx = os.path.join(res_dir, "explode_11.ogg.bak")
+        try:
+            if os.path.exists(orig_sfx) and not os.path.exists(bak_sfx):
+                shutil.copy2(orig_sfx, bak_sfx)
+            shutil.copy2(source_audio_path, orig_sfx)
+            return True, "Successfully installed custom death sound!"
+        except Exception as e:
+            return False, f"Failed to swap death sound: {e}"
+
+    def restore_vanilla_death_sfx(self):
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        res_dir = os.path.join(self.gd_path, "Resources")
+        orig_sfx = os.path.join(res_dir, "explode_11.ogg")
+        bak_sfx = os.path.join(res_dir, "explode_11.ogg.bak")
+        if not os.path.exists(bak_sfx):
+            return True, "Already using vanilla death sound."
+        try:
+            shutil.copy2(bak_sfx, orig_sfx)
+            os.remove(bak_sfx)
+            return True, "Restored original vanilla death sound."
+        except Exception as e:
+            return False, f"Failed to restore vanilla sound: {e}"
+
+    # ==================== SAVE RESURRECTOR ENGINE ====================
+
+    def find_salvageable_saves(self):
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return []
+        candidates = []
+        for root, _, files in os.walk(save_dir):
+            for file in files:
+                if file.startswith("CCGameManager") and (file.endswith(".dat") or ".bak" in file):
+                    full_p = os.path.join(root, file)
+                    try:
+                        sz = os.path.getsize(full_p)
+                        if sz > 100:
+                            with open(full_p, "rb") as f:
+                                dec = decode_geometry_dash_save(f.read()).decode("utf-8", errors="ignore")
+                            if "<k>playerName</k>" in dec:
+                                name_m = re.search(r"<k>playerName</k><s>([^<]+)</s>", dec)
+                                stars_m = re.search(r"<k>6</k><s>([0-9]+)</s>", dec)
+                                demons_m = re.search(r"<k>GS_value</k>.*?<k>14</k><s>([0-9]+)</s>", dec, re.DOTALL)
+                                mtime = os.path.getmtime(full_p)
+                                rel_name = os.path.relpath(full_p, save_dir).replace("\\", "/")
+                                candidates.append({
+                                    "path": full_p,
+                                    "relative_path": rel_name,
+                                    "size_kb": round(sz / 1024, 1),
+                                    "player_name": name_m.group(1) if name_m else "Player",
+                                    "stars": int(stars_m.group(1)) if stars_m else 0,
+                                    "demons": int(demons_m.group(1)) if demons_m else 0,
+                                    "mtime": mtime,
+                                    "date_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+                                })
+                    except Exception:
+                        pass
+        return sorted(candidates, key=lambda c: c["mtime"], reverse=True)
+
+    def resurrect_save(self, candidate_gm_path):
+        save_dir = self.get_save_data_dir()
+        if not save_dir:
+            return False, "Save directory not found"
+        if not os.path.isfile(candidate_gm_path):
+            return False, "Target save file does not exist"
+        self.backup_save_files_snapshot(tag="pre_resurrect")
+        target_gm = os.path.join(save_dir, "CCGameManager.dat")
+        shutil.copy2(candidate_gm_path, target_gm)
+
+        cand_dir = os.path.dirname(candidate_gm_path)
+        for cand_ll in ("CCLocalLevels.dat", "CCLocalLevels.dat.bak"):
+            ll_cand_p = os.path.join(cand_dir, cand_ll)
+            if os.path.isfile(ll_cand_p):
+                shutil.copy2(ll_cand_p, os.path.join(save_dir, "CCLocalLevels.dat"))
+                break
+
+        return True, "Save file successfully resurrected and restored!"
+
+    # ==================== MOD PRESETS ENGINE ====================
+
+    def apply_mod_preset(self, preset_type):
+        """
+        Applies a curated mod configuration:
+        'tournament': enables FPS unlockers / trackers, disables visual clutter
+        'globed': enables multiplayer
+        'vanilla': disables all mods
+        """
+        if not self.gd_path:
+            return False, "Could not locate Geometry Dash folder."
+        mods_dir = os.path.join(self.gd_path, "geode", "mods")
+        if not os.path.isdir(mods_dir):
+            return False, "Geode mods directory not found."
+
+        all_mods = self.get_installed_mods()
+        if not all_mods:
+            return True, "No mods installed to configure."
+
+        updated = 0
+        for m in all_mods:
+            mod_id = m.get("mod_id") or m.get("id") or ""
+            m_id = mod_id.lower()
+            is_enabled = m.get("is_enabled", True)
+
+            should_enable = True
+            if preset_type == "vanilla":
+                should_enable = False
+            elif preset_type == "tournament":
+                if "globed" in m_id or "imageplus" in m_id:
+                    should_enable = False
+            elif preset_type == "globed":
+                if "globed" in m_id or "node-ids" in m_id:
+                    should_enable = True
+
+            if should_enable != is_enabled:
+                curr_file = os.path.join(mods_dir, m.get("filename", f"{mod_id}.geode" if is_enabled else f"{mod_id}.geode.disabled"))
+                new_file = os.path.join(mods_dir, f"{mod_id}.geode" if should_enable else f"{mod_id}.geode.disabled")
+                if os.path.exists(curr_file):
+                    try:
+                        os.rename(curr_file, new_file)
+                        updated += 1
+                    except Exception:
+                        pass
+
+        return True, f"Preset '{preset_type}' applied ({updated} mods adjusted)."
 
 
 
@@ -5168,6 +5389,22 @@ class GeodeSyncApp(tk.Tk):
         self.opt_badge.pack(side="left", padx=2)
         self.opt_badge.bind("<Button-1>", lambda e: self.open_save_optimizer_dialog())
 
+        self.slots_badge = tk.Label(setup_chips_row, text="💾 Slots", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.slots_badge.pack(side="left", padx=2)
+        self.slots_badge.bind("<Button-1>", lambda e: self.open_save_slots_dialog())
+
+        self.sfx_badge = tk.Label(setup_chips_row, text="💥 SFX", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.sfx_badge.pack(side="left", padx=2)
+        self.sfx_badge.bind("<Button-1>", lambda e: self.open_soundpack_hub())
+
+        self.vault_badge = tk.Label(setup_chips_row, text="🗝️ Vaults", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.vault_badge.pack(side="left", padx=2)
+        self.vault_badge.bind("<Button-1>", lambda e: self.open_vault_helper())
+
+        self.salvage_badge = tk.Label(setup_chips_row, text="🛡️ Salvager", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.salvage_badge.pack(side="left", padx=2)
+        self.salvage_badge.bind("<Button-1>", lambda e: self.open_corrupt_save_resurrector())
+
         # Hero Center: Status badge & description
         self.guide_badge = tk.Label(self.guide_card, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=2)
         self.guide_badge.pack(anchor="w", pady=(0, 2))
@@ -5230,7 +5467,7 @@ class GeodeSyncApp(tk.Tk):
         tool_grid.columnconfigure(0, weight=0, minsize=92)
         for col in range(1, 5):
             tool_grid.columnconfigure(col, weight=1)
-        for row in range(6):
+        for row in range(7):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
         groups = (
@@ -5240,6 +5477,7 @@ class GeodeSyncApp(tk.Tk):
             ("PREFERENCES", "#a99be7", "#282432"),
             ("APP", "#63d5ce", "#202b2b"),
             ("POWER", "#f39c12", "#2e2417"),
+            ("EXTRAS", "#63d5ce", "#1e2b2a"),
         )
         for row, (name, accent, row_bg) in enumerate(groups):
             tk.Label(
@@ -5292,6 +5530,12 @@ class GeodeSyncApp(tk.Tk):
         add_tool("🏆 Top Demonlist", self.open_demonlist_browser, color=UI["lilac"], row=5, column=1, bold=True)
         add_tool("🎵 Jukebox & Practice", self.open_jukebox_dialog, color=UI["lime"], row=5, column=2, bold=True)
         add_tool("☁️ Sync Archive", self.open_bundle_manager_dialog, color=UI["amber"], row=5, column=3, bold=True)
+
+        # v2.4.0 Extras
+        add_tool("💾 Save Slots", self.open_save_slots_dialog, color=UI["amber"], row=6, column=0, bold=True)
+        add_tool("💥 Custom SFX", self.open_soundpack_hub, color=UI["lilac"], row=6, column=1, bold=True)
+        add_tool("🗝️ Secret Vaults", self.open_vault_helper, color=UI["amber"], row=6, column=2, bold=True)
+        add_tool("🛡️ Save Salvager", self.open_corrupt_save_resurrector, color=UI["lime"], row=6, column=3, bold=True)
 
         if not self.auto_backup_enabled:
             self.auto_backup_btn.config(text="Auto-Backup: OFF", fg=UI["muted"])
@@ -9331,6 +9575,325 @@ class GeodeSyncApp(tk.Tk):
                 messagebox.showerror("Optimization Failed", str(res))
 
         tk.Button(card, text="🚀 Optimize & Clean Save Data Now", command=do_clean, font=("Segoe UI", 10, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=14, pady=6, cursor="hand2").pack(anchor="w")
+
+    def open_save_slots_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Multi-Slot Save Manager")
+        dialog.geometry("640x520")
+        dialog.minsize(580, 420)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="💾 Multi-Slot Save File Manager", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Maintain independent save profiles (e.g. Main Account, Demon Grinds, Alt) and switch in 1 click.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=18, pady=12)
+        content.pack(fill="both", expand=True)
+
+        top_ctrl = tk.Frame(content, bg=UI["background"])
+        top_ctrl.pack(fill="x", pady=(0, 10))
+
+        slot_name_var = tk.StringVar()
+        tk.Entry(top_ctrl, textvariable=slot_name_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1, width=24).pack(side="left", ipady=3, padx=(0, 8))
+
+        def create_slot():
+            name = slot_name_var.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Please enter a slot name.")
+                return
+            ok, msg = self.mgr.create_save_slot(name)
+            if ok:
+                self.log(msg, "SUCCESS")
+                self.play_ding()
+                slot_name_var.set("")
+                render_slots()
+                messagebox.showinfo("Slot Created", f"Successfully saved current state to slot '{name}'!")
+            else:
+                messagebox.showerror("Error", msg)
+
+        tk.Button(top_ctrl, text="➕ Create Slot from Current Progress", command=create_slot, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left")
+
+        list_container = tk.Frame(content, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_container.pack(fill="both", expand=True)
+
+        slots_frame = tk.Frame(list_container, bg=UI["panel"], padx=10, pady=10)
+        slots_frame.pack(fill="both", expand=True)
+
+        def render_slots():
+            for w in slots_frame.winfo_children():
+                w.destroy()
+            slots = self.mgr.get_save_slots()
+            if not slots:
+                tk.Label(slots_frame, text="No extra save slots saved yet.\nEnter a name above to capture your current game state as a slot!", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"]).pack(pady=40)
+                return
+
+            for s in slots:
+                row = tk.Frame(slots_frame, bg=UI["panel_alt"], padx=12, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", pady=3)
+
+                tk.Label(row, text=f"📁 {s['name']}", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+                p_text = f"Player: {s.get('player_name', 'Player')}  •  ⭐ {s.get('stars', 0)}"
+                tk.Label(row, text=p_text, font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel_alt"]).pack(side="left", padx=(12, 0))
+
+                def make_switch(slot_name):
+                    def do_switch():
+                        if not messagebox.askyesno("Confirm Switch", f"Switch active save files to slot '{slot_name}'?\nYour current state will be backed up automatically."):
+                            return
+                        ok, msg = self.mgr.switch_save_slot(slot_name)
+                        if ok:
+                            self.log(msg, "SUCCESS")
+                            self.play_ding()
+                            self.update_player_stats_ui()
+                            messagebox.showinfo("Switched", f"Active save switched to '{slot_name}'!")
+                        else:
+                            messagebox.showerror("Error", msg)
+                    return do_switch
+
+                tk.Button(row, text="⚡ Switch to this Slot", command=make_switch(s["name"]), font=("Segoe UI", 8, "bold"), bg=UI["inset"], fg=UI["lime"], relief="flat", padx=8, pady=3, cursor="hand2").pack(side="right")
+
+        render_slots()
+
+    def open_soundpack_hub(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Custom SFX & Death Sound Hub")
+        dialog.geometry("620x480")
+        dialog.minsize(560, 400)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="💥 Custom SFX & Death Sound Hub", font=("Segoe UI", 14, "bold"), fg=UI["lilac"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Safely customize Geometry Dash explosion / death sound effects with zero DLL hooks.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=18, pady=14)
+        content.pack(fill="both", expand=True)
+
+        card = tk.Frame(content, bg=UI["panel"], padx=16, pady=14, highlightbackground=UI["border"], highlightthickness=1)
+        card.pack(fill="x", pady=(0, 12))
+
+        status = self.mgr.get_custom_sfx_status()
+        status_text = "Status: 💥 Custom Death Sound Active" if status.get("death_sfx_custom") else "Status: 🔒 Vanilla Explosion (explode_11.ogg)"
+        status_lbl = tk.Label(card, text=status_text, font=("Segoe UI", 10, "bold"), fg=UI["lime"] if status.get("death_sfx_custom") else UI["quiet"], bg=UI["panel"])
+        status_lbl.pack(anchor="w", pady=(0, 10))
+
+        def pick_custom_file():
+            f_path = filedialog.askopenfilename(
+                parent=dialog,
+                title="Select Custom Death Sound Effect",
+                filetypes=[("Audio Files (*.ogg;*.wav;*.mp3)", "*.ogg;*.wav;*.mp3"), ("All Files", "*.*")]
+            )
+            if not f_path:
+                return
+            ok, msg = self.mgr.set_custom_death_sfx(f_path)
+            if ok:
+                status_lbl.config(text="Status: 💥 Custom Death Sound Active", fg=UI["lime"])
+                self.log(f"Custom death sound installed: {os.path.basename(f_path)}", "SUCCESS")
+                self.play_ding()
+                messagebox.showinfo("Sound Updated", f"Successfully activated custom death sound!\n\nFile: {os.path.basename(f_path)}")
+            else:
+                messagebox.showerror("Error", msg)
+
+        def restore_vanilla():
+            ok, msg = self.mgr.restore_vanilla_death_sfx()
+            if ok:
+                status_lbl.config(text="Status: 🔒 Vanilla Explosion (explode_11.ogg)", fg=UI["quiet"])
+                self.log("Restored vanilla death sound.", "SUCCESS")
+                self.play_ding()
+                messagebox.showinfo("Restored", "Restored official vanilla Geometry Dash death sound.")
+            else:
+                messagebox.showerror("Error", msg)
+
+        tk.Button(card, text="📁 Choose Any Custom Audio File (.ogg/.wav/.mp3)...", command=pick_custom_file, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=12, pady=5, cursor="hand2").pack(anchor="w", pady=(0, 8))
+        tk.Button(card, text="🔄 Restore Vanilla Death Sound", command=restore_vanilla, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2").pack(anchor="w")
+
+    def open_vault_helper(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Secret Vaults & Chamber of Time Helper")
+        dialog.geometry("640x540")
+        dialog.minsize(580, 440)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🗝️ Secret Vaults & Chamber of Time Helper", font=("Segoe UI", 14, "bold"), fg=UI["amber"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="All official unlock codes for The Vault, Vault of Secrets, and Chamber of Time with 1-click copying.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=10)
+        content.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(content, bg=UI["panel"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(content, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_c_resize(event):
+            canvas.itemconfig(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _on_c_resize)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        vault_sections = [
+            ("THE VAULT (SPOOKY - 10 SILVER COINS)", [
+                ("robot", "Unlocks Robot icon"),
+                ("ahead", "Unlocks Wave icon"),
+                ("gandalf", "Unlocks Rainbow trail"),
+                ("sparky", "Unlocks Secret coin"),
+                ("spooky", "Unlocks Shy Guy icon"),
+                ("neverending", "Unlocks UFO icon"),
+            ]),
+            ("VAULT OF SECRETS (KEYMASTER - 50 DIAMONDS)", [
+                ("brainpower", "Unlocks Brain icon"),
+                ("octocube", "Unlocks Octopus icon"),
+                ("seven", "Unlocks Finn icon"),
+                ("the chicken is on fire", "Unlocks Swamp Green color"),
+                ("the challenge", "Unlocks The Challenge secret level"),
+                ("gimmiethecolor", "Unlocks Dark Teal color"),
+            ]),
+            ("CHAMBER OF TIME (GATEKEEPER - 500 DIAMONDS)", [
+                ("river", "Unlocks Dark Green color"),
+                ("silence", "Unlocks Alternate Wave icon"),
+                ("darkness", "Unlocks Face icon"),
+                ("hunger", "Unlocks Hungry icon"),
+                ("volcano", "Unlocks Flame Wave icon"),
+            ]),
+        ]
+
+        for sec_title, codes in vault_sections:
+            tk.Label(scrollable, text=sec_title, font=("Segoe UI", 9, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w", padx=8, pady=(10, 4))
+            for code_str, desc in codes:
+                row = tk.Frame(scrollable, bg=UI["panel_alt"], padx=10, pady=5, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", padx=6, pady=2)
+
+                tk.Label(row, text=code_str, font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel_alt"], width=22, anchor="w").pack(side="left")
+                tk.Label(row, text=desc, font=("Segoe UI", 8), fg=UI["text"], bg=UI["panel_alt"]).pack(side="left")
+
+                def copy_code(c=code_str):
+                    self.clipboard_clear()
+                    self.clipboard_append(c)
+                    self.log(f"Copied vault code '{c}' to clipboard.", "INFO")
+                    self.play_ding()
+
+                tk.Button(row, text="📋 Copy", command=copy_code, font=("Segoe UI", 7, "bold"), bg=UI["inset"], fg=UI["quiet"], relief="flat", padx=6, pady=2, cursor="hand2").pack(side="right")
+
+    def open_corrupt_save_resurrector(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · Emergency Save Resurrector & Salvager")
+        dialog.geometry("660x520")
+        dialog.minsize(600, 420)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🛡️ Emergency Save Resurrector & Salvager", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Recovers and resurrects lost, 0-byte, or corrupted player save data from historical snapshot backups.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=16, pady=10)
+        content.pack(fill="both", expand=True)
+
+        candidates = self.mgr.find_salvageable_saves()
+        tk.Label(content, text=f"Found {len(candidates)} salvageable save snapshot backups on your PC:", font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["background"]).pack(anchor="w", pady=(0, 6))
+
+        canvas = tk.Canvas(content, bg=UI["panel"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(content, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=UI["panel"])
+
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_win = canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_c_resize(event):
+            canvas.itemconfig(canvas_win, width=event.width)
+        canvas.bind("<Configure>", _on_c_resize)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        if not candidates:
+            tk.Label(scrollable, text="No valid backup saves found to resurrect.\nBe sure to keep Auto-Backup turned ON to guarantee continuous protection.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"]).pack(pady=40)
+        else:
+            for c in candidates:
+                row = tk.Frame(scrollable, bg=UI["panel_alt"], padx=12, pady=8, highlightbackground=UI["border"], highlightthickness=1)
+                row.pack(fill="x", padx=6, pady=3)
+
+                info_col = tk.Frame(row, bg=UI["panel_alt"])
+                info_col.pack(side="left", fill="x", expand=True)
+
+                tk.Label(info_col, text=f"🎮 {c['player_name']}  •  ⭐ {c['stars']:,} Stars  •  👿 {c['demons']} Demons", font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["panel_alt"]).pack(anchor="w")
+                tk.Label(info_col, text=f"Snapshot: {c['date_str']}  •  Size: {c['size_kb']} KB  •  Location: {c['relative_path']}", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel_alt"]).pack(anchor="w", pady=(2, 0))
+
+                def make_resurrect(candidate_path, player_n):
+                    def do_resurrect():
+                        if not messagebox.askyesno("Confirm Resurrection", f"Restore this save snapshot for '{player_n}'?\nYour existing state will be backed up safely first."):
+                            return
+                        ok, msg = self.mgr.resurrect_save(candidate_path)
+                        if ok:
+                            self.log(msg, "SUCCESS")
+                            self.play_ding()
+                            self.update_player_stats_ui()
+                            messagebox.showinfo("Resurrection Successful", f"Save data successfully restored for {player_n}!")
+                        else:
+                            messagebox.showerror("Error", msg)
+                    return do_resurrect
+
+                tk.Button(row, text="⚡ Revive This Save", command=make_resurrect(c["path"], c["player_name"]), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=4, cursor="hand2").pack(side="right")
+
+    def open_mod_presets_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("GeodeSync · 1-Click Mod Presets & Competitive Loadouts")
+        dialog.geometry("640x500")
+        dialog.minsize(580, 420)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="⚡ 1-Click Mod Presets & Competitive Loadouts", font=("Segoe UI", 14, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Instantly optimize your mod configuration for tournaments, level creation, or multiplayer.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(dialog, bg=UI["background"], padx=18, pady=12)
+        content.pack(fill="both", expand=True)
+
+        presets = [
+            ("🏆 TOURNAMENT & DEMON GRINDER", "tournament", UI["lilac"], "Maximizes FPS, enables Demon progress trackers, and disables heavy background mods for minimal input latency."),
+            ("🎨 LEVEL CREATOR & BUILDER", "creator", UI["amber"], "Optimizes for level editing with BetterEdit and building utilities."),
+            ("🌐 GLOBED MULTIPLAYER", "globed", UI["lime"], "Ensures Globed, Node IDs, and voice chat mods are fully active for online sessions."),
+            ("🛡️ CLEAN VANILLA PHYSICS", "vanilla", UI["quiet"], "Disables all mods instantly to ensure 100% pure vanilla physics verification.")
+        ]
+
+        for p_title, p_key, col, desc in presets:
+            card = tk.Frame(content, bg=UI["panel"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+            card.pack(fill="x", pady=4)
+
+            tk.Label(card, text=p_title, font=("Segoe UI", 9, "bold"), fg=col, bg=UI["panel"]).pack(anchor="w")
+            tk.Label(card, text=desc, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=480, justify="left").pack(anchor="w", pady=(2, 6))
+
+            def make_apply(preset_k, title_str):
+                def do_apply():
+                    ok, msg = self.mgr.apply_mod_preset(preset_k)
+                    if ok:
+                        self.log(msg, "SUCCESS")
+                        self.play_ding()
+                        messagebox.showinfo("Preset Applied", f"Successfully activated {title_str}!\n\n{msg}")
+                    else:
+                        messagebox.showerror("Error", msg)
+                return do_apply
+
+            tk.Button(card, text="Apply Preset", command=make_apply(p_key, p_title), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=col, relief="flat", padx=10, pady=3, cursor="hand2").pack(anchor="e")
+
 
 
 

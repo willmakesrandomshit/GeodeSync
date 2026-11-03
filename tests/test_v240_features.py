@@ -235,8 +235,98 @@ class TestV240Features(unittest.TestCase):
         self.assertEqual(demons[0]["name"], "Tidal Wave")
         self.assertEqual(demons[0]["verifier"], "Zoink")
 
+    def test_save_slots_creation_and_switching(self):
+        # Create a mock save in save_dir
+        gm_path = os.path.join(self.save_dir, "CCGameManager.dat")
+        raw_xml = b'<?xml version="1.0"?><plist version="1.0" gjver="2.0"><dict><k>playerName</k><s>SlotPlayer1</s><k>6</k><s>500</s></dict></plist>'
+        with open(gm_path, "wb") as f:
+            f.write(encode_geometry_dash_save(raw_xml))
+
+        # Create slot
+        ok, msg = self.mgr.create_save_slot("DemonGrindSlot")
+        self.assertTrue(ok)
+        slots = self.mgr.get_save_slots()
+        self.assertEqual(len(slots), 1)
+        self.assertEqual(slots[0]["name"], "DemonGrindSlot")
+        self.assertEqual(slots[0]["player_name"], "SlotPlayer1")
+
+        # Now change the active save to simulate progress in main
+        new_xml = b'<?xml version="1.0"?><plist version="1.0" gjver="2.0"><dict><k>playerName</k><s>MainPlayer2</s><k>6</k><s>1200</s></dict></plist>'
+        with open(gm_path, "wb") as f:
+            f.write(encode_geometry_dash_save(new_xml))
+
+        # Switch back to DemonGrindSlot
+        ok, msg = self.mgr.switch_save_slot("DemonGrindSlot")
+        self.assertTrue(ok)
+        with open(gm_path, "rb") as f:
+            restored_dec = decode_geometry_dash_save(f.read()).decode("utf-8")
+        self.assertIn("SlotPlayer1", restored_dec)
+
+    def test_custom_sfx_swap_and_restore(self):
+        explode_file = os.path.join(self.resources_dir, "explode_11.ogg")
+        with open(explode_file, "wb") as f:
+            f.write(b"VANILLA_EXPLOSION")
+
+        status = self.mgr.get_custom_sfx_status()
+        self.assertFalse(status["death_sfx_custom"])
+
+        custom_sfx = os.path.join(self.test_dir, "vine_boom.ogg")
+        with open(custom_sfx, "wb") as f:
+            f.write(b"VINE_BOOM_DEATH_SFX")
+
+        ok, msg = self.mgr.set_custom_death_sfx(custom_sfx)
+        self.assertTrue(ok)
+        status = self.mgr.get_custom_sfx_status()
+        self.assertTrue(status["death_sfx_custom"])
+        with open(explode_file, "rb") as f:
+            self.assertEqual(f.read(), b"VINE_BOOM_DEATH_SFX")
+
+        ok, msg = self.mgr.restore_vanilla_death_sfx()
+        self.assertTrue(ok)
+        with open(explode_file, "rb") as f:
+            self.assertEqual(f.read(), b"VANILLA_EXPLOSION")
+
+    def test_salvage_and_resurrect_save(self):
+        # Create a historical backup directory
+        bak_dir = os.path.join(self.save_dir, "GeodeSync_Save_Backups", "auto_123456")
+        os.makedirs(bak_dir)
+        old_gm = os.path.join(bak_dir, "CCGameManager.dat")
+        raw_xml = b'<?xml version="1.0"?><plist version="1.0" gjver="2.0"><dict><k>playerName</k><s>ResurrectedHero</s><k>6</k><s>2500</s></dict></plist>'
+        with open(old_gm, "wb") as f:
+            f.write(encode_geometry_dash_save(raw_xml))
+
+        candidates = self.mgr.find_salvageable_saves()
+        self.assertGreaterEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["player_name"], "ResurrectedHero")
+
+        # Corrupt the main save (write 0 bytes)
+        main_gm = os.path.join(self.save_dir, "CCGameManager.dat")
+        with open(main_gm, "wb") as f:
+            f.write(b"")
+
+        # Resurrect!
+        ok, msg = self.mgr.resurrect_save(old_gm)
+        self.assertTrue(ok)
+        with open(main_gm, "rb") as f:
+            resurrected_dec = decode_geometry_dash_save(f.read()).decode("utf-8")
+        self.assertIn("ResurrectedHero", resurrected_dec)
+
+    def test_apply_mod_preset(self):
+        # Create 2 mods: one globed, one normal
+        m1 = os.path.join(self.mods_dir, "dankmeme.globed2.geode")
+        with zipfile.ZipFile(m1, "w") as zf:
+            zf.writestr("mod.json", json.dumps({"id": "dankmeme.globed2", "version": "1.0.0"}))
+        m2 = os.path.join(self.mods_dir, "geode.node-ids.geode")
+        with zipfile.ZipFile(m2, "w") as zf:
+            zf.writestr("mod.json", json.dumps({"id": "geode.node-ids", "version": "1.0.0"}))
+
+        # Apply vanilla preset (disables all mods)
+        ok, msg = self.mgr.apply_mod_preset("vanilla")
+        self.assertTrue(ok)
+        installed = self.mgr.get_installed_mods()
+        self.assertTrue(all(not m["is_enabled"] for m in installed))
+
     def test_gui_dialogs_initialized(self):
-        # Test that GeodeSyncApp has all new dialog methods available
         app = GeodeSyncApp()
         try:
             self.assertTrue(hasattr(app, "open_mod_store_dialog"))
@@ -244,8 +334,17 @@ class TestV240Features(unittest.TestCase):
             self.assertTrue(hasattr(app, "open_jukebox_dialog"))
             self.assertTrue(hasattr(app, "open_bundle_manager_dialog"))
             self.assertTrue(hasattr(app, "open_save_optimizer_dialog"))
+            self.assertTrue(hasattr(app, "open_save_slots_dialog"))
+            self.assertTrue(hasattr(app, "open_soundpack_hub"))
+            self.assertTrue(hasattr(app, "open_vault_helper"))
+            self.assertTrue(hasattr(app, "open_corrupt_save_resurrector"))
+            self.assertTrue(hasattr(app, "open_mod_presets_dialog"))
             self.assertTrue(hasattr(app, "launch_boosted_game"))
             self.assertTrue(hasattr(app, "opt_badge"))
+            self.assertTrue(hasattr(app, "slots_badge"))
+            self.assertTrue(hasattr(app, "sfx_badge"))
+            self.assertTrue(hasattr(app, "vault_badge"))
+            self.assertTrue(hasattr(app, "salvage_badge"))
         finally:
             app.destroy()
 
