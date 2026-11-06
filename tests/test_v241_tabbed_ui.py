@@ -126,7 +126,7 @@ class TestV241TabbedUI(unittest.TestCase):
         app = GeodeSyncApp()
         try:
             # Case 1: GD missing
-            orig_path = app.mgr.gd_path
+            orig_path = app.mgr.gd_path or os.path.join(os.getcwd(), "mock_gd")
             app.mgr.gd_path = None
             app.update_smart_guide(has_geode=False, is_locked=False)
             self.assertIn("couldn't find", app.guide_title.cget("text").lower())
