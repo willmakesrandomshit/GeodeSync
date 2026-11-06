@@ -4634,6 +4634,19 @@ class GeodeSyncApp(tk.Tk):
         threading.Thread(target=self._auto_backup_monitor_thread, daemon=True).start()
         self._start_auto_sync_loop()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind("<Unmap>", self._on_window_unmap)
+
+    def _on_window_unmap(self, event=None):
+        try:
+            if event is not None and event.widget != self:
+                return
+            if getattr(self, "run_in_bg_enabled", True) and IS_WIN:
+                if self.state() == "iconic":
+                    if self._start_system_tray():
+                        self.withdraw()
+                        self.log("GeodeSync minimized to system tray. Click tray icon to restore.", "INFO")
+        except Exception:
+            pass
 
     def _start_auto_sync_loop(self):
         """Starts a periodic 10-second background auto-sync loop to keep status, save progress, and steam lock updated."""

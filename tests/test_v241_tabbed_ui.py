@@ -123,17 +123,19 @@ class TestV241TabbedUI(unittest.TestCase):
             app.destroy()
 
     def test_smart_guide_states(self):
+        import tempfile
+        import shutil
         app = GeodeSyncApp()
+        temp_gd = tempfile.mkdtemp()
         try:
             # Case 1: GD missing
-            orig_path = app.mgr.gd_path or os.path.join(os.getcwd(), "mock_gd")
             app.mgr.gd_path = None
             app.update_smart_guide(has_geode=False, is_locked=False)
             self.assertIn("couldn't find", app.guide_title.cget("text").lower())
             self.assertIn("Find Geometry Dash Automatically", app.primary_btn.text)
 
             # Case 2: GD found, Geode missing
-            app.mgr.gd_path = orig_path
+            app.mgr.gd_path = temp_gd
             app.update_smart_guide(has_geode=False, is_locked=False)
             self.assertIn("Install the Geode", app.guide_title.cget("text"))
 
@@ -147,6 +149,7 @@ class TestV241TabbedUI(unittest.TestCase):
             self.assertIn("safely locked", app.guide_desc.cget("text"))
         finally:
             app.destroy()
+            shutil.rmtree(temp_gd, ignore_errors=True)
 
     def test_diagnostic_self_repair_and_snapshot(self):
         import tempfile

@@ -12,7 +12,8 @@ if (Test-Path $packageDir) { Remove-Item $packageDir -Recurse -Force }
 
 python -m PyInstaller --noconfirm --clean --onedir --windowed `
     --name GeodeSync --icon icon.ico --version-file version_info.txt `
-    --manifest app.manifest --add-data 'icon.ico;.' main.py
+    --manifest app.manifest --add-data 'icon.ico;.' `
+    --hidden-import pystray --hidden-import pystray._win32 main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed to build GeodeSync.' }
 
 $exePath = Join-Path $buildDir 'GeodeSync.exe'
