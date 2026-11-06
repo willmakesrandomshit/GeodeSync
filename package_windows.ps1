@@ -46,10 +46,18 @@ Get-FileHash -Algorithm SHA256 -Path $zipPath |
     Set-Content -Encoding ascii (Join-Path $repoRoot 'dist\SHA256SUMS.txt')
 Copy-Item $exePath (Join-Path $repoRoot 'dist\GeodeSync.exe') -Force
 if (Test-Path 'C:\Users\Owner\Downloads') {
-    Copy-Item $exePath 'C:\Users\Owner\Downloads\GeodeSync.exe' -Force
+    try {
+        Copy-Item $exePath 'C:\Users\Owner\Downloads\GeodeSync.exe' -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Could not copy to Downloads\GeodeSync.exe: $_"
+    }
 }
 if (Test-Path 'C:\Users\Owner\Downloads\GeodeSync-Windows') {
-    Get-ChildItem -Force $buildDir | Copy-Item -Destination 'C:\Users\Owner\Downloads\GeodeSync-Windows' -Recurse -Force
+    try {
+        Get-ChildItem -Force $buildDir | Copy-Item -Destination 'C:\Users\Owner\Downloads\GeodeSync-Windows' -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Could not update Downloads\GeodeSync-Windows: $_"
+    }
 }
 Copy-Item $zipPath (Join-Path $repoRoot 'dist\GeodeSync-Windows.zip') -Force
 Write-Output "Built $zipPath"

@@ -8,7 +8,7 @@ from main import GeodeSyncApp, APP_VERSION
 
 class TestV241TabbedUI(unittest.TestCase):
     def test_version_bumped_to_2_4_2(self):
-        self.assertEqual(APP_VERSION, "2.5.0")
+        self.assertEqual(APP_VERSION, "2.6.0")
 
     def test_embedded_store_safe_unpacking(self):
         app = GeodeSyncApp()
@@ -87,18 +87,24 @@ class TestV241TabbedUI(unittest.TestCase):
         try:
             self.assertIsNotNone(app.nav_frame)
             self.assertIsNotNone(app.tab_frames)
-            expected_tabs = {"dashboard", "store", "demonlist", "jukebox", "saves", "toolbox"}
-            self.assertEqual(set(app.tab_frames.keys()), expected_tabs)
-            self.assertEqual(set(app.tab_buttons.keys()), expected_tabs)
+            primary_tabs = {"home", "mods", "library", "tools"}
+            self.assertTrue(primary_tabs.issubset(set(app.tab_frames.keys())))
+            self.assertTrue(primary_tabs.issubset(set(app.tab_buttons.keys())))
 
-            # Test tab switching
-            for tab_id in expected_tabs:
+            # Test primary tab switching
+            for tab_id in primary_tabs:
                 app.switch_main_tab(tab_id)
                 self.assertEqual(app.active_main_tab, tab_id)
 
-            # Switch back to dashboard
-            app.switch_main_tab("dashboard")
-            self.assertEqual(app.active_main_tab, "dashboard")
+            # Test backward-compatible alias navigation
+            legacy_tabs = ["dashboard", "store", "demonlist", "jukebox", "saves", "toolbox"]
+            for tab_id in legacy_tabs:
+                app.switch_main_tab(tab_id)
+                self.assertEqual(app.active_main_tab, tab_id)
+
+            # Switch back to home
+            app.switch_main_tab("home")
+            self.assertEqual(app.active_main_tab, "home")
 
             # Verify embedded components exist
             self.assertTrue(hasattr(app, "store_scroll"))

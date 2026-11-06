@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -5855,76 +5855,88 @@ class GeodeSyncApp(tk.Tk):
         )
 
     def create_ui(self):
-        # Update Banner
-        self.update_banner = tk.Frame(self, bg=UI["lime_dark"], padx=18, pady=9)
+        # Update Banner (hidden by default)
+        self.update_banner = tk.Frame(self, bg=UI["lime_dark"], padx=18, pady=8)
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], activeforeground=UI["text"], relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg="#ffffff", activebackground=UI["lime_hover"], activeforeground="#ffffff", relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
 
-        # Header banner
-        self.header_frame = tk.Frame(self, bg=UI["header"], padx=24, pady=14)
+        # 1. HEADER BAR: Clean 52px top bar with brand, primary navigation, and discrete utilities
+        self.header_frame = tk.Frame(self, bg=UI["header"], padx=20, pady=10)
         self.header_frame.pack(fill="x")
 
         title_box = tk.Frame(self.header_frame, bg=UI["header"])
         title_box.pack(side="left")
 
-        title = tk.Label(title_box, text=f"⚡  GeodeSync  ·  v{APP_VERSION}", font=("Segoe UI", 16, "bold"), fg=UI["text"], bg=UI["header"])
-        title.pack(anchor="w")
+        title = tk.Label(title_box, text="⚡ GeodeSync", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["header"])
+        title.pack(side="left")
 
-        subtitle = tk.Label(title_box, text="High-Performance Companion & Mod Manager for Geometry Dash", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"])
-        subtitle.pack(anchor="w")
+        ver_pill = tk.Label(title_box, text=f"v{APP_VERSION}", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=2)
+        ver_pill.pack(side="left", padx=(8, 0))
 
-        badge_box = tk.Frame(self.header_frame, bg=UI["header"])
-        badge_box.pack(side="right")
+        # Right: discrete utilities
+        utility_box = tk.Frame(self.header_frame, bg=UI["header"])
+        utility_box.pack(side="right")
 
-        discord_hdr_btn = tk.Button(
-            badge_box,
-            text="💬 Discord Community",
-            command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"),
-            font=("Segoe UI", 8, "bold"),
-            bg="#5865F2",
-            fg="#ffffff",
-            activebackground="#4752C4",
-            activeforeground="#ffffff",
-            relief="flat",
-            padx=12,
-            pady=6,
-            cursor="hand2",
-        )
-        discord_hdr_btn.pack(side="right", padx=(6, 0))
-
-        get_help_btn = tk.Button(
-            badge_box,
-            text="🩺 Get Help",
-            command=self.open_get_help_center,
+        settings_btn = tk.Button(
+            utility_box,
+            text="⚙️ Settings",
+            command=self.open_preferences_dialog,
             font=("Segoe UI", 8, "bold"),
             bg=UI["panel_alt"],
-            fg=UI["lime"],
+            fg=UI["muted"],
             activebackground=UI["border"],
             activeforeground=UI["text"],
             relief="flat",
-            padx=12,
-            pady=6,
-            cursor="hand2"
+            padx=10,
+            pady=5,
+            cursor="hand2",
         )
-        get_help_btn.pack(side="right", padx=(4, 0))
+        settings_btn.pack(side="right", padx=(6, 0))
 
-        help_btn = tk.Button(badge_box, text="How it works", command=self.show_help_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=6, cursor="hand2")
-        help_btn.pack(side="right", padx=(4, 0))
+        help_btn = tk.Button(
+            utility_box,
+            text="🩺 Diagnostics",
+            command=self.open_get_help_center,
+            font=("Segoe UI", 8, "bold"),
+            bg=UI["panel_alt"],
+            fg=UI["cyan"],
+            activebackground=UI["border"],
+            activeforeground=UI["text"],
+            relief="flat",
+            padx=10,
+            pady=5,
+            cursor="hand2",
+        )
+        help_btn.pack(side="right", padx=(6, 0))
 
-        # Navigation Bar
-        self.nav_frame = tk.Frame(self, bg=UI["header"], padx=20, pady=0)
-        self.nav_frame.pack(fill="x")
+        discord_link = tk.Button(
+            utility_box,
+            text="Discord",
+            command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"),
+            font=("Segoe UI", 8),
+            bg=UI["header"],
+            fg=UI["quiet"],
+            activebackground=UI["header"],
+            activeforeground=UI["text"],
+            relief="flat",
+            padx=6,
+            pady=5,
+            cursor="hand2",
+        )
+        discord_link.pack(side="right", padx=(4, 0))
+
+        # Center Primary Navigation Bar
+        self.nav_frame = tk.Frame(self.header_frame, bg=UI["header"])
+        self.nav_frame.pack(side="left", padx=(30, 0))
 
         self.nav_tabs = [
-            ("dashboard", "⚡ Dashboard"),
-            ("store", "🛍️ Mod Store"),
-            ("demonlist", "🏆 Demonlist"),
-            ("jukebox", "🎵 Jukebox & SFX"),
-            ("saves", "💾 Save Hub"),
-            ("toolbox", "🛠️ Toolbox"),
+            ("home", "🏠 Home"),
+            ("mods", "🧩 Mods"),
+            ("library", "📚 Library"),
+            ("tools", "🛠️ Tools"),
         ]
         self.tab_buttons = {}
         for tab_id, tab_label in self.nav_tabs:
@@ -5932,20 +5944,28 @@ class GeodeSyncApp(tk.Tk):
                 self.nav_frame,
                 text=tab_label,
                 font=("Segoe UI", 9, "bold"),
-                bg=UI["panel_alt"] if tab_id == "dashboard" else UI["header"],
-                fg=UI["lime"] if tab_id == "dashboard" else UI["muted"],
+                bg=UI["panel_alt"] if tab_id == "home" else UI["header"],
+                fg=UI["cyan"] if tab_id == "home" else UI["muted"],
                 activebackground=UI["panel_alt"],
                 activeforeground=UI["text"],
                 relief="flat",
                 padx=14,
-                pady=7,
+                pady=5,
                 cursor="hand2",
                 command=lambda tid=tab_id: self.switch_main_tab(tid),
             )
             btn.pack(side="left", padx=(0, 4))
             self.tab_buttons[tab_id] = btn
 
-        # Main Body
+        # Backward compatibility aliases for existing tests
+        self.tab_buttons["dashboard"] = self.tab_buttons["home"]
+        self.tab_buttons["store"] = self.tab_buttons["mods"]
+        self.tab_buttons["demonlist"] = self.tab_buttons["library"]
+        self.tab_buttons["jukebox"] = self.tab_buttons["tools"]
+        self.tab_buttons["saves"] = self.tab_buttons["library"]
+        self.tab_buttons["toolbox"] = self.tab_buttons["tools"]
+
+        # Main Body Container
         body = tk.Frame(self, bg=UI["background"], padx=20, pady=12)
         body.pack(fill="both", expand=True)
 
@@ -5953,115 +5973,60 @@ class GeodeSyncApp(tk.Tk):
         self.tab_container.pack(fill="both", expand=True)
 
         self.tab_frames = {
-            "dashboard": tk.Frame(self.tab_container, bg=UI["background"]),
-            "store": tk.Frame(self.tab_container, bg=UI["background"]),
-            "demonlist": tk.Frame(self.tab_container, bg=UI["background"]),
-            "jukebox": tk.Frame(self.tab_container, bg=UI["background"]),
-            "saves": tk.Frame(self.tab_container, bg=UI["background"]),
-            "toolbox": tk.Frame(self.tab_container, bg=UI["background"]),
+            "home": tk.Frame(self.tab_container, bg=UI["background"]),
+            "mods": tk.Frame(self.tab_container, bg=UI["background"]),
+            "library": tk.Frame(self.tab_container, bg=UI["background"]),
+            "tools": tk.Frame(self.tab_container, bg=UI["background"]),
         }
-        self.tab_frames["dashboard"].pack(fill="both", expand=True)
+        # Backward compatibility aliases
+        self.tab_frames["dashboard"] = self.tab_frames["home"]
+        self.tab_frames["store"] = self.tab_frames["mods"]
+        self.tab_frames["demonlist"] = self.tab_frames["library"]
+        self.tab_frames["jukebox"] = self.tab_frames["tools"]
+        self.tab_frames["saves"] = self.tab_frames["library"]
+        self.tab_frames["toolbox"] = self.tab_frames["tools"]
 
-        # 1. CONSOLIDATED HERO DASHBOARD (Player Profile + Game Setup + Primary Action)
-        self.guide_card = tk.Frame(self.tab_frames["dashboard"], bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
-        self.guide_card.pack(fill="x", pady=(0, 10))
+        self.tab_frames["home"].pack(fill="both", expand=True)
 
-        hero_top = tk.Frame(self.guide_card, bg=UI["panel"])
-        hero_top.pack(fill="x", pady=(0, 10))
+        # =========================================================================
+        # TAB 1: HOME (Launch Hero + 2 Clean Overview Cards)
+        # =========================================================================
+        home_f = self.tab_frames["home"]
 
-        # Left: Player identity & live stats
-        p_left = tk.Frame(hero_top, bg=UI["panel"])
-        p_left.pack(side="top", fill="x", expand=True)
+        # 1A. HERO LAUNCH CARD
+        self.guide_card = tk.Frame(home_f, bg=UI["panel"], padx=22, pady=16, highlightbackground=UI["border"], highlightthickness=1)
+        self.guide_card.pack(fill="x", pady=(0, 12))
 
-        p_name_row = tk.Frame(p_left, bg=UI["panel"])
-        p_name_row.pack(anchor="w")
+        # Top status strip inside hero
+        hero_status_row = tk.Frame(self.guide_card, bg=UI["panel"])
+        hero_status_row.pack(fill="x", pady=(0, 8))
 
-        tk.Label(p_name_row, text="PLAYER", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left")
-        self.player_name_lbl = tk.Label(p_name_row, text="Reading save...", font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["panel"])
-        self.player_name_lbl.pack(side="left", padx=(6, 0))
+        self.guide_badge = tk.Label(hero_status_row, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=8, pady=2)
+        self.guide_badge.pack(side="left")
 
-        self.refresh_stats_btn = tk.Label(p_name_row, text="🔄", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], cursor="hand2")
-        self.refresh_stats_btn.pack(side="left", padx=(6, 0))
-        self.refresh_stats_btn.bind("<Button-1>", lambda e: self.update_player_stats_ui())
+        # Setup badges packed next to status
+        chips_right = tk.Frame(hero_status_row, bg=UI["panel"])
+        chips_right.pack(side="right")
 
-        self.stats_chips_frame = tk.Frame(p_left, bg=UI["panel"])
-        self.stats_chips_frame.pack(anchor="w", pady=(3, 0))
-
-        def _make_stat_chip(parent, icon, text_val, fg_color):
-            f = tk.Frame(parent, bg=UI["panel_alt"], padx=6, pady=2, highlightbackground=UI["border"], highlightthickness=1)
-            f.pack(side="left", padx=(0, 3))
-            tk.Label(f, text=icon, font=("Segoe UI", 8), fg=fg_color, bg=UI["panel_alt"]).pack(side="left", padx=(0, 2))
-            lbl = tk.Label(f, text=text_val, font=("Segoe UI", 8, "bold"), fg=UI["text"], bg=UI["panel_alt"])
-            lbl.pack(side="left")
-            return lbl
-
-        self.stat_stars_lbl = _make_stat_chip(self.stats_chips_frame, "⭐", "0 Stars", UI["amber"])
-        self.stat_demons_lbl = _make_stat_chip(self.stats_chips_frame, "👿", "0 Demons", UI["lilac"])
-        self.stat_moons_lbl = _make_stat_chip(self.stats_chips_frame, "🌙", "0 Moons", "#66b3ff")
-        self.stat_diamonds_lbl = _make_stat_chip(self.stats_chips_frame, "💎", "0 Diamonds", "#00e5ff")
-        self.stat_coins_lbl = _make_stat_chip(self.stats_chips_frame, "🪙", "0 Coins", UI["amber"])
-        self.stat_orbs_lbl = _make_stat_chip(self.stats_chips_frame, "🔮", "0 Orbs", "#e056fd")
-
-        # Right: Game setup badges
-        p_right = tk.Frame(hero_top, bg=UI["panel"])
-        p_right.pack(side="top", fill="x", pady=(6, 0))
-
-        setup_chips_row = tk.Frame(p_right, bg=UI["panel"])
-        setup_chips_row.pack(anchor="w")
-
-        self.ver_badge = tk.Label(setup_chips_row, text="GD ...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=3, cursor="hand2")
+        self.ver_badge = tk.Label(chips_right, text="GD ...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=8, pady=2, cursor="hand2")
         self.ver_badge.pack(side="left", padx=2)
         self.ver_badge.bind("<Button-1>", lambda e: self.open_whats_new_dialog())
 
-        self.geode_badge = tk.Label(setup_chips_row, text="Geode ...", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["lilac_dark"], padx=6, pady=3, cursor="hand2")
+        self.geode_badge = tk.Label(chips_right, text="Geode ...", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["panel_alt"], padx=8, pady=2, cursor="hand2")
         self.geode_badge.pack(side="left", padx=2)
         self.geode_badge.bind("<Button-1>", lambda e: self.manual_update_geode())
 
-        self.lock_badge = tk.Label(setup_chips_row, text="Steam ...", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.lock_badge = tk.Label(chips_right, text="Steam ...", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=8, pady=2, cursor="hand2")
         self.lock_badge.pack(side="left", padx=2)
         self.lock_badge.bind("<Button-1>", lambda e: self.toggle_steam_lock())
 
-        self.steam_badge = tk.Label(setup_chips_row, text="Steam", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=3)
-        self.steam_badge.pack(side="left", padx=2)
-
-        self.saves_badge = tk.Label(setup_chips_row, text="Saves", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=3)
-        self.saves_badge.pack(side="left", padx=2)
-
-        self.opt_badge = tk.Label(setup_chips_row, text="🧹 Optimizer", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.opt_badge.pack(side="left", padx=2)
-        self.opt_badge.bind("<Button-1>", lambda e: self.open_save_optimizer_dialog())
-
-        self.slots_badge = tk.Label(setup_chips_row, text="💾 Slots", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.slots_badge.pack(side="left", padx=2)
-        self.slots_badge.bind("<Button-1>", lambda e: self.open_save_slots_dialog())
-
-        self.health_badge = tk.Label(setup_chips_row, text="🩺 Diagnostics", font=("Segoe UI", 8, "bold"), fg=UI["cyan"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.health_badge.pack(side="left", padx=2)
-        self.health_badge.bind("<Button-1>", lambda e: self.run_health_check())
-
-        self.sfx_badge = tk.Label(setup_chips_row, text="💥 SFX", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.sfx_badge.pack(side="left", padx=2)
-        self.sfx_badge.bind("<Button-1>", lambda e: self.open_soundpack_hub())
-
-        self.vault_badge = tk.Label(setup_chips_row, text="🗝️ Vaults", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.vault_badge.pack(side="left", padx=2)
-        self.vault_badge.bind("<Button-1>", lambda e: self.open_vault_helper())
-
-        self.salvage_badge = tk.Label(setup_chips_row, text="🛡️ Salvager", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
-        self.salvage_badge.pack(side="left", padx=2)
-        self.salvage_badge.bind("<Button-1>", lambda e: self.open_corrupt_save_resurrector())
-
-        # Hero Center: Status badge & description
-        self.guide_badge = tk.Label(self.guide_card, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=6, pady=2)
-        self.guide_badge.pack(anchor="w", pady=(0, 2))
-
-        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 13, "bold"), fg=UI["text"], bg=UI["panel"])
-        self.guide_title.pack(anchor="w", pady=(0, 1))
+        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["panel"])
+        self.guide_title.pack(anchor="w", pady=(0, 2))
 
         self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is ready.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=780, justify="left")
-        self.guide_desc.pack(anchor="w", pady=(0, 8))
+        self.guide_desc.pack(anchor="w", pady=(0, 10))
 
-        # Real-time progress bar frame
+        # Progress bar (for updates / depot downloads)
         self.progress_frame = tk.Frame(self.guide_card, bg=UI["panel"])
         self.progress_lbl = tk.Label(self.progress_frame, text="Working...", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel"])
         self.progress_lbl.pack(anchor="w", pady=(0, 2))
@@ -6069,25 +6034,12 @@ class GeodeSyncApp(tk.Tk):
         style.theme_use('default')
         style.configure("Cyber.Horizontal.TProgressbar", background=UI["lime"], troughcolor=UI["inset"], bordercolor=UI["panel"], lightcolor=UI["lime"], darkcolor=UI["lime_hover"])
         self.progress_bar = ttk.Progressbar(self.progress_frame, style="Cyber.Horizontal.TProgressbar", orient="horizontal", mode="determinate", length=400)
-        self.progress_bar.pack(fill="x", pady=(0, 4))
+        self.progress_bar.pack(fill="x", pady=(0, 6))
 
-        # Primary Action Button
-        self.primary_btn = ModernButton(
-            self.guide_card,
-            text="Checking...",
-            command=None,
-            bg=UI["lime"],
-            hover_bg=UI["lime_hover"],
-            fg=UI["background"],
-            height=44,
-            font=("Segoe UI", 11, "bold")
-        )
-        self.primary_btn.pack(fill="x")
-
-        # Launch presets row
+        # Launch presets row (mode selector)
         launch_presets_row = tk.Frame(self.guide_card, bg=UI["panel"])
-        launch_presets_row.pack(fill="x", pady=(8, 0))
-        tk.Label(launch_presets_row, text="LAUNCH PRESETS:", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(0, 8))
+        launch_presets_row.pack(fill="x", pady=(0, 10))
+        tk.Label(launch_presets_row, text="LAUNCH MODE:", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(0, 8))
 
         def _add_preset_chip(lbl_text, mode_id, color):
             b = tk.Button(
@@ -6107,114 +6059,409 @@ class GeodeSyncApp(tk.Tk):
             b.pack(side="left", padx=(0, 6))
             return b
 
-        _add_preset_chip("⚡ Boosted (High Priority)", "boosted", UI["lime"])
+        _add_preset_chip("⚡ Boosted (Default)", "boosted", UI["lime"])
         _add_preset_chip("🎮 Vanilla (No Mods)", "vanilla", UI["amber"])
         _add_preset_chip("🏆 Tournament (Legal)", "tournament", UI["lilac"])
-        _add_preset_chip("🌐 Globed (Multiplayer)", "globed", "#00e5ff")
+        _add_preset_chip("🌐 Globed (Multiplayer)", "globed", UI["cyan"])
 
-        # 4 FEATURED HUB CARDS (Modern AAA Dashboard Layout)
-        hub_grid = tk.Frame(self.tab_frames["dashboard"], bg=UI["background"])
-        hub_grid.pack(fill="both", expand=True, pady=(2, 0))
-        hub_grid.columnconfigure(0, weight=1)
-        hub_grid.columnconfigure(1, weight=1)
-        hub_grid.rowconfigure(0, weight=1)
-        hub_grid.rowconfigure(1, weight=1)
-
-        def _make_hub_card(grid_row, grid_col, icon, title, desc, btn_text, cmd, border_color):
-            card = tk.Frame(hub_grid, bg=UI["panel"], padx=14, pady=10, highlightbackground=border_color, highlightthickness=1)
-            card.grid(row=grid_row, column=grid_col, sticky="nsew", padx=4, pady=4)
-
-            top_r = tk.Frame(card, bg=UI["panel"])
-            top_r.pack(fill="x")
-            tk.Label(top_r, text=icon, font=("Segoe UI", 11), fg=border_color, bg=UI["panel"]).pack(side="left", padx=(0, 6))
-            tk.Label(top_r, text=title, font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
-
-            tk.Label(card, text=desc, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], justify="left", wraplength=340).pack(anchor="w", pady=(4, 8), fill="x", expand=True)
-
-            action = tk.Button(
-                card,
-                text=btn_text,
-                command=cmd,
-                font=("Segoe UI", 8, "bold"),
-                bg=UI["panel_alt"],
-                fg=border_color,
-                activebackground=border_color,
-                activeforeground=UI["background"],
-                relief="flat",
-                padx=10,
-                pady=4,
-                cursor="hand2"
-            )
-            action.pack(anchor="e")
-            return card
-
-        _make_hub_card(
-            0, 0,
-            "🛍️", "Mod Store & Index",
-            "Browse and 1-click install verified Geode mods (Globed, Megahack, CBF, Node IDs, BetterEdit).",
-            "Open Store →",
-            lambda: self.switch_main_tab("store"),
-            UI["lime"]
+        # Big, Prominent Primary Action Button
+        self.primary_btn = ModernButton(
+            self.guide_card,
+            text="Checking...",
+            command=None,
+            bg=UI["lime"],
+            hover_bg=UI["lime_hover"],
+            fg="#ffffff",
+            height=46,
+            font=("Segoe UI", 11, "bold")
         )
+        self.primary_btn.pack(fill="x")
+        self.launch_btn = self.primary_btn
 
-        _make_hub_card(
-            0, 1,
-            "🏆", "Pointercrate Demonlist",
-            "Live Top 150 Extreme Demon rankings synced with pointercrate.com. Track records & creator stats.",
-            "View Demonlist →",
-            lambda: self.switch_main_tab("demonlist"),
-            UI["lilac"]
+        # 1B. TWO SIDE-BY-SIDE SUMMARY CARDS
+        overview_grid = tk.Frame(home_f, bg=UI["background"])
+        overview_grid.pack(fill="both", expand=True)
+        overview_grid.columnconfigure(0, weight=1)
+        overview_grid.columnconfigure(1, weight=1)
+        overview_grid.rowconfigure(0, weight=1)
+
+        # Left Card: Mods Summary
+        mods_summary_card = tk.Frame(overview_grid, bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
+        mods_summary_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=0)
+
+        m_head = tk.Frame(mods_summary_card, bg=UI["panel"])
+        m_head.pack(fill="x", pady=(0, 8))
+        tk.Label(m_head, text="🧩  Installed Mods & Loader", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+
+        m_link = tk.Button(
+            m_head,
+            text="Manage Mods →",
+            command=lambda: self.switch_main_tab("mods"),
+            font=("Segoe UI", 8, "bold"),
+            bg=UI["panel"],
+            fg=UI["cyan"],
+            activebackground=UI["panel"],
+            activeforeground=UI["cyan_hover"],
+            relief="flat",
+            cursor="hand2",
         )
+        m_link.pack(side="right")
 
-        _make_hub_card(
-            1, 0,
-            "🎵", "Practice Music & SFX",
-            "Crash-proof StayInsideMe.mp3 replacer and custom death sound effects hub without DLL injection.",
-            "Customize Audio →",
-            lambda: self.switch_main_tab("jukebox"),
-            "#66b3ff"
+        self.mods_summary_lbl = tk.Label(
+            mods_summary_card,
+            text="Geode mod loader active.",
+            font=("Segoe UI", 8),
+            fg=UI["muted"],
+            bg=UI["panel"],
+            justify="left",
+            wraplength=340
         )
+        self.mods_summary_lbl.pack(anchor="w", pady=(0, 10))
 
-        _make_hub_card(
-            1, 1,
-            "💾", "Save Hub & Multi-Slots",
-            "Manage multi-account save slots, clean CCGameManager bloat, and export .geodesync portable archives.",
-            "Open Save Hub →",
-            lambda: self.switch_main_tab("saves"),
-            UI["amber"]
+        m_btn_row = tk.Frame(mods_summary_card, bg=UI["panel"])
+        m_btn_row.pack(anchor="w", pady=(6, 0))
+
+        b1 = tk.Button(m_btn_row, text="🛍️ Browse Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=4, cursor="hand2")
+        b1.pack(side="left", padx=(0, 6))
+
+        b2 = tk.Button(m_btn_row, text="🔄 Update Mods", command=self.open_mod_updater_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
+        b2.pack(side="left")
+
+        # Right Card: Player & Saves Overview (self.player_card)
+        self.player_card = tk.Frame(overview_grid, bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
+        self.player_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=0)
+
+        p_head = tk.Frame(self.player_card, bg=UI["panel"])
+        p_head.pack(fill="x", pady=(0, 8))
+        tk.Label(p_head, text="👤  Player Profile & Saves", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+
+        p_link = tk.Button(
+            p_head,
+            text="Save Hub →",
+            command=lambda: self.switch_main_tab("library"),
+            font=("Segoe UI", 8, "bold"),
+            bg=UI["panel"],
+            fg=UI["lilac"],
+            activebackground=UI["panel"],
+            activeforeground=UI["lilac_hover"],
+            relief="flat",
+            cursor="hand2",
         )
+        p_link.pack(side="right")
 
-        # Quick tools bar on dashboard
-        quick_bar = tk.Frame(self.tab_frames["dashboard"], bg=UI["background"])
-        quick_bar.pack(fill="x", pady=(6, 0))
-        tk.Label(quick_bar, text="QUICK TOOLS:", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["background"]).pack(side="left", padx=(4, 6))
+        self.player_name_lbl = tk.Label(self.player_card, text="Reading save data...", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"])
+        self.player_name_lbl.pack(anchor="w", pady=(0, 6))
 
-        def _add_quick_btn(label, cmd, fg_col):
-            b = tk.Button(
-                quick_bar,
-                text=label,
-                command=cmd,
-                font=("Segoe UI", 8, "bold"),
-                bg=UI["panel_alt"],
-                fg=fg_col,
-                activebackground=UI["border"],
-                relief="flat",
-                padx=8,
-                pady=2,
-                cursor="hand2"
-            )
-            b.pack(side="left", padx=(0, 4))
-            return b
+        self.stats_chips_frame = tk.Frame(self.player_card, bg=UI["panel"])
+        self.stats_chips_frame.pack(anchor="w", pady=(0, 10))
 
-        _add_quick_btn("⚡ FPS Unlocker", self.open_fps_unlocker, UI["lime"])
-        _add_quick_btn("🎨 Texture Packs", self.open_texture_pack_hub, UI["lilac"])
-        _add_quick_btn("🩹 Crash Doctor", self.run_crash_doctor, UI["amber"])
-        _add_quick_btn("💾 Backup Saves", self.backup_saves, UI["lime"])
-        _add_quick_btn("🛠️ Full Toolbox →", lambda: self.switch_main_tab("toolbox"), UI["text"])
+        def _make_stat_chip(parent, icon, text_val, fg_color):
+            f = tk.Frame(parent, bg=UI["panel_alt"], padx=5, pady=2, highlightbackground=UI["border_subtle"], highlightthickness=1)
+            f.pack(side="left", padx=(0, 3))
+            tk.Label(f, text=icon, font=("Segoe UI", 7), fg=fg_color, bg=UI["panel_alt"]).pack(side="left", padx=(0, 2))
+            lbl = tk.Label(f, text=text_val, font=("Segoe UI", 7, "bold"), fg=UI["text"], bg=UI["panel_alt"])
+            lbl.pack(side="left")
+            return lbl
 
-        # 2. TOOLKIT (Dedicated Toolbox Tab with all tools)
-        tools_card = tk.Frame(self.tab_frames["toolbox"], bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
-        tools_card.pack(fill="both", expand=True, pady=(0, 8))
+        self.stat_stars_lbl = _make_stat_chip(self.stats_chips_frame, "⭐", "0 Stars", UI["amber"])
+        self.stat_demons_lbl = _make_stat_chip(self.stats_chips_frame, "👿", "0 Demons", UI["lilac"])
+        self.stat_moons_lbl = _make_stat_chip(self.stats_chips_frame, "🌙", "0 Moons", UI["cyan"])
+        self.stat_diamonds_lbl = _make_stat_chip(self.stats_chips_frame, "💎", "0 Diamonds", UI["cyan"])
+        self.stat_coins_lbl = _make_stat_chip(self.stats_chips_frame, "🪙", "0 Coins", UI["amber"])
+        self.stat_orbs_lbl = _make_stat_chip(self.stats_chips_frame, "🔮", "0 Orbs", UI["lilac"])
+
+        p_btn_row = tk.Frame(self.player_card, bg=UI["panel"])
+        p_btn_row.pack(anchor="w", pady=(6, 0))
+
+        pb1 = tk.Button(p_btn_row, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=4, cursor="hand2")
+        pb1.pack(side="left", padx=(0, 6))
+
+        pb2 = tk.Button(p_btn_row, text="🧹 Optimize Save", command=self.open_save_optimizer_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
+        pb2.pack(side="left")
+
+        # Hidden frame for backward-compatible badge references
+        compat_f = tk.Frame(self, bg=UI["background"])
+        self.steam_badge = tk.Label(compat_f, text="Steam")
+        self.saves_badge = tk.Label(compat_f, text="Saves")
+        self.opt_badge = tk.Label(compat_f, text="Optimizer", cursor="hand2")
+        self.slots_badge = tk.Label(compat_f, text="Slots", cursor="hand2")
+        self.health_badge = tk.Label(compat_f, text="Diagnostics", cursor="hand2")
+        self.sfx_badge = tk.Label(compat_f, text="SFX", cursor="hand2")
+        self.vault_badge = tk.Label(compat_f, text="Vaults", cursor="hand2")
+        self.salvage_badge = tk.Label(compat_f, text="Salvager", cursor="hand2")
+        self.more_toggle_btn = None
+        self.restore_gd_btn = None
+        self.more_frame = None
+        self.log_text = tk.Text(compat_f, bg=UI["inset"], fg=UI["text"], font=("Consolas", 8))
+
+        # =========================================================================
+        # BUILD MODERN TABS (Mods, Library, Tools)
+        # =========================================================================
+        self._build_mods_tab(self.tab_frames["mods"])
+        self._build_library_tab(self.tab_frames["library"])
+        self._build_tools_tab(self.tab_frames["tools"])
+
+        # =========================================================================
+        # 3. MINIMAL 28px FOOTER
+        # =========================================================================
+        footer = tk.Frame(self, bg=UI["header"], padx=20, pady=6)
+        footer.pack(fill="x", side="bottom")
+
+        footer_actions = tk.Frame(footer, bg=UI["header"])
+        footer_actions.pack(fill="x")
+
+        self.status_ticker_lbl = tk.Label(
+            footer_actions,
+            text="● Ready to play Geometry Dash",
+            font=("Segoe UI", 8),
+            fg=UI["lime"],
+            bg=UI["header"],
+            wraplength=340,
+            justify="left",
+            anchor="w",
+        )
+        self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        choose_path_btn.pack(side="right", padx=(4, 0))
+
+        choose_save_btn = tk.Button(footer_actions, text="💾 Save Folder", command=self.browse_save_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        choose_save_btn.pack(side="right", padx=(4, 0))
+
+        view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        view_log_btn.pack(side="right", padx=(4, 0))
+
+        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_get_help_center, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=2, cursor="hand2")
+        fix_problem_btn.pack(side="right", padx=(4, 0))
+
+        self.path_lbl = tk.Label(
+            footer,
+            text=f"Game: {self.mgr.gd_path or 'Not found'}  •  Saves: {self.mgr.get_save_data_dir() or 'Not found'}",
+            font=("Segoe UI", 7),
+            fg=UI["quiet"],
+            bg=UI["header"],
+            wraplength=900,
+            justify="left",
+            anchor="w",
+        )
+        self.path_lbl.pack(fill="x", anchor="w", pady=(2, 0))
+
+    def switch_main_tab(self, tab_id):
+        self.active_main_tab = tab_id
+        target = tab_id
+        if tab_id in ("dashboard", "home"):
+            target = "home"
+        elif tab_id in ("store", "mods"):
+            target = "mods"
+        elif tab_id in ("demonlist", "saves", "library"):
+            target = "library"
+        elif tab_id in ("toolbox", "jukebox", "tools"):
+            target = "tools"
+
+        for tid, btn in getattr(self, "tab_buttons", {}).items():
+            if tid in (target, tab_id):
+                btn.config(bg=UI["panel_alt"], fg=UI["cyan"])
+            else:
+                btn.config(bg=UI["header"], fg=UI["muted"])
+
+        for tid, frame in getattr(self, "tab_frames", {}).items():
+            if tid == target:
+                frame.pack(fill="both", expand=True)
+                if tab_id == "store":
+                    if hasattr(self, "show_mods_subview"):
+                        self.show_mods_subview("store")
+                    else:
+                        self._load_embedded_store()
+                elif tab_id == "demonlist":
+                    if hasattr(self, "show_library_subview"):
+                        self.show_library_subview("demonlist")
+                    else:
+                        self._load_embedded_demonlist()
+                elif tab_id == "saves":
+                    if hasattr(self, "show_library_subview"):
+                        self.show_library_subview("saves")
+                    else:
+                        self._refresh_embedded_saves()
+                elif tab_id == "mods":
+                    if hasattr(self, "_refresh_installed_mods_list"):
+                        self._refresh_installed_mods_list()
+                elif tab_id == "jukebox":
+                    self._refresh_embedded_jukebox()
+            elif tid in ("home", "mods", "library", "tools"):
+                frame.pack_forget()
+
+    def _build_mods_tab(self, parent):
+        subnav = tk.Frame(parent, bg=UI["background"])
+        subnav.pack(fill="x", pady=(0, 8))
+
+        self.mods_sub_container = tk.Frame(parent, bg=UI["background"])
+        self.mods_sub_container.pack(fill="both", expand=True)
+
+        self.mods_installed_frame = tk.Frame(self.mods_sub_container, bg=UI["background"])
+        self.mods_store_frame = tk.Frame(self.mods_sub_container, bg=UI["background"])
+
+        def show_mods_subview(view_name):
+            self.mods_subview = view_name
+            if view_name == "installed":
+                btn_inst.config(bg=UI["panel_alt"], fg=UI["cyan"])
+                btn_store.config(bg=UI["header"], fg=UI["muted"])
+                self.mods_store_frame.pack_forget()
+                self.mods_installed_frame.pack(fill="both", expand=True)
+                self._refresh_installed_mods_list()
+            else:
+                btn_store.config(bg=UI["panel_alt"], fg=UI["cyan"])
+                btn_inst.config(bg=UI["header"], fg=UI["muted"])
+                self.mods_installed_frame.pack_forget()
+                self.mods_store_frame.pack(fill="both", expand=True)
+                self._load_embedded_store()
+
+        self.show_mods_subview = show_mods_subview
+
+        btn_inst = tk.Button(subnav, text="🧩 Installed Mods", command=lambda: show_mods_subview("installed"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["cyan"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_inst.pack(side="left", padx=(0, 4))
+
+        btn_store = tk.Button(subnav, text="🛍️ Mod Store & Index", command=lambda: show_mods_subview("store"), font=("Segoe UI", 8, "bold"), bg=UI["header"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_store.pack(side="left")
+
+        tk.Button(subnav, text="📁 Open Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right")
+        tk.Button(subnav, text="🔄 Check Updates", command=self.open_mod_updater_dialog, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right", padx=(0, 6))
+
+        self._build_installed_mods_view(self.mods_installed_frame)
+        self._build_store_tab(self.mods_store_frame)
+
+        self.mods_installed_frame.pack(fill="both", expand=True)
+
+    def _build_installed_mods_view(self, parent):
+        head = tk.Frame(parent, bg=UI["header"], padx=16, pady=10)
+        head.pack(fill="x", pady=(0, 8))
+        tk.Label(head, text="🧩  Installed Geode Mods", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Toggle mods on/off, inspect version compatibility, or uninstall unwanted mods safely.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        list_card = tk.Frame(parent, bg=UI["panel"], highlightbackground=UI["border"], highlightthickness=1)
+        list_card.pack(fill="both", expand=True)
+
+        self.installed_mods_canvas = tk.Canvas(list_card, bg=UI["panel"], highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_card, orient="vertical", command=self.installed_mods_canvas.yview)
+        self.installed_mods_container = tk.Frame(self.installed_mods_canvas, bg=UI["panel"])
+
+        self.installed_mods_container.bind("<Configure>", lambda e: self.installed_mods_canvas.configure(scrollregion=self.installed_mods_canvas.bbox("all")))
+        self.installed_mods_canvas.create_window((0, 0), window=self.installed_mods_container, anchor="nw")
+        self.installed_mods_canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.installed_mods_canvas.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+        scrollbar.pack(side="right", fill="y", pady=8)
+
+    def _refresh_installed_mods_list(self):
+        if not hasattr(self, "installed_mods_container"):
+            return
+        for child in self.installed_mods_container.winfo_children():
+            child.destroy()
+
+        mods = self.mgr.get_installed_mods()
+        if not mods:
+            empty = tk.Frame(self.installed_mods_container, bg=UI["panel"], pady=30)
+            empty.pack(fill="x")
+            tk.Label(empty, text="No Geode mods installed yet.", font=("Segoe UI", 11, "bold"), fg=UI["muted"], bg=UI["panel"]).pack()
+            tk.Label(empty, text="Browse the official Mod Store to install popular mods like Globed, CBF, and Megahack.", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(pady=(4, 10))
+            tk.Button(empty, text="🛍️ Open Mod Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg="#ffffff", relief="flat", padx=12, pady=5, cursor="hand2").pack()
+            return
+
+        for mod in mods:
+            card = tk.Frame(self.installed_mods_container, bg=UI["panel_alt"], padx=12, pady=8, highlightbackground=UI["border_subtle"], highlightthickness=1)
+            card.pack(fill="x", pady=3)
+
+            top = tk.Frame(card, bg=UI["panel_alt"])
+            top.pack(fill="x")
+
+            name = mod.get("name", mod.get("id", "Unknown Mod"))
+            version = mod.get("version", "v1.0")
+            is_disabled = mod.get("disabled", False)
+
+            tk.Label(top, text=name, font=("Segoe UI", 9, "bold"), fg=UI["quiet"] if is_disabled else UI["text"], bg=UI["panel_alt"]).pack(side="left")
+            tk.Label(top, text=f"v{version}", font=("Segoe UI", 7, "bold"), fg=UI["muted"], bg=UI["inset"], padx=4, pady=1).pack(side="left", padx=6)
+            if is_disabled:
+                tk.Label(top, text="DISABLED", font=("Segoe UI", 7, "bold"), fg=UI["amber"], bg=UI["amber_dark"], padx=4, pady=1).pack(side="left")
+
+            dev = mod.get("developer", "")
+            if dev:
+                tk.Label(card, text=f"by {dev} • ID: {mod.get('id', '')}", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["panel_alt"]).pack(anchor="w", pady=(2, 0))
+
+            btn_box = tk.Frame(top, bg=UI["panel_alt"])
+            btn_box.pack(side="right")
+
+            m_path = mod.get("file_path", "")
+            if is_disabled:
+                tk.Button(btn_box, text="Enable", command=lambda p=m_path: self._toggle_mod_file(p, enable=True), font=("Segoe UI", 7, "bold"), bg=UI["lime_dark"], fg=UI["lime"], relief="flat", padx=6, pady=2, cursor="hand2").pack(side="left", padx=2)
+            else:
+                tk.Button(btn_box, text="Disable", command=lambda p=m_path: self._toggle_mod_file(p, enable=False), font=("Segoe UI", 7), bg=UI["panel"], fg=UI["muted"], relief="flat", padx=6, pady=2, cursor="hand2").pack(side="left", padx=2)
+
+            tk.Button(btn_box, text="🗑️", command=lambda p=m_path, n=name: self._delete_mod_file(p, n), font=("Segoe UI", 7), bg=UI["red_dark"], fg=UI["red"], relief="flat", padx=4, pady=2, cursor="hand2").pack(side="left", padx=2)
+
+    def _toggle_mod_file(self, file_path, enable=True):
+        if not file_path or not os.path.exists(file_path):
+            return
+        try:
+            if enable and file_path.endswith(".disabled"):
+                os.rename(file_path, file_path[:-9])
+            elif not enable and not file_path.endswith(".disabled"):
+                os.rename(file_path, file_path + ".disabled")
+            self._refresh_installed_mods_list()
+            self.refresh_status()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not toggle mod: {e}")
+
+    def _delete_mod_file(self, file_path, name):
+        if not file_path or not os.path.exists(file_path):
+            return
+        if messagebox.askyesno("Delete Mod", f"Are you sure you want to delete '{name}'?"):
+            try:
+                os.remove(file_path)
+                self._refresh_installed_mods_list()
+                self.refresh_status()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not delete mod: {e}")
+
+    def _build_library_tab(self, parent):
+        subnav = tk.Frame(parent, bg=UI["background"])
+        subnav.pack(fill="x", pady=(0, 8))
+
+        self.library_sub_container = tk.Frame(parent, bg=UI["background"])
+        self.library_sub_container.pack(fill="both", expand=True)
+
+        self.library_saves_frame = tk.Frame(self.library_sub_container, bg=UI["background"])
+        self.library_demon_frame = tk.Frame(self.library_sub_container, bg=UI["background"])
+
+        def show_library_subview(view_name):
+            self.library_subview = view_name
+            if view_name == "saves":
+                btn_saves.config(bg=UI["panel_alt"], fg=UI["lilac"])
+                btn_demon.config(bg=UI["header"], fg=UI["muted"])
+                self.library_demon_frame.pack_forget()
+                self.library_saves_frame.pack(fill="both", expand=True)
+                self._refresh_embedded_saves()
+            else:
+                btn_demon.config(bg=UI["panel_alt"], fg=UI["lilac"])
+                btn_saves.config(bg=UI["header"], fg=UI["muted"])
+                self.library_saves_frame.pack_forget()
+                self.library_demon_frame.pack(fill="both", expand=True)
+                self._load_embedded_demonlist()
+
+        self.show_library_subview = show_library_subview
+
+        btn_saves = tk.Button(subnav, text="💾 Save Vault & Slots", command=lambda: show_library_subview("saves"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_saves.pack(side="left", padx=(0, 4))
+
+        btn_demon = tk.Button(subnav, text="🏆 Top 150 Demonlist", command=lambda: show_library_subview("demonlist"), font=("Segoe UI", 8, "bold"), bg=UI["header"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_demon.pack(side="left")
+
+        self._build_saves_tab(self.library_saves_frame)
+        self._build_demonlist_tab(self.library_demon_frame)
+
+        self.library_saves_frame.pack(fill="both", expand=True)
+
+    def _build_tools_tab(self, parent):
+        tools_card = tk.Frame(parent, bg=UI["panel"], padx=16, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+        tools_card.pack(fill="both", expand=True, pady=(0, 4))
 
         tools_head = tk.Frame(tools_card, bg=UI["panel"])
         tools_head.pack(fill="x", pady=(0, 8))
@@ -6234,8 +6481,6 @@ class GeodeSyncApp(tk.Tk):
         self.tool_buttons = []
         self.tool_search_var.trace_add("write", lambda *a: self._filter_tools())
 
-        # Keep a single, flat grid: some Linux Tk 8.6 builds crash when these
-        # controls are constructed inside nested section frames.
         tool_grid = tk.Frame(tools_card, bg=UI["panel"])
         tool_grid.pack(fill="both", expand=True)
         tool_grid.columnconfigure(0, weight=0, minsize=92)
@@ -6245,13 +6490,13 @@ class GeodeSyncApp(tk.Tk):
             tool_grid.rowconfigure(row, weight=1, uniform="tool-row")
 
         groups = (
-            ("MODS", "#a7d957", "#252b20"),
-            ("PLAY", "#c497e8", "#292333"),
-            ("REPAIR", "#e4b968", "#30281e"),
-            ("PREFERENCES", "#a99be7", "#282432"),
-            ("APP", "#63d5ce", "#202b2b"),
-            ("POWER", "#f39c12", "#2e2417"),
-            ("EXTRAS", "#63d5ce", "#1e2b2a"),
+            ("MODS", "#10b981", "#19221d"),
+            ("PLAY", "#8b5cf6", "#211c2a"),
+            ("REPAIR", "#f59e0b", "#262015"),
+            ("PREFERENCES", "#06b6d4", "#152327"),
+            ("APP", "#94a3b8", "#1c212a"),
+            ("POWER", "#f59e0b", "#262015"),
+            ("EXTRAS", "#8b5cf6", "#211c2a"),
         )
         for row, (name, accent, row_bg) in enumerate(groups):
             tk.Label(
@@ -6272,40 +6517,44 @@ class GeodeSyncApp(tk.Tk):
             self.tool_buttons.append((button, label, color, row_bg))
             return button
 
-        # Each row keeps related actions together: mods, play, repair, settings, system, power.
+        # Row 0: MODS
         add_tool("🧩 Mod Manager", self.open_mod_manager, color=UI["lime"], row=0, column=0, bold=True)
         add_tool("🔄 Update Mods", self.open_mod_updater_dialog, color=UI["lime"], row=0, column=1, bold=True)
         add_tool("📦 Essential Mods", self.install_essential_mods, color=UI["amber"], row=0, column=2, bold=True)
         add_tool("🎵 NONG Songs", self.open_nong_manager, color=UI["lime"], row=0, column=3)
 
+        # Row 1: PLAY
         add_tool("📈 Demon Tracker", self.open_demon_tracker, color=UI["lilac"], row=1, column=0, bold=True)
         add_tool("⚡ FPS Unlocker", self.open_fps_unlocker, color=UI["lime"], row=1, column=1)
         add_tool("🎨 Texture Packs", self.open_texture_pack_hub, color=UI["lime"], row=1, column=2)
         add_tool("🎮 Game Profiles", self.open_game_profiles, color=UI["lilac"], row=1, column=3)
 
+        # Row 2: REPAIR
         add_tool("💾 Backup Saves", self.backup_saves, color=UI["lime"], row=2, column=0, bold=True)
         add_tool("🩺 Save Doctor", self.run_save_doctor, color=UI["lilac"], row=2, column=1)
         add_tool("🩹 Crash Doctor", self.run_crash_doctor, color=UI["lilac"], row=2, column=2)
         add_tool("🧹 Cache Cleaner", self.open_cache_cleaner, color=UI["muted"], row=2, column=3)
 
+        # Row 3: PREFERENCES
         self.auto_backup_btn = add_tool("Auto-Backup: ON", self.toggle_auto_backup, color=UI["lime"], row=3, column=0, bold=True)
         self.rpc_btn = add_tool("🎮 Discord RPC: ON", self.toggle_rpc, color=UI["lilac"], row=3, column=1)
         sounds_text = "🔊 GD Sounds: ON" if self.sounds_enabled else "🔇 GD Sounds: OFF"
         self.sounds_btn = add_tool(sounds_text, self.toggle_sounds, color=UI["lime"] if self.sounds_enabled else UI["muted"], row=3, column=2)
         self.bg_mode_btn = add_tool("🌙 Close to System Tray: ON", self.toggle_bg_mode, color=UI["lime"], row=3, column=3)
 
+        # Row 4: APP
         add_tool("🔄 Check for Updates", self.manual_check_updates, color=UI["lime"], row=4, column=0, bold=True)
         add_tool("⌨️ Keybind Doctor", self.open_keybind_doctor, color=UI["amber"], row=4, column=1)
         add_tool("⚠️ Restore Steam GD", self.upgrade_clicked, color=UI["amber"], row=4, column=2)
         add_tool("📌 Desktop Shortcut", self.create_desktop_shortcut, color=UI["muted"], row=4, column=3)
 
-        # v2.4.0 Power Tools
+        # Row 5: POWER
         add_tool("🛍️ Mod Store", self.open_mod_store_dialog, color=UI["lime"], row=5, column=0, bold=True)
         add_tool("🏆 Top Demonlist", self.open_demonlist_browser, color=UI["lilac"], row=5, column=1, bold=True)
         add_tool("🎵 Jukebox & Practice", self.open_jukebox_dialog, color=UI["lime"], row=5, column=2, bold=True)
         add_tool("☁️ Sync Archive", self.open_bundle_manager_dialog, color=UI["amber"], row=5, column=3, bold=True)
 
-        # v2.4.0 Extras
+        # Row 6: EXTRAS
         add_tool("💾 Save Slots", self.open_save_slots_dialog, color=UI["amber"], row=6, column=0, bold=True)
         add_tool("💥 Custom SFX", self.open_soundpack_hub, color=UI["lilac"], row=6, column=1, bold=True)
         add_tool("🗝️ Secret Vaults", self.open_vault_helper, color=UI["amber"], row=6, column=2, bold=True)
@@ -6320,108 +6569,50 @@ class GeodeSyncApp(tk.Tk):
         if not self.run_in_bg_enabled:
             self.bg_mode_btn.config(text="🌙 Close to System Tray: OFF", fg=UI["muted"])
 
-        # Backward compatibility references
-        self.player_card = self.guide_card
-        self.launch_btn = self.primary_btn
-        self.more_toggle_btn = None
-        self.restore_gd_btn = None
-        self.more_frame = None
+        jb_frame = tk.Frame(parent, bg=UI["panel"])
+        self._build_jukebox_tab(jb_frame)
 
-        # Hidden text widget for logging compatibility
-        self.log_text = tk.Text(self, bg=UI["inset"], fg=UI["text"], font=("Consolas", 8))
+    def open_preferences_dialog(self):
+        d = tk.Toplevel(self)
+        d.title("GeodeSync Preferences")
+        d.geometry("520x420")
+        d.configure(bg=UI["background"])
+        d.transient(self)
+        d.grab_set()
 
-        # Build embedded views for modern tabs
-        self._build_store_tab(self.tab_frames["store"])
-        self._build_demonlist_tab(self.tab_frames["demonlist"])
-        self._build_jukebox_tab(self.tab_frames["jukebox"])
-        self._build_saves_tab(self.tab_frames["saves"])
+        head = tk.Frame(d, bg=UI["header"], padx=20, pady=12)
+        head.pack(fill="x")
+        tk.Label(head, text="⚙️ Preferences & Automation", font=("Segoe UI", 12, "bold"), fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Configure automatic backups, Discord integration, and system behaviors.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
 
-        # 3. MODERN 1-LINE STATUS TICKER & FOOTER
-        footer = tk.Frame(self, bg=UI["header"], padx=20, pady=7)
-        footer.pack(fill="x", side="bottom")
+        content = tk.Frame(d, bg=UI["background"], padx=20, pady=16)
+        content.pack(fill="both", expand=True)
 
-        footer_actions = tk.Frame(footer, bg=UI["header"])
-        footer_actions.pack(fill="x")
+        def _make_pref_row(parent, title, desc, btn_text, btn_cmd, fg_color):
+            card = tk.Frame(parent, bg=UI["panel"], padx=14, pady=10, highlightbackground=UI["border_subtle"], highlightthickness=1)
+            card.pack(fill="x", pady=4)
+            left = tk.Frame(card, bg=UI["panel"])
+            left.pack(side="left", fill="x", expand=True)
+            tk.Label(left, text=title, font=("Segoe UI", 9, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w")
+            tk.Label(left, text=desc, font=("Segoe UI", 7), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w")
+            b = tk.Button(card, text=btn_text, command=btn_cmd, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=fg_color, relief="flat", padx=10, pady=3, cursor="hand2")
+            b.pack(side="right")
+            return b
 
-        self.status_ticker_lbl = tk.Label(
-            footer_actions,
-            text="● Ready to play Geometry Dash",
-            font=("Segoe UI", 8),
-            fg=UI["lime"],
-            bg=UI["header"],
-            wraplength=320,
-            justify="left",
-            anchor="w",
-        )
-        self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        ab_status = "ON (Hourly)" if self.auto_backup_enabled else "OFF"
+        _make_pref_row(content, "Automatic Save Backup", "Silently protects your saves every hour while playing", f"Auto-Backup: {ab_status}", lambda: [self.toggle_auto_backup(), d.destroy(), self.open_preferences_dialog()], UI["lime"] if self.auto_backup_enabled else UI["muted"])
 
-        choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
-        choose_path_btn.pack(side="right", padx=(4, 0))
+        rpc_status = "ON" if self.discord_rpc_enabled else "OFF"
+        _make_pref_row(content, "Discord Rich Presence", "Displays your live stars, demons, and Geode status on Discord", f"Discord RPC: {rpc_status}", lambda: [self.toggle_rpc(), d.destroy(), self.open_preferences_dialog()], UI["lilac"] if self.discord_rpc_enabled else UI["muted"])
 
-        choose_save_btn = tk.Button(footer_actions, text="💾 Save Folder", command=self.browse_save_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
-        choose_save_btn.pack(side="right", padx=(4, 0))
+        snd_status = "ON" if self.sounds_enabled else "OFF"
+        _make_pref_row(content, "Application Audio", "Play classic GD sound effects on actions and achievements", f"GD Sounds: {snd_status}", lambda: [self.toggle_sounds(), d.destroy(), self.open_preferences_dialog()], UI["lime"] if self.sounds_enabled else UI["muted"])
 
-        view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
-        view_log_btn.pack(side="right", padx=(4, 0))
+        bg_status = "ON" if self.run_in_bg_enabled else "OFF"
+        _make_pref_row(content, "Close to System Tray", "Keeps GeodeSync running in background for hotkeys and auto-backup", f"System Tray: {bg_status}", lambda: [self.toggle_bg_mode(), d.destroy(), self.open_preferences_dialog()], UI["lime"] if self.run_in_bg_enabled else UI["muted"])
 
-        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_get_help_center, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
-        fix_problem_btn.pack(side="right", padx=(4, 0))
-
-        discord_link = tk.Label(footer_actions, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
-        discord_link.pack(side="right", padx=6)
-        discord_link.bind("<Button-1>", lambda e: webbrowser.open("https://discord.gg/tyQG5xNGCx"))
-
-        repo_link = tk.Label(footer_actions, text="GitHub", font=("Segoe UI", 8, "underline"), fg=UI["muted"], bg=UI["header"], cursor="hand2")
-        repo_link.pack(side="right", padx=6)
-        repo_link.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
-
-        self.path_lbl = tk.Label(
-            footer,
-            text=f"Game: {self.mgr.gd_path or 'Not found'}  •  Saves: {self.mgr.get_save_data_dir() or 'Not found'}",
-            font=("Segoe UI", 7),
-            fg=UI["quiet"],
-            bg=UI["header"],
-            wraplength=900,
-            justify="left",
-            anchor="w",
-        )
-        self.path_lbl.pack(fill="x", anchor="w", pady=(4, 0))
-
-        def _fit_footer_status(event=None):
-            available = event.width if event is not None else footer_actions.winfo_width()
-            if available <= 1:
-                return
-            fixed_width = sum(
-                child.winfo_reqwidth()
-                for child in footer_actions.winfo_children()
-                if child is not self.status_ticker_lbl
-            )
-            self.status_ticker_lbl.configure(wraplength=max(110, available - fixed_width - 40))
-            self.path_lbl.configure(wraplength=max(240, footer.winfo_width() - 40))
-
-        footer_actions.bind("<Configure>", _fit_footer_status)
-        footer.bind("<Configure>", _fit_footer_status)
-
-    def switch_main_tab(self, tab_id):
-        self.active_main_tab = tab_id
-        for tid, btn in getattr(self, "tab_buttons", {}).items():
-            if tid == tab_id:
-                btn.config(bg=UI["panel_alt"], fg=UI["lime"])
-            else:
-                btn.config(bg=UI["header"], fg=UI["muted"])
-        for tid, frame in getattr(self, "tab_frames", {}).items():
-            if tid == tab_id:
-                frame.pack(fill="both", expand=True)
-                if tid == "store":
-                    self._load_embedded_store()
-                elif tid == "demonlist":
-                    self._load_embedded_demonlist()
-                elif tid == "jukebox":
-                    self._refresh_embedded_jukebox()
-                elif tid == "saves":
-                    self._refresh_embedded_saves()
-            else:
-                frame.pack_forget()
+        close_btn = tk.Button(d, text="Close", command=d.destroy, font=("Segoe UI", 9, "bold"), bg=UI["panel_alt"], fg=UI["text"], relief="flat", padx=16, pady=6, cursor="hand2")
+        close_btn.pack(pady=(0, 16))
 
     def _build_store_tab(self, parent):
         head = tk.Frame(parent, bg=UI["header"], padx=16, pady=10)
@@ -7189,6 +7380,16 @@ class GeodeSyncApp(tk.Tk):
         )
 
         self.update_player_stats_ui()
+        if hasattr(self, "mods_summary_lbl"):
+            try:
+                mods = self.mgr.get_installed_mods()
+                active_cnt = sum(1 for m in mods if not m.get("disabled", False))
+                self.mods_summary_lbl.config(
+                    text=f"{active_cnt} active mods loaded ({len(mods)} total installed). Geode is ready.",
+                    fg=UI["text"]
+                )
+            except Exception:
+                pass
         if not self.is_downloading_depot:
             self.update_smart_guide(has_geode, is_locked)
 

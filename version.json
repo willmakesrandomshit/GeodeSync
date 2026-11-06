@@ -1,9 +1,9 @@
 {
-  "app_version": "2.5.0",
+  "app_version": "2.6.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.5.0 — The Ultimate Zero-Confusion & Self-Repair Release: Diagnostic-first automated recovery with safety snapshots, clean tabbed interface, instant auto-locate, sanitized community support, and complete mod ecosystem integration!"
+  "announcement": "GeodeSync v2.6.0 — Complete UI/UX Reconstruction: Zero cognitive overload with modern 4-tab architecture (Home, Mods, Library, Tools), prominent 1-click launch hero, unified mod management, and effortless save vault."
 }
