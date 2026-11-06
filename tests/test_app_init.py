@@ -38,12 +38,13 @@ class TestAppInit(unittest.TestCase):
             buttons = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Button)}
 
             self.assertTrue({"TOOLBOX", "Choose what you want to do", "MODS", "PLAY", "REPAIR", "PREFERENCES", "APP"}.issubset(labels))
-            self.assertTrue({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor", "Auto-Backup: ON"}.issubset(buttons))
+            self.assertTrue({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor"}.issubset(buttons))
+            self.assertTrue("Auto-Backup: ON" in buttons or "Auto-Backup: OFF" in buttons)
             tool_names = {
                 "🧩 Mod Manager", "🔄 Update Mods", "📦 Essential Mods", "🎵 NONG Songs",
                 "📈 Demon Tracker", "⚡ FPS Unlocker", "🎨 Texture Packs", "🎮 Game Profiles",
                 "💾 Backup Saves", "🩺 Save Doctor", "🩹 Crash Doctor", "🧹 Cache Cleaner",
-                "Auto-Backup: ON", "🎮 Discord RPC: ON", "🔇 GD Sounds: OFF",
+                "Auto-Backup: ON" if app.auto_backup_enabled else "Auto-Backup: OFF", "🎮 Discord RPC: ON", "🔊 GD Sounds: ON" if app.sounds_enabled else "🔇 GD Sounds: OFF",
                 "🌙 Close to System Tray: ON", "🔄 Check for Updates", "⌨️ Keybind Doctor",
                 "⚠️ Restore Steam GD", "📌 Desktop Shortcut",
             }

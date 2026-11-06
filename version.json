@@ -1,9 +1,9 @@
 {
-  "app_version": "2.4.2",
+  "app_version": "2.5.0",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.4.2 Hotfix & Power Polish: Fixed embedded Mod Store and Demonlist tuple unpacking crash, resolved custom SFX status inspection, and boosted updater package verification reliability!"
+  "announcement": "GeodeSync v2.5.0 — The Ultimate Zero-Confusion & Self-Repair Release: Diagnostic-first automated recovery with safety snapshots, clean tabbed interface, instant auto-locate, sanitized community support, and complete mod ecosystem integration!"
 }

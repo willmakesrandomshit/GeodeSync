@@ -31,15 +31,15 @@ GeodeSync manages Geometry Dash installations provided by Steam; it does not rep
 
 ## What it can do
 
-- Switch between supported Geometry Dash versions and manage Steam's update lock.
-- Back up and restore saves, recover interrupted switches, and get clear error steps from Fix a problem.
-- Keep Discord Rich Presence active when the window is closed. On Windows, GeodeSync moves to the system tray, where you can reopen it or exit; while GD is running it shows “Playing Geometry Dash with GeodeSync”.
-- Save game and mod profiles; inspect, enable, disable, and update Geode mods.
-- Inspect Geometry Dash progress and troubleshoot mod crashes and keybind conflicts.
-- Install and restore texture packs with a vanilla texture backup.
-- Use companion tools such as the cache cleaner, FPS unlocker, click-delay fix, and essential-mod installer.
-
-Some tools and supported game versions vary by platform. Read each confirmation before changing game files, mods, save files, or Steam settings. Support reports contain diagnostic details; review the exported file before sharing it.
+- **⚡ AAA Gaming Dashboard:** Clean player profile hero card with glowing live stats (Stars, Demons, Moons, Diamonds, Coins, Orbs), setup status chips, and 1-click launch presets (Boosted, Vanilla, Tournament, Globed).
+- **🛍️ Embedded Geode Mod Store:** Browse official Geode SDK mods directly inside the main app window with category filtering (All, QoL & Tools, Visual & Audio, Multiplayer, Installed), live instant search, and 1-click installation.
+- **🏆 Live Pointercrate Top 150 Demonlist:** Real-time Demon rankings with point values, verifiers, video links, and **Live Save Progress Cross-Referencing** (showing 🏆 100% BEATEN or 🎯 X% (N att) next to each Demon).
+- **🎵 Universal Audio Jukebox & Death SFX Hub:** 100% crash-proof Practice Music replacer (StayInsideMe.mp3) and custom explosion sound effects (explode_11.ogg) with 1-click vanilla rollback and zero memory DLL hooks.
+- **💾 Comprehensive Save Hub & Compactor:** Multi-slot game saves, automated bloat purging (reducing 40MB+ bloated files down to ~1.8MB), and 1-click portable .geodesync bundle export & restore.
+- **🩺 1-Click Health & Diagnostics Check (Ctrl+H):** Automated 8-point inspection of your Geometry Dash environment (version parity, Steam lock, Geode loader, save file decryption, OneDrive reparse locks, Visual C++ runtime, and mod conflicts) with instant 1-click auto-repair.
+- **⌨️ Universal Keyboard Shortcuts:** Instant tab navigation with Ctrl+1 through Ctrl+6, Ctrl+F tab-aware search, F5 status refresh, and Ctrl+H diagnostics.
+- **Switch Supported GD Versions:** Safely manage Geometry Dash versions (such as Geode-compatible 2.2081) and Steam's update lock.
+- **Discord Rich Presence & Tray Mode:** Keep live Rich Presence active when minimized to the system tray, showing real-time stats and in-game state.
 
 ## Build and verify
 

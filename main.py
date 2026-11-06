@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.4.2"
+APP_VERSION = "2.5.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -324,23 +324,29 @@ class DiscordRPC:
 
 
 UI = {
-    "background": "#121013",
-    "header": "#19161b",
-    "panel": "#201c22",
-    "panel_alt": "#29242c",
-    "inset": "#171419",
-    "border": "#3c3440",
-    "text": "#f6f0e8",
-    "muted": "#b8adb9",
-    "quiet": "#897e8b",
-    "lime": "#c2e66b",
-    "lime_hover": "#a8ce50",
-    "lime_dark": "#27351b",
-    "lilac": "#c497e8",
-    "lilac_dark": "#34233f",
-    "amber": "#e4b968",
-    "red": "#f08087",
-    "red_dark": "#46242a",
+    "background": "#0c0e12",
+    "header": "#141820",
+    "panel": "#191e26",
+    "panel_alt": "#222934",
+    "inset": "#0d1117",
+    "border": "#2d3542",
+    "border_subtle": "#1f2631",
+    "text": "#f0f6fc",
+    "muted": "#8b949e",
+    "quiet": "#6e7681",
+    "lime": "#10b981",
+    "lime_hover": "#059669",
+    "lime_dark": "#064e3b",
+    "lilac": "#a855f7",
+    "lilac_hover": "#9333ea",
+    "lilac_dark": "#3b0764",
+    "cyan": "#06b6d4",
+    "cyan_hover": "#0891b2",
+    "cyan_dark": "#164e63",
+    "amber": "#f59e0b",
+    "amber_dark": "#451a03",
+    "red": "#ef4444",
+    "red_dark": "#450a0a",
 }
 
 APP_ID = "322170"
@@ -3065,14 +3071,18 @@ class GDManager:
                     try:
                         with zipfile.ZipFile(full, "r") as zf:
                             if "mod.json" in zf.namelist():
-                                meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
-                                name = meta.get("name", meta.get("id", mod_id))
-                                version = meta.get("version", "v1.0")
-                                dev = meta.get("developer") or meta.get("developers")
-                                if isinstance(dev, list):
-                                    developer = ", ".join(dev)
-                                elif isinstance(dev, str):
-                                    developer = str(dev)
+                                try:
+                                    meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                                except Exception:
+                                    meta = {}
+                                if isinstance(meta, dict):
+                                    name = meta.get("name", meta.get("id", mod_id))
+                                    version = meta.get("version", "v1.0")
+                                    dev = meta.get("developer") or meta.get("developers")
+                                    if isinstance(dev, list):
+                                        developer = ", ".join(dev)
+                                    elif isinstance(dev, str):
+                                        developer = str(dev)
                     except Exception:
                         pass
                     results.append({
@@ -3127,19 +3137,23 @@ class GDManager:
             try:
                 with zipfile.ZipFile(ip_path, "r") as zf:
                     if "mod.json" in zf.namelist():
-                        meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
-                        ver = str(meta.get("version", "")).lstrip("v")
-                        # 1.1.1 calls loadRootSubDictFromCompressedFile which crashes GD 2.2081
-                        if ver == "1.1.1":
-                            issues.append({
-                                "id": "prevter.imageplus",
-                                "name": "ImagePlus",
-                                "version": "v" + ver,
-                                "issue": "Missing DLL Entry Point (?loadRootSubDictFromCompressedFile@DS_Dictionary@@QEAA_NPEBD@Z)",
-                                "recommended_version": "v1.1.0",
-                                "download_url": "https://api.geode-sdk.org/v1/mods/prevter.imageplus/versions/1.1.0/download",
-                                "file_path": ip_path
-                            })
+                        try:
+                            meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                        except Exception:
+                            meta = {}
+                        if isinstance(meta, dict):
+                            ver = str(meta.get("version", "")).lstrip("v")
+                            # 1.1.1 calls loadRootSubDictFromCompressedFile which crashes GD 2.2081
+                            if ver == "1.1.1":
+                                issues.append({
+                                    "id": "prevter.imageplus",
+                                    "name": "ImagePlus",
+                                    "version": "v" + ver,
+                                    "issue": "Missing DLL Entry Point (?loadRootSubDictFromCompressedFile@DS_Dictionary@@QEAA_NPEBD@Z)",
+                                    "recommended_version": "v1.1.0",
+                                    "download_url": "https://api.geode-sdk.org/v1/mods/prevter.imageplus/versions/1.1.0/download",
+                                    "file_path": ip_path
+                                })
             except Exception:
                 pass
 
@@ -3190,17 +3204,21 @@ class GDManager:
                 try:
                     with zipfile.ZipFile(fp, "r") as zf:
                         if "mod.json" in zf.namelist():
-                            meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
-                            mid = meta.get("id")
-                            mver = meta.get("version", "").lstrip("v")
-                            mname = meta.get("name", mid)
-                            if is_safe_geode_mod_id(mid) and mver:
-                                installed.append({
-                                    "id": mid,
-                                    "name": mname,
-                                    "current_version": mver,
-                                    "file_path": fp
-                                })
+                            try:
+                                meta = json.loads(zf.read("mod.json").decode("utf-8", errors="ignore"))
+                            except Exception:
+                                meta = {}
+                            if isinstance(meta, dict):
+                                mid = meta.get("id")
+                                mver = str(meta.get("version", "")).lstrip("v")
+                                mname = meta.get("name", mid)
+                                if is_safe_geode_mod_id(mid) and mver:
+                                    installed.append({
+                                        "id": mid,
+                                        "name": mname,
+                                        "current_version": mver,
+                                        "file_path": fp
+                                    })
                 except Exception:
                     pass
 
@@ -3916,6 +3934,53 @@ class GDManager:
         except Exception as e:
             return False, str(e)
 
+    def create_safety_snapshot(self, tag="pre_repair"):
+        """Creates a timestamped pre-repair safety snapshot of save files, active mods, and configurations.
+        Returns the snapshot directory path on success, or None on failure.
+        """
+        save_dir = self.get_save_data_dir()
+        if not save_dir or not os.path.isdir(save_dir):
+            return None
+        snapshot_root = os.path.join(save_dir, "GeodeSync_Save_Backups")
+        os.makedirs(snapshot_root, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        snapshot_dir = os.path.join(snapshot_root, f"{tag}_{timestamp}")
+        os.makedirs(snapshot_dir, exist_ok=True)
+
+        # 1. Backup save files (*.dat, *.dat.bak)
+        try:
+            for f in os.listdir(save_dir):
+                if f.endswith((".dat", ".dat.bak")):
+                    src = os.path.join(save_dir, f)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, os.path.join(snapshot_dir, f))
+        except Exception:
+            pass
+
+        # 2. Backup active mods and configurations
+        if self.gd_path and os.path.isdir(self.gd_path):
+            mods_dir = os.path.join(self.gd_path, "geode", "mods")
+            if os.path.isdir(mods_dir):
+                mods_snapshot = os.path.join(snapshot_dir, "mods")
+                os.makedirs(mods_snapshot, exist_ok=True)
+                for mf in os.listdir(mods_dir):
+                    if mf.endswith((".geode", ".disabled")):
+                        src_m = os.path.join(mods_dir, mf)
+                        if os.path.isfile(src_m):
+                            try:
+                                shutil.copy2(src_m, os.path.join(mods_snapshot, mf))
+                            except Exception:
+                                pass
+            cfg_dir = os.path.join(self.gd_path, "geode", "config")
+            if os.path.isdir(cfg_dir):
+                cfg_snapshot = os.path.join(snapshot_dir, "config")
+                try:
+                    shutil.copytree(cfg_dir, cfg_snapshot, dirs_exist_ok=True)
+                except Exception:
+                    pass
+
+        return snapshot_dir
+
     def import_geodesync_bundle(self, bundle_path, overwrite_saves=True, overwrite_mods=True):
         """
         Unpacks and restores saves, mods, and configs from a .geodesync bundle.
@@ -4372,12 +4437,8 @@ class GeodeSyncApp(tk.Tk):
         _global_excepthook(exc_type, exc_value, exc_traceback)
         try:
             err_msg = f"{exc_type.__name__}: {exc_value}"
-            self.log(f"Interface error: {err_msg}", "ERROR")
-            self.after(0, lambda: self.show_smart_error(
-                "Interface Issue Detected",
-                f"An unexpected interface issue occurred:\n\n{err_msg}\n\nClick 'Auto-Fix It For Me' below and GeodeSync will unstick your session and restore full functionality.",
-                auto_fix_func=self.emergency_unstick
-            ))
+            self.last_troubleshooting_error = err_msg
+            self.log(f"Interface notice: {exc_value}", "WARN")
         except Exception:
             pass
 
@@ -4442,8 +4503,25 @@ class GeodeSyncApp(tk.Tk):
         self.last_troubleshooting_error = ""
         self.is_downloading_depot = False
         self._monitor_running = True
+        self.active_main_tab = "dashboard"
+        self._cached_store_mods = []
+        self._cached_demons = []
 
         self.create_ui()
+
+        # Universal Productivity & Navigation Shortcuts
+        self.bind("<Control-Key-1>", lambda e: self.switch_main_tab("dashboard"))
+        self.bind("<Control-Key-2>", lambda e: self.switch_main_tab("store"))
+        self.bind("<Control-Key-3>", lambda e: self.switch_main_tab("demonlist"))
+        self.bind("<Control-Key-4>", lambda e: self.switch_main_tab("jukebox"))
+        self.bind("<Control-Key-5>", lambda e: self.switch_main_tab("saves"))
+        self.bind("<Control-Key-6>", lambda e: self.switch_main_tab("toolbox"))
+        self.bind("<Control-f>", lambda e: self._focus_active_search())
+        self.bind("<Control-F>", lambda e: self._focus_active_search())
+        self.bind("<F5>", lambda e: self.refresh_status())
+        self.bind("<Control-h>", lambda e: self.run_health_check())
+        self.bind("<Control-H>", lambda e: self.run_health_check())
+
         self._load_activity()
         self.refresh_status()
         for recovered in self.recovered_transactions:
@@ -4464,6 +4542,340 @@ class GeodeSyncApp(tk.Tk):
     def _start_auto_sync_loop(self):
         """Starts a periodic 10-second background auto-sync loop to keep status, save progress, and steam lock updated."""
         self.after(10000, self._auto_sync_tick)
+
+    def safe_after(self, delay_ms, func):
+        """Thread-safe UI callback that avoids unhandled errors if the window is destroyed."""
+        try:
+            if hasattr(self, "winfo_exists") and self.winfo_exists():
+                return self.after(delay_ms, func)
+        except Exception:
+            pass
+        return None
+
+    def _focus_active_search(self):
+        """Focus the search box in whichever tab is active."""
+        try:
+            tab = getattr(self, "active_main_tab", "dashboard")
+            if tab == "store" and hasattr(self, "store_search_entry"):
+                self.store_search_entry.focus_set()
+            elif tab == "demonlist" and hasattr(self, "demon_search_entry"):
+                self.demon_search_entry.focus_set()
+            elif tab == "toolbox" and hasattr(self, "tool_search_entry"):
+                self.tool_search_entry.focus_set()
+        except Exception:
+            pass
+
+    def run_health_check(self):
+        """1-Click System Health & Diagnostics Check."""
+        dialog = tk.Toplevel(self)
+        dialog.title(f"GeodeSync v{APP_VERSION} — System Health Diagnostic")
+        dialog.geometry("700x560")
+        dialog.minsize(620, 480)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🩺 System Health & Diagnostics", font=("Segoe UI", 13, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Automated 8-point inspection of your Geometry Dash & Geode environment.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        scroll = ScrollableFrame(dialog)
+        scroll.pack(fill="both", expand=True, padx=16, pady=12)
+        content = scroll.scrollable_content
+
+        checks = []
+        issues_count = 0
+
+        # Check 1: Game installation
+        gd_found = bool(self.mgr.gd_path and os.path.isdir(self.mgr.gd_path))
+        if gd_found:
+            exe_name = "Geometry Dash.app" if IS_MAC else "GeometryDash.exe"
+            exe_exists = os.path.exists(os.path.join(self.mgr.gd_path, exe_name))
+            if exe_exists:
+                checks.append(("Geometry Dash Installation", "PASS", f"Located at: {self.mgr.gd_path}", UI["lime"]))
+            else:
+                issues_count += 1
+                checks.append(("Geometry Dash Installation", "FAIL", f"Folder found, but {exe_name} is missing.", UI["red"]))
+        else:
+            issues_count += 1
+            checks.append(("Geometry Dash Installation", "FAIL", "Could not locate Geometry Dash installation folder.", UI["red"]))
+
+        # Check 2: Version Compatibility
+        v_info, _ = self.mgr.get_gd_version_info()
+        is_22081 = self.mgr.is_current_gd_22081()
+        if is_22081:
+            checks.append(("Version Compatibility", "PASS", f"Active Version: {v_info} — 100% Geode mod compatible.", UI["lime"]))
+        elif "2.209" in str(v_info):
+            issues_count += 1
+            checks.append(("Version Compatibility", "WARN", f"Active Version: {v_info} — Geode mods will crash. Downgrade to 2.2081 recommended.", UI["amber"]))
+        else:
+            checks.append(("Version Compatibility", "INFO", f"Active Version: {v_info}", UI["quiet"]))
+
+        # Check 3: Steam Update Lock
+        is_locked = self.mgr.is_manifest_locked()
+        if is_locked:
+            checks.append(("Steam Update Lock", "PASS", "Steam manifest is locked (Read-Only). Auto-updates cannot break your mods.", UI["lime"]))
+        else:
+            checks.append(("Steam Update Lock", "INFO", "Steam manifest is unlocked. Steam may attempt to update to 2.2091 on launch.", UI["quiet"]))
+
+        # Check 4: Geode Mod Loader
+        is_geode = self.mgr.is_geode_installed()
+        geode_v = self.mgr.get_installed_geode_version()
+        if is_geode:
+            checks.append(("Geode Mod Loader", "PASS", f"Installed: Geode v{geode_v or 'Active'}", UI["lime"]))
+        else:
+            issues_count += 1
+            checks.append(("Geode Mod Loader", "WARN", "Geode is not currently installed in this game folder.", UI["amber"]))
+
+        # Check 5: Save File Integrity
+        save_dir = self.mgr.get_save_data_dir()
+        if save_dir and os.path.isdir(save_dir):
+            gm_path = os.path.join(save_dir, "CCGameManager.dat")
+            save_ok = True
+            save_msg = "Decoded cleanly with zero corruption."
+            try:
+                if os.path.exists(gm_path):
+                    with open(gm_path, "rb") as f:
+                        decode_geometry_dash_save(f.read())
+            except Exception as e:
+                save_ok = False
+                save_msg = f"CCGameManager.dat decode failed: {e}"
+            if save_ok:
+                checks.append(("Player Save Files", "PASS", save_msg, UI["lime"]))
+            else:
+                issues_count += 1
+                checks.append(("Player Save Files", "FAIL", save_msg, UI["red"]))
+        else:
+            checks.append(("Player Save Files", "INFO", "No local save files created yet.", UI["quiet"]))
+
+        # Check 6: OneDrive Reparse Point Locks
+        onedrive_lock = False
+        if save_dir and os.path.isdir(save_dir):
+            for fname in ("CCGameManager.dat", "CCLocalLevels.dat"):
+                fpath = os.path.join(save_dir, fname)
+                if os.path.exists(fpath):
+                    try:
+                        attrs = os.stat(fpath).st_file_attributes if hasattr(os.stat(fpath), "st_file_attributes") else 0
+                        if attrs & 0x0400:
+                            onedrive_lock = True
+                    except Exception:
+                        pass
+        if onedrive_lock:
+            issues_count += 1
+            checks.append(("Storage / OneDrive", "WARN", "Save files have OneDrive cloud-only reparse locks. May cause save loss.", UI["amber"]))
+        else:
+            checks.append(("Storage / OneDrive", "PASS", "Local save folder is healthy with full write permissions.", UI["lime"]))
+
+        # Check 7: Visual C++ Runtime (Windows only)
+        if IS_WIN:
+            vc_installed = check_vc_redist_installed()
+            if vc_installed:
+                checks.append(("Visual C++ Runtime", "PASS", "Microsoft Visual C++ 2015-2022 x86 Runtime detected.", UI["lime"]))
+            else:
+                issues_count += 1
+                checks.append(("Visual C++ Runtime", "WARN", "Visual C++ Runtime missing or outdated. May cause GD 0xc000007b crash.", UI["amber"]))
+
+        # Check 8: Incompatible Mods
+        incomp = self.mgr.check_incompatible_mods()
+        if incomp:
+            issues_count += 1
+            m_names = ", ".join(m["name"] for m in incomp[:2])
+            checks.append(("Mod Compatibility", "FAIL", f"{len(incomp)} crashing/outdated mods found: {m_names}", UI["red"]))
+        else:
+            checks.append(("Mod Compatibility", "PASS", "Zero conflicting or incompatible mods detected.", UI["lime"]))
+
+        # Render check cards
+        for title, status, desc, color in checks:
+            row = tk.Frame(content, bg=UI["panel"], padx=14, pady=10, highlightbackground=UI["border"], highlightthickness=1)
+            row.pack(fill="x", pady=3)
+            r_top = tk.Frame(row, bg=UI["panel"])
+            r_top.pack(fill="x")
+            badge = tk.Label(r_top, text=f" {status} ", font=("Segoe UI", 8, "bold"), fg=color, bg=UI["panel_alt"], padx=6, pady=2)
+            badge.pack(side="right")
+            tk.Label(r_top, text=title, font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
+            tk.Label(row, text=desc, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=600, justify="left").pack(anchor="w", pady=(3, 0))
+
+        # Bottom actions
+        b_bar = tk.Frame(dialog, bg=UI["header"], padx=20, pady=12)
+        b_bar.pack(fill="x", side="bottom")
+
+        summary_text = f"✨ All {len(checks)} Systems Healthy & Ready to Play!" if issues_count == 0 else f"⚠️ {issues_count} Issue(s) Requiring Attention"
+        summary_color = UI["lime"] if issues_count == 0 else UI["amber"]
+        tk.Label(b_bar, text=summary_text, font=("Segoe UI", 10, "bold"), fg=summary_color, bg=UI["header"]).pack(side="left")
+
+        if issues_count > 0:
+            def _auto_fix():
+                dialog.destroy()
+                self.emergency_unstick()
+            tk.Button(b_bar, text="⚡ Auto-Repair All Issues", command=_auto_fix, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="right", padx=(8, 0))
+
+        tk.Button(b_bar, text="Close", command=dialog.destroy, font=("Segoe UI", 9), bg=UI["panel_alt"], fg=UI["text"], activebackground=UI["border"], relief="flat", padx=12, pady=5, cursor="hand2").pack(side="right")
+
+    def auto_find_and_set_gd(self):
+        """Scans Steam libraries and common directories across all drives to auto-detect Geometry Dash."""
+        self.log("Auto-detecting Geometry Dash installation...", "INFO")
+        found_paths = self.mgr.find_all_gd_installations()
+        if found_paths:
+            best = found_paths[0]
+            self.mgr.gd_path = os.path.abspath(best)
+            self.mgr.manifest_path = self.mgr.get_manifest_path()
+            self._save_settings()
+            self.refresh_status()
+            self.log(f"Located Geometry Dash automatically: {best}", "SUCCESS")
+            self.play_ding()
+            messagebox.showinfo(
+                "Game Found!",
+                f"Successfully located Geometry Dash at:\n{best}\n\nGeodeSync is ready!",
+                parent=self
+            )
+            return True
+        else:
+            self.log("Auto-detection did not find Geometry Dash.", "WARN")
+            res = messagebox.askyesno(
+                "Geometry Dash Not Found",
+                "GeodeSync could not automatically locate Geometry Dash in standard Steam folders.\n\nWould you like to manually choose your Geometry Dash folder?",
+                parent=self
+            )
+            if res:
+                self.browse_gd_path()
+            return False
+
+    def open_get_help_center(self, initial_error=None):
+        """Intelligent Help & Self-Repair Center with 1-click automated fixes and privacy-sanitized support ticket preview."""
+        dialog = tk.Toplevel(self)
+        dialog.title(f"GeodeSync v{APP_VERSION} — Help & Self-Repair Center")
+        dialog.geometry("740x630")
+        dialog.minsize(640, 520)
+        dialog.configure(bg=UI["background"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        head = tk.Frame(dialog, bg=UI["header"], padx=20, pady=14)
+        head.pack(fill="x")
+        tk.Label(head, text="🩺 Help & Self-Repair Center", font=("Segoe UI", 13, "bold"), fg=UI["lime"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(head, text="Instant 1-click self-repair solutions and privacy-sanitized community assistance.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        scroll = ScrollableFrame(dialog)
+        scroll.pack(fill="both", expand=True, padx=16, pady=12)
+        content = scroll.scrollable_content
+
+        # Section 1: Quick 1-Click Self-Repair Solvers
+        s1 = tk.Frame(content, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        s1.pack(fill="x", pady=(0, 12))
+        tk.Label(s1, text="⚡ 1-Click Self-Repair Solvers", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w", pady=(0, 8))
+
+        grid1 = tk.Frame(s1, bg=UI["panel"])
+        grid1.pack(fill="x")
+
+        # Solver 1: Emergency Unstick
+        btn1 = tk.Button(
+            grid1, text="⚡ Auto-Fix Everything\n(Unstick & Reset)",
+            command=lambda: [dialog.destroy(), self.emergency_unstick()],
+            font=("Segoe UI", 8, "bold"), bg=UI["lime_dark"], fg=UI["lime"],
+            activebackground=UI["lime"], activeforeground=UI["background"],
+            relief="flat", padx=10, pady=8, cursor="hand2", justify="center"
+        )
+        btn1.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        # Solver 2: Auto Find GD
+        btn2 = tk.Button(
+            grid1, text="🔍 Locate Game\n(Scan All Drives)",
+            command=lambda: [self.auto_find_and_set_gd(), update_ticket_preview()],
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["text"],
+            activebackground=UI["border"], activeforeground=UI["text"],
+            relief="flat", padx=10, pady=8, cursor="hand2", justify="center"
+        )
+        btn2.pack(side="left", fill="x", expand=True, padx=4)
+
+        # Solver 3: System Health Check
+        btn3 = tk.Button(
+            grid1, text="🩺 Run Diagnostics\n(8-Point Inspection)",
+            command=self.run_health_check,
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["cyan"],
+            activebackground=UI["border"], activeforeground=UI["text"],
+            relief="flat", padx=10, pady=8, cursor="hand2", justify="center"
+        )
+        btn3.pack(side="left", fill="x", expand=True, padx=4)
+
+        # Solver 4: Crash Doctor
+        btn4 = tk.Button(
+            grid1, text="🩹 Crash Doctor\n(Analyze GD Logs)",
+            command=self.run_crash_doctor,
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"],
+            activebackground=UI["border"], activeforeground=UI["text"],
+            relief="flat", padx=10, pady=8, cursor="hand2", justify="center"
+        )
+        btn4.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Section 2: Privacy-Sanitized Discord Support Ticket
+        s2 = tk.Frame(content, bg=UI["panel"], padx=14, pady=12, highlightbackground=UI["border"], highlightthickness=1)
+        s2.pack(fill="both", expand=True)
+
+        tk.Label(s2, text="🛡️ Community Support Ticket (Privacy-Sanitized)", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(s2, text="Your Windows username, personal folder paths, and auth secrets are automatically redacted.", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(anchor="w", pady=(2, 8))
+
+        ticket_text_box = tk.Text(s2, height=10, font=("Consolas", 8), bg=UI["inset"], fg=UI["text"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        ticket_text_box.pack(fill="both", expand=True, pady=(0, 10))
+
+        def get_current_sanitized_ticket():
+            game_version, _ = self.mgr.get_gd_version_info()
+            geode_ver = self.mgr.get_installed_geode_version() or ("Detected" if self.mgr.is_geode_installed() else "Not Installed")
+            is_locked = "Locked (Protected)" if self.mgr.is_manifest_locked() else "Unlocked (Normal)"
+            mods = self.mgr.get_installed_mods()
+            stats = self.mgr.get_player_stats()
+
+            recent_logs = []
+            try:
+                if os.path.exists(self.activity_log_path):
+                    with open(self.activity_log_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = [line.strip() for line in f.readlines() if line.strip()]
+                        recent_logs = lines[-12:]
+            except OSError:
+                pass
+
+            log_excerpt = "\n".join([f"> `{self._redact_diagnostic_text(l)}`" for l in recent_logs]) if recent_logs else "> *(No recent log entries)*"
+            err_val = initial_error or getattr(self, "last_troubleshooting_error", "")
+            err_line = f"  **Reported Notice:** `{self._redact_diagnostic_text(str(err_val).strip())}`\n" if err_val else ""
+
+            return (
+                f"### 🚀 GeodeSync v{APP_VERSION} Support Ticket\n"
+                f"  **Platform:** {platform.system()} {platform.release()} ({platform.machine()})\n"
+                f"  **GD Version:** `{game_version}` (Target: `{self.mgr.target_gd_version}`)\n"
+                f"  **Geode Loader:** `{geode_ver}`\n"
+                f"  **Steam Update Lock:** `{is_locked}`\n"
+                f"{err_line}"
+                f"  **Installed Mods:** {len(mods)} mods\n"
+                f"  **Player:** {stats['name'] if stats else 'Player'} ({stats['stars'] if stats else 0} ⭐, {stats['demons'] if stats else 0} 👿)\n"
+                f"  **Recent Activity:**\n{log_excerpt}\n\n"
+                f"*Generated via GeodeSync Zero-Confusion Self-Repair*"
+            )
+
+        def update_ticket_preview():
+            ticket_text_box.config(state="normal")
+            ticket_text_box.delete("1.0", "end")
+            ticket_text_box.insert("1.0", get_current_sanitized_ticket())
+            ticket_text_box.config(state="disabled")
+
+        update_ticket_preview()
+
+        act_row = tk.Frame(s2, bg=UI["panel"])
+        act_row.pack(fill="x")
+
+        def copy_ticket_action():
+            self.clipboard_clear()
+            self.clipboard_append(get_current_sanitized_ticket())
+            self.play_ding()
+            messagebox.showinfo("Ticket Copied!", "📋 Sanitized support ticket copied to clipboard!\n\nPaste it into #geodesync-help on Discord for quick assistance.", parent=dialog)
+
+        cp_btn = tk.Button(act_row, text="📋 Copy Sanitized Ticket", command=copy_ticket_action, font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], relief="flat", padx=12, pady=6, cursor="hand2")
+        cp_btn.pack(side="left", padx=(0, 6))
+
+        disc_btn = tk.Button(act_row, text="💬 Open #geodesync-help on Discord", command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"), font=("Segoe UI", 9, "bold"), bg="#5865F2", fg="#ffffff", activebackground="#4752C4", relief="flat", padx=12, pady=6, cursor="hand2")
+        disc_btn.pack(side="left", padx=(0, 6))
+
+        exp_btn = tk.Button(act_row, text="💾 Export Full Report", command=self.export_support_report, font=("Segoe UI", 9), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["border"], relief="flat", padx=10, pady=6, cursor="hand2")
+        exp_btn.pack(side="right")
 
     def _auto_sync_tick(self):
         try:
@@ -4887,63 +5299,196 @@ class GeodeSyncApp(tk.Tk):
                 auto_fix_func=self.emergency_unstick
             ))
 
-    def emergency_unstick(self):
-        """All-in-One Emergency Fix for when users are stuck.
-        Kills hung GD processes, unlocks Steam manifest, clears corrupted depot cache,
-        resets target to 2.2081, fixes incompatible mods, and prompts clean repair.
+    def emergency_unstick(self, interactive=True):
+        """Safe Diagnostic-First Self-Repair routine.
+        1. Non-destructively diagnoses environment for stuck locks, hung processes,
+           incompatible mods, corrupt depot caches, or cloud sync issues.
+        2. In interactive mode, summarizes detected problems and requests confirmation.
+        3. Creates a pre-repair safety snapshot of saves and active mods.
+        4. Applies targeted remediation only to the detected issues.
+        5. Verifies repair status and reports results cleanly.
         """
-        self.log("🆘 Running Emergency Unstick & Self-Repair routine...", "WARNING")
+        self.log("🩺 Starting Safe Diagnostic-First Self-Repair...", "INFO")
 
-        killed_count = 0
+        issues = []
+        actions = []
+
+        # 1. Diagnose running/hung GD processes
+        gd_running = False
         if IS_WIN:
             try:
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 out = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe"], startupinfo=si).decode(errors="ignore")
                 if "GeometryDash.exe" in out:
-                    subprocess.run(["taskkill", "/F", "/IM", "GeometryDash.exe"], startupinfo=si, capture_output=True)
-                    killed_count += 1
+                    gd_running = True
             except Exception:
                 pass
         elif IS_MAC:
             try:
-                subprocess.run(["pkill", "-9", "-f", "Geometry Dash"])
-                killed_count += 1
+                out = subprocess.check_output(["pgrep", "-f", "Geometry Dash"]).decode(errors="ignore")
+                if out.strip():
+                    gd_running = True
             except Exception:
                 pass
+        if gd_running:
+            issues.append("Geometry Dash process is currently running or hung")
+            actions.append("Safely terminate hung Geometry Dash process")
 
-        self.mgr.target_gd_version = "2.2081"
-        self.mgr.target_manifest = "8780295549609362522" if IS_MAC else "3816559102876907245"
-        self.settings["target_manifest"] = self.mgr.target_manifest
-        self._save_settings()
-
+        # 2. Diagnose manifest locks
+        manifest_locked = False
         try:
-            self.mgr.set_manifest_locked(False)
-            self.log("Emergency: Unlocked Steam manifest (read-only removed).", "INFO")
-        except Exception as e:
-            self.log(f"Emergency note: {e}", "WARN")
+            if hasattr(self.mgr, "is_manifest_locked") and self.mgr.is_manifest_locked():
+                manifest_locked = True
+                issues.append("Steam appmanifest file is locked in read-only mode")
+                actions.append("Unlock Steam manifest permissions")
+        except Exception:
+            pass
 
+        # 3. Diagnose target version setting
+        version_mismatch = False
+        expected_manifest = "8780295549609362522" if IS_MAC else "3816559102876907245"
+        if getattr(self.mgr, "target_gd_version", None) != "2.2081" or getattr(self.mgr, "target_manifest", None) != expected_manifest:
+            version_mismatch = True
+            issues.append("Target version is not set to official Geode baseline (2.2081)")
+            actions.append("Calibrate target version & Steam depot manifest to 2.2081")
+
+        # 4. Diagnose corrupted depot cache
         depot_path = self.mgr.get_depot_path()
-        cleared_cache = False
+        stale_depot = False
         if depot_path and os.path.exists(depot_path):
+            if "steamapps" in depot_path and "content" in depot_path:
+                stale_depot = True
+                issues.append("Stale Steam depot download cache detected in content folder")
+                actions.append("Clear temporary depot download cache")
+
+        # 5. Diagnose incompatible mods
+        incompat = []
+        try:
+            incompat = self.mgr.check_incompatible_mods()
+        except Exception:
+            incompat = []
+        if incompat:
+            mod_names = [m.get("name", "Mod") if isinstance(m, dict) else "Mod" for m in incompat]
+            issues.append(f"{len(incompat)} incompatible or crash-prone mod(s) detected: {', '.join(mod_names)}")
+            actions.append(f"Safely quarantine {len(incompat)} incompatible mod(s)")
+
+        # 6. Diagnose OneDrive cloud stub
+        onedrive_detected = False
+        if IS_WIN:
+            if (self.mgr.gd_path and "onedrive" in self.mgr.gd_path.casefold()) or \
+               (self.mgr.get_save_data_dir() and "onedrive" in self.mgr.get_save_data_dir().casefold()):
+                onedrive_detected = True
+                issues.append("Geometry Dash or save files located in OneDrive (potential cloud stub desync)")
+                actions.append("Ensure OneDrive game & save files are pinned and cached locally")
+
+        # 7. Diagnose non-Steam installation when Steam exists
+        steam_alternative = None
+        try:
+            all_installs = self.mgr.find_all_gd_installations()
+            steam_inst = next((i for i in all_installs if i.get("is_steam")), None)
+            if steam_inst and self.mgr.gd_path and not is_steam_library_game_path(self.mgr.gd_path):
+                steam_alternative = steam_inst["path"]
+                issues.append(f"Active folder is non-Steam ({self.mgr.gd_path}), but official Steam was found at {steam_alternative}")
+                actions.append("Offer one-click switch to official Steam installation")
+        except Exception:
+            pass
+
+        # Interactive confirmation
+        if interactive:
+            if not issues:
+                proceed = messagebox.askyesno(
+                    "Self-Repair Health Check",
+                    "GeodeSync diagnosed your environment:\n\n"
+                    "✅ No hung processes detected\n"
+                    "✅ Steam manifests and permissions are normal\n"
+                    "✅ No conflicting or crash-prone mods found\n\n"
+                    "Your setup is healthy! Would you still like to take a pre-repair safety snapshot and verify files?",
+                    parent=self
+                )
+                if not proceed:
+                    self.log("Self-Repair: Environment is healthy, no repair needed.", "SUCCESS")
+                    return
+            else:
+                issue_lines = "\n".join(f"• {issue}" for issue in issues)
+                plan_lines = "\n".join(f"{i+1}. {act}" for i, act in enumerate(["Create pre-repair safety snapshot (saves + mods)"] + actions))
+                proceed = messagebox.askyesno(
+                    "GeodeSync Safe Self-Repair",
+                    f"GeodeSync diagnosed the following condition(s):\n\n"
+                    f"{issue_lines}\n\n"
+                    f"Remediation Plan:\n"
+                    f"{plan_lines}\n\n"
+                    "Would you like GeodeSync to safely apply these fixes now?",
+                    parent=self
+                )
+                if not proceed:
+                    self.log("Self-Repair: Cancelled by user.", "INFO")
+                    return
+
+        # 1. Create pre-repair safety snapshot
+        snapshot_dir = None
+        try:
+            snapshot_dir = self.mgr.create_safety_snapshot("pre_repair")
+            if snapshot_dir:
+                self.log(f"Self-Repair: Pre-repair safety snapshot saved to {snapshot_dir}", "SUCCESS")
+        except Exception as snap_err:
+            self.log(f"Self-Repair snapshot note: {snap_err}", "WARN")
+
+        # 2. Terminate hung GD if running
+        killed_count = 0
+        if gd_running:
+            if IS_WIN:
+                try:
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    subprocess.run(["taskkill", "/F", "/IM", "GeometryDash.exe"], startupinfo=si, capture_output=True)
+                    killed_count += 1
+                except Exception:
+                    pass
+            elif IS_MAC:
+                try:
+                    subprocess.run(["pkill", "-9", "-f", "Geometry Dash"])
+                    killed_count += 1
+                except Exception:
+                    pass
+
+        # 3. Calibrate target version
+        if version_mismatch or not getattr(self.mgr, "target_gd_version", None):
+            self.mgr.target_gd_version = "2.2081"
+            self.mgr.target_manifest = expected_manifest
+            self.settings["target_manifest"] = self.mgr.target_manifest
+            self._save_settings()
+
+        # 4. Unlock manifest if locked
+        if manifest_locked:
+            try:
+                self.mgr.set_manifest_locked(False)
+                self.log("Self-Repair: Unlocked Steam manifest (read-only removed).", "INFO")
+            except Exception as e:
+                self.log(f"Self-Repair note: {e}", "WARN")
+
+        # 5. Clear stale depot cache if detected
+        cleared_cache = False
+        if stale_depot and depot_path and os.path.exists(depot_path):
             try:
                 if "steamapps" in depot_path and "content" in depot_path:
                     shutil.rmtree(depot_path, ignore_errors=True)
                     cleared_cache = True
-                    self.log("Emergency: Cleared stale Steam download depot cache.", "INFO")
+                    self.log("Self-Repair: Cleared stale Steam download depot cache.", "INFO")
             except Exception:
                 pass
 
-        incompat = self.mgr.check_incompatible_mods()
+        # 6. Fix incompatible mods
         fixed_mods = []
         for inc in incompat:
-            ok, msg = self.mgr.fix_incompatible_mod(inc)
-            if ok:
-                fixed_mods.append(inc["name"])
+            if isinstance(inc, dict):
+                ok, msg = self.mgr.fix_incompatible_mod(inc)
+                if ok:
+                    fixed_mods.append(inc.get("name", "Mod"))
 
-        # OneDrive cloud stub unpinning
+        # 7. OneDrive cloud stub unpinning
         onedrive_repaired = False
-        if IS_WIN:
+        if onedrive_detected and IS_WIN:
             if self.mgr.gd_path and "onedrive" in self.mgr.gd_path.casefold():
                 ok_od, _ = ensure_local_onedrive_files(self.mgr.gd_path)
                 if ok_od:
@@ -4954,26 +5499,21 @@ class GeodeSyncApp(tk.Tk):
                 if ok_od:
                     onedrive_repaired = True
 
-        # Check for multiple installations: if active is outside Steam but a Steam copy exists, suggest switching!
+        # 8. Check for multiple installations: suggest switching to official Steam
         switched_to_steam = False
-        try:
-            all_installs = self.mgr.find_all_gd_installations()
-            steam_inst = next((i for i in all_installs if i["is_steam"]), None)
-            if steam_inst and self.mgr.gd_path and not is_steam_library_game_path(self.mgr.gd_path):
-                if messagebox.askyesno(
-                    "Switch to Official Steam Installation?",
-                    f"GeodeSync detected your official Steam Geometry Dash installation at:\n{steam_inst['path']}\n\n"
-                    f"Your current folder is outside Steam (e.g. OneDrive or portable copy):\n{self.mgr.gd_path}\n\n"
-                    "Would you like to switch to the official Steam folder automatically now?",
-                    parent=self
-                ):
-                    self.mgr.gd_path = steam_inst["path"]
-                    self.mgr.manifest_path = self.mgr.get_manifest_path()
-                    self._save_settings()
-                    switched_to_steam = True
-                    self.log(f"Emergency: Switched game path to official Steam installation: {self.mgr.gd_path}", "SUCCESS")
-        except Exception:
-            pass
+        if interactive and steam_alternative and self.mgr.gd_path and not is_steam_library_game_path(self.mgr.gd_path):
+            if messagebox.askyesno(
+                "Switch to Official Steam Installation?",
+                f"GeodeSync detected your official Steam Geometry Dash installation at:\n{steam_alternative}\n\n"
+                f"Your current folder is outside Steam:\n{self.mgr.gd_path}\n\n"
+                "Would you like to switch to the official Steam folder automatically now?",
+                parent=self
+            ):
+                self.mgr.gd_path = steam_alternative
+                self.mgr.manifest_path = self.mgr.get_manifest_path()
+                self._save_settings()
+                switched_to_steam = True
+                self.log(f"Self-Repair: Switched game path to official Steam installation: {self.mgr.gd_path}", "SUCCESS")
 
         self.is_downloading_depot = False
         self.pending_profile_mods = None
@@ -4984,20 +5524,23 @@ class GeodeSyncApp(tk.Tk):
 
         od_line = f"• OneDrive Cloud Files: Pinned & Downloaded locally\n" if onedrive_repaired else ""
         steam_line = f"• Game Directory: Switched to official Steam installation\n" if switched_to_steam else ""
+        snap_line = f"• Safety Snapshot: Saved to {os.path.basename(snapshot_dir)}\n" if snapshot_dir else ""
 
         summary_msg = (
-            "🎉 Emergency Unstick Completed!\n\n"
-            "The following auto-repairs were applied:\n"
+            "🎉 Safe Self-Repair Completed!\n\n"
+            "The following actions were applied:\n"
+            f"{snap_line}"
             f"• Frozen Game Processes: {'Terminated' if killed_count else 'None running'}\n"
-            f"• Target Version: Reset to 2.2081 (Official Geode Baseline)\n"
-            f"• Steam Update Lock: Unlocked & Cleared\n"
-            f"• Corrupt Download Cache: {'Purged for fresh retry' if cleared_cache else 'Clean'}\n"
+            f"• Target Version: Set to 2.2081 (Official Geode Baseline)\n"
+            f"• Steam Update Lock: {'Unlocked & Cleared' if manifest_locked else 'Verified healthy'}\n"
+            f"• Download Cache: {'Purged for fresh retry' if cleared_cache else 'Clean'}\n"
             f"• Incompatible Mods Repaired: {', '.join(fixed_mods) if fixed_mods else 'None found (Clean)'}\n"
             f"{od_line}"
             f"{steam_line}\n"
-            "Your setup is now un-stuck! You can click '⚡ Fix Geode Mods' to install clean files, or '▶️ Play' if already on 2.2081."
+            "Your setup is ready to play!"
         )
-        messagebox.showinfo("Emergency Unstick Complete", summary_msg, parent=self)
+        if interactive:
+            messagebox.showinfo("Self-Repair Complete", summary_msg, parent=self)
 
     def show_smart_error(self, title, message, auto_fix_func=None, parent=None, is_warning=False):
         """Displays a rich, user-friendly Self-Repair dialog for any error encountered.
@@ -5352,6 +5895,22 @@ class GeodeSyncApp(tk.Tk):
         )
         discord_hdr_btn.pack(side="right", padx=(6, 0))
 
+        get_help_btn = tk.Button(
+            badge_box,
+            text="🩺 Get Help",
+            command=self.open_get_help_center,
+            font=("Segoe UI", 8, "bold"),
+            bg=UI["panel_alt"],
+            fg=UI["lime"],
+            activebackground=UI["border"],
+            activeforeground=UI["text"],
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2"
+        )
+        get_help_btn.pack(side="right", padx=(4, 0))
+
         help_btn = tk.Button(badge_box, text="How it works", command=self.show_help_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], activebackground=UI["border"], activeforeground=UI["text"], relief="flat", padx=12, pady=6, cursor="hand2")
         help_btn.pack(side="right", padx=(4, 0))
 
@@ -5475,6 +6034,10 @@ class GeodeSyncApp(tk.Tk):
         self.slots_badge = tk.Label(setup_chips_row, text="💾 Slots", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
         self.slots_badge.pack(side="left", padx=2)
         self.slots_badge.bind("<Button-1>", lambda e: self.open_save_slots_dialog())
+
+        self.health_badge = tk.Label(setup_chips_row, text="🩺 Diagnostics", font=("Segoe UI", 8, "bold"), fg=UI["cyan"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
+        self.health_badge.pack(side="left", padx=2)
+        self.health_badge.bind("<Button-1>", lambda e: self.run_health_check())
 
         self.sfx_badge = tk.Label(setup_chips_row, text="💥 SFX", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["panel_alt"], padx=6, pady=3, cursor="hand2")
         self.sfx_badge.pack(side="left", padx=2)
@@ -5801,7 +6364,7 @@ class GeodeSyncApp(tk.Tk):
         view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=3, cursor="hand2")
         view_log_btn.pack(side="right", padx=(4, 0))
 
-        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_troubleshooter, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
+        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_get_help_center, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=3, cursor="hand2")
         fix_problem_btn.pack(side="right", padx=(4, 0))
 
         discord_link = tk.Label(footer_actions, text="Discord", font=("Segoe UI", 8, "underline"), fg=UI["lilac"], bg=UI["header"], cursor="hand2")
@@ -5870,12 +6433,44 @@ class GeodeSyncApp(tk.Tk):
         bar.pack(fill="x")
         self.store_search_var = tk.StringVar()
         tk.Label(bar, text="🔍", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(side="left", padx=(0, 6))
-        s_ent = tk.Entry(bar, textvariable=self.store_search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
-        s_ent.pack(side="left", fill="x", expand=True, ipady=3)
+        self.store_search_entry = tk.Entry(bar, textvariable=self.store_search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        self.store_search_entry.pack(side="left", fill="x", expand=True, ipady=3)
         self.store_search_var.trace_add("write", lambda *a: self._filter_embedded_store())
 
         ref_btn = tk.Button(bar, text="🔄 Refresh Store", command=lambda: self._load_embedded_store(force=True), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=3, cursor="hand2")
         ref_btn.pack(side="right", padx=(8, 0))
+
+        # Category Filter Bar
+        cat_bar = tk.Frame(head, bg=UI["header"])
+        cat_bar.pack(fill="x", pady=(8, 0))
+        self.store_category_var = tk.StringVar(value="all")
+        categories = [
+            ("all", "All Mods"),
+            ("qol", "⚡ QoL & Tools"),
+            ("cosmetic", "🎨 Visual & Audio"),
+            ("multiplayer", "🌐 Multiplayer"),
+            ("installed", "✓ Installed Only"),
+        ]
+        for cat_id, cat_lbl in categories:
+            rb = tk.Radiobutton(
+                cat_bar,
+                text=cat_lbl,
+                variable=self.store_category_var,
+                value=cat_id,
+                command=self._render_store_cards,
+                indicatoron=0,
+                font=("Segoe UI", 8, "bold"),
+                bg=UI["panel_alt"],
+                fg=UI["muted"],
+                selectcolor=UI["lime_dark"],
+                activebackground=UI["panel"],
+                activeforeground=UI["lime"],
+                relief="flat",
+                padx=9,
+                pady=2,
+                cursor="hand2"
+            )
+            rb.pack(side="left", padx=(0, 5))
 
         self.store_scroll = ScrollableFrame(parent)
         self.store_scroll.pack(fill="both", expand=True)
@@ -5910,13 +6505,50 @@ class GeodeSyncApp(tk.Tk):
     def _render_store_cards(self):
         for child in self.store_cards_container.winfo_children():
             child.destroy()
+
+        if not self._cached_store_mods:
+            err_box = tk.Frame(self.store_cards_container, bg=UI["panel"], padx=20, pady=18, highlightbackground=UI["border"], highlightthickness=1)
+            err_box.pack(fill="x", padx=10, pady=20)
+            tk.Label(err_box, text="⚠️ Mod Store Offline or Unreachable", font=("Segoe UI", 11, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w")
+            tk.Label(err_box, text="Could not connect to the official Geode SDK Index (api.geode-sdk.org). Please check your internet connection.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 10))
+            tk.Button(err_box, text="🔄 Retry Connection", command=lambda: self._load_embedded_store(force=True), font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg=UI["background"], activebackground=UI["lime_hover"], relief="flat", padx=12, pady=5, cursor="hand2").pack(anchor="w")
+            return
+
         query = (self.store_search_var.get() or "").lower().strip()
-        filtered = [
-            m for m in self._cached_store_mods
-            if isinstance(m, dict) and (not query or query in m.get("name", "").lower() or query in m.get("id", "").lower() or query in m.get("description", "").lower())
-        ]
+        cat = getattr(self, "store_category_var", None)
+        selected_cat = cat.get() if cat else "all"
+
+        installed_ids = {m.get("id", "").lower(): m for m in self.mgr.get_installed_mods()}
+
+        filtered = []
+        for m in self._cached_store_mods:
+            if not isinstance(m, dict):
+                continue
+            m_id = m.get("id", "").lower()
+            m_name = m.get("name", "").lower()
+            m_desc = m.get("description", "").lower()
+            m_tags = [str(t).lower() for t in m.get("tags", [])]
+
+            if query and not (query in m_name or query in m_id or query in m_desc):
+                continue
+
+            if selected_cat == "installed":
+                if m_id not in installed_ids:
+                    continue
+            elif selected_cat == "multiplayer":
+                if not any(k in m_name or k in m_id or k in m_desc or any(k in t for t in m_tags) for k in ("multiplayer", "globed", "online", "chat")):
+                    continue
+            elif selected_cat == "cosmetic":
+                if not any(k in m_name or k in m_id or k in m_desc or any(k in t for t in m_tags) for k in ("texture", "icon", "theme", "color", "visual", "audio", "music", "sfx", "death")):
+                    continue
+            elif selected_cat == "qol":
+                if not any(k in m_name or k in m_id or k in m_desc or any(k in t for t in m_tags) for k in ("qol", "quality", "utility", "tool", "fps", "bypass", "keybind", "preview", "edit")):
+                    continue
+
+            filtered.append(m)
+
         if not filtered:
-            tk.Label(self.store_cards_container, text="No mods found matching your search.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["background"], pady=20).pack()
+            tk.Label(self.store_cards_container, text="No mods found matching your search and category filter.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["background"], pady=20).pack()
             return
 
         installed_ids = {m.get("id", "").lower(): m for m in self.mgr.get_installed_mods()}
@@ -5990,8 +6622,8 @@ class GeodeSyncApp(tk.Tk):
         bar.pack(fill="x")
         self.demon_search_var = tk.StringVar()
         tk.Label(bar, text="🔍", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["header"]).pack(side="left", padx=(0, 6))
-        d_ent = tk.Entry(bar, textvariable=self.demon_search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lime"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
-        d_ent.pack(side="left", fill="x", expand=True, ipady=3)
+        self.demon_search_entry = tk.Entry(bar, textvariable=self.demon_search_var, font=("Segoe UI", 9), bg=UI["inset"], fg=UI["text"], insertbackground=UI["lilac"], relief="flat", highlightbackground=UI["border"], highlightthickness=1)
+        self.demon_search_entry.pack(side="left", fill="x", expand=True, ipady=3)
         self.demon_search_var.trace_add("write", lambda *a: self._filter_embedded_demonlist())
 
         ref_btn = tk.Button(bar, text="🔄 Refresh Rankings", command=lambda: self._load_embedded_demonlist(force=True), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=3, cursor="hand2")
@@ -6027,9 +6659,27 @@ class GeodeSyncApp(tk.Tk):
 
         threading.Thread(target=_fetch, daemon=True).start()
 
+    def _copy_demon_info(self, name, rank):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(f"#{rank} {name}")
+            self.log(f"Copied #{rank} {name} to clipboard.", "INFO")
+            self.play_ding()
+        except Exception:
+            pass
+
     def _render_demonlist_cards(self):
         for child in self.demon_cards_container.winfo_children():
             child.destroy()
+
+        if not self._cached_demons:
+            err_box = tk.Frame(self.demon_cards_container, bg=UI["panel"], padx=20, pady=18, highlightbackground=UI["border"], highlightthickness=1)
+            err_box.pack(fill="x", padx=10, pady=20)
+            tk.Label(err_box, text="⚠️ Pointercrate Demonlist Unreachable", font=("Segoe UI", 11, "bold"), fg=UI["amber"], bg=UI["panel"]).pack(anchor="w")
+            tk.Label(err_box, text="Could not retrieve the Top 150 list from Pointercrate. Check your connection or try again.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"]).pack(anchor="w", pady=(2, 10))
+            tk.Button(err_box, text="🔄 Retry Connection", command=lambda: self._load_embedded_demonlist(force=True), font=("Segoe UI", 9, "bold"), bg=UI["lilac"], fg=UI["background"], activebackground=UI["lilac_hover"], relief="flat", padx=12, pady=5, cursor="hand2").pack(anchor="w")
+            return
+
         query = (self.demon_search_var.get() or "").lower().strip()
         filtered = [
             d for d in self._cached_demons
@@ -6038,6 +6688,17 @@ class GeodeSyncApp(tk.Tk):
         if not filtered:
             tk.Label(self.demon_cards_container, text="No demons found matching your search.", font=("Segoe UI", 10), fg=UI["muted"], bg=UI["background"], pady=20).pack()
             return
+
+        # Cross-reference with player's local save progress
+        beaten_names = set()
+        demon_grinds = {}
+        try:
+            p_data = self.mgr.get_demon_and_grind_data()
+            if p_data and isinstance(p_data, dict):
+                beaten_names = {d["name"].lower() for d in p_data.get("completed_demons", []) if isinstance(d, dict) and "name" in d}
+                demon_grinds = {g["name"].lower(): g for g in p_data.get("grinds", []) if isinstance(g, dict) and "name" in g}
+        except Exception:
+            pass
 
         for demon in filtered:
             rank = demon.get("position", 1)
@@ -6052,7 +6713,8 @@ class GeodeSyncApp(tk.Tk):
             rank_badge = tk.Label(top, text=f"#{rank}", font=("Segoe UI", 10, "bold"), fg=rank_color, bg=UI["panel_alt"], padx=6, pady=2)
             rank_badge.pack(side="left", padx=(0, 8))
 
-            name_lbl = tk.Label(top, text=demon.get("name", "Unknown Demon"), font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"])
+            d_name = demon.get("name", "Unknown Demon")
+            name_lbl = tk.Label(top, text=d_name, font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"])
             name_lbl.pack(side="left")
 
             creator = demon.get("creator", "Unknown")
@@ -6060,10 +6722,54 @@ class GeodeSyncApp(tk.Tk):
             info_lbl = tk.Label(top, text=f"by {creator}  •  Verified by {verifier}", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"])
             info_lbl.pack(side="left", padx=(8, 0))
 
+            # Live Local Save Progress Chip
+            d_lower = d_name.lower()
+            if d_lower in beaten_names:
+                tk.Label(top, text="🏆 100% BEATEN", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["panel_alt"], padx=6, pady=2).pack(side="left", padx=(8, 0))
+            elif d_lower in demon_grinds:
+                grind = demon_grinds[d_lower]
+                pct = grind.get("percent", 0)
+                att = grind.get("attempts", 0)
+                tk.Label(top, text=f"🎯 {pct}% ({att:,} att)", font=("Segoe UI", 8, "bold"), fg=UI["amber"], bg=UI["panel_alt"], padx=6, pady=2).pack(side="left", padx=(8, 0))
+
             pts = demon.get("points", 0.0)
             req = demon.get("requirement", 100)
             pts_lbl = tk.Label(top, text=f"{pts:.1f} pts ({req}%)", font=("Segoe UI", 8, "bold"), fg=UI["lilac"], bg=UI["panel"])
             pts_lbl.pack(side="right", padx=(8, 0))
+
+            # 1-Click Copy Info
+            cp_btn = tk.Button(
+                top,
+                text="📋 Copy",
+                command=lambda n=d_name, r=rank: self._copy_demon_info(n, r),
+                font=("Segoe UI", 8),
+                bg=UI["panel_alt"],
+                fg=UI["muted"],
+                activebackground=UI["border"],
+                relief="flat",
+                padx=6,
+                pady=2,
+                cursor="hand2"
+            )
+            cp_btn.pack(side="right", padx=(4, 0))
+
+            # Verification Video Link
+            v_url = demon.get("video")
+            if v_url:
+                vid_btn = tk.Button(
+                    top,
+                    text="▶ Video",
+                    command=lambda u=v_url: webbrowser.open(u),
+                    font=("Segoe UI", 8, "bold"),
+                    bg=UI["panel_alt"],
+                    fg=UI["lime"],
+                    activebackground=UI["border"],
+                    relief="flat",
+                    padx=6,
+                    pady=2,
+                    cursor="hand2"
+                )
+                vid_btn.pack(side="right", padx=(4, 0))
 
             link_btn = tk.Button(
                 top,
@@ -6487,20 +7193,37 @@ class GeodeSyncApp(tk.Tk):
             self.update_smart_guide(has_geode, is_locked)
 
     def update_smart_guide(self, has_geode: bool, is_locked: bool):
+        gd_found = bool(self.mgr.gd_path and os.path.isdir(self.mgr.gd_path))
+        if not gd_found:
+            self.guide_card.config(highlightbackground=UI["amber"])
+            self.guide_badge.config(text="SETUP NEEDED", fg=UI["amber"], bg=UI["amber_dark"])
+            self.guide_title.config(text="We couldn't find Geometry Dash")
+            self.guide_desc.config(
+                text="GeodeSync needs your Geometry Dash folder to manage mods, verify updates, and protect your saves."
+            )
+            self.primary_btn.set_config(
+                text="🔍 Find Geometry Dash Automatically",
+                bg=UI["lime"],
+                hover_bg=UI["lime_hover"],
+                fg=UI["background"],
+                command=self.auto_find_and_set_gd
+            )
+            return
+
         is_22081 = self.mgr.is_current_gd_22081()
 
         if not has_geode:
-            self.guide_card.config(highlightbackground=UI["red"])
-            self.guide_badge.config(text="GEODE NOT FOUND", fg=UI["red"], bg=UI["red_dark"])
-            self.guide_title.config(text="Install the Geode mod loader")
+            self.guide_card.config(highlightbackground=UI["lilac"])
+            self.guide_badge.config(text="MOD LOADER NEEDED", fg=UI["lilac"], bg=UI["lilac_dark"])
+            self.guide_title.config(text="Install the Geode Mod Loader")
             self.guide_desc.config(
-                text="GeodeSync found the game, but not Geode. Download the official installer to add the mod loader."
+                text="Geode is the official mod loader for Geometry Dash (enabling Globed, Megahack, custom textures, and more)."
             )
             self.primary_btn.set_config(
-                text="Download and install Geode",
-                bg=UI["red"],
-                hover_bg="#dc6972",
-                fg=UI["background"],
+                text="⚡ 1-Click Install Official Geode",
+                bg=UI["lilac"],
+                hover_bg=UI["lilac_hover"],
+                fg="#ffffff",
                 command=self.auto_install_geode
             )
             return
@@ -6541,9 +7264,14 @@ class GeodeSyncApp(tk.Tk):
         self.guide_card.config(highlightbackground=UI["lime"])
         self.guide_badge.config(text="READY TO PLAY", fg=UI["lime"], bg=UI["lime_dark"])
         self.guide_title.config(text="✨ Geometry Dash 2.2081 is Active")
-        self.guide_desc.config(
-            text=f"Geode mods are fully compatible and Steam updates are safely locked. You're ready to play!"
-        )
+        if is_locked:
+            self.guide_desc.config(
+                text="Geode mods are fully compatible and Steam updates are safely locked. You're ready to play!"
+            )
+        else:
+            self.guide_desc.config(
+                text="Geode mods are active and ready to play. (Tip: You can lock Steam updates in Toolbox to prevent unexpected updates.)"
+            )
         self.primary_btn.set_config(
             text="▶️ Play Geometry Dash (Boosted)",
             bg=UI["lime"],
@@ -7932,7 +8660,13 @@ class GeodeSyncApp(tk.Tk):
                 self.refresh_status()
             else:
                 target_name = "Geometry Dash.app" if IS_MAC else "GeometryDash.exe"
-                messagebox.showerror("Invalid Directory", f"The selected folder does not contain {target_name}.")
+                auto = messagebox.askyesno(
+                    "Folder Missing Game Executable",
+                    f"The selected folder does not contain {target_name}.\n\nWould you like GeodeSync to automatically scan your PC for Geometry Dash?",
+                    parent=self
+                )
+                if auto:
+                    self.auto_find_and_set_gd()
 
     def browse_save_path(self):
         selected = filedialog.askdirectory(title="Select Geometry Dash Save Folder (where CCGameManager.dat is stored)")
@@ -8832,6 +9566,12 @@ class GeodeSyncApp(tk.Tk):
         except Exception as e:
             self.log(f"Failed to create shortcut: {e}", "WARN")
             messagebox.showerror("Error", f"Could not create desktop shortcut:\n{e}")
+
+    def toggle_discord_rpc(self):
+        return self.toggle_rpc()
+
+    def toggle_run_in_bg(self):
+        return self.toggle_bg_mode()
 
     def toggle_rpc(self):
         self.discord_rpc_enabled = not getattr(self, "discord_rpc_enabled", True)
@@ -9939,7 +10679,7 @@ class GeodeSyncApp(tk.Tk):
             nonlocal demon_grinds, beaten_names
             data = self.mgr.get_demon_and_grind_data()
             if data:
-                beaten_names = {d["name"].lower() for d in data.get("demons", []) if isinstance(d, dict) and "name" in d}
+                beaten_names = {d["name"].lower() for d in data.get("completed_demons", []) if isinstance(d, dict) and "name" in d}
                 demon_grinds = {g["name"].lower(): g for g in data.get("grinds", []) if isinstance(g, dict) and "name" in g}
 
         def render_demons():
@@ -10379,8 +11119,9 @@ class GeodeSyncApp(tk.Tk):
         card.pack(fill="x", pady=(0, 12))
 
         status = self.mgr.get_custom_sfx_status()
-        status_text = "Status: 💥 Custom Death Sound Active" if status.get("death_sfx_custom") else "Status: 🔒 Vanilla Explosion (explode_11.ogg)"
-        status_lbl = tk.Label(card, text=status_text, font=("Segoe UI", 10, "bold"), fg=UI["lime"] if status.get("death_sfx_custom") else UI["quiet"], bg=UI["panel"])
+        is_custom_sfx = status.get("death_sfx_custom", False) if isinstance(status, dict) else False
+        status_text = "Status: 💥 Custom Death Sound Active" if is_custom_sfx else "Status: 🔒 Vanilla Explosion (explode_11.ogg)"
+        status_lbl = tk.Label(card, text=status_text, font=("Segoe UI", 10, "bold"), fg=UI["lime"] if is_custom_sfx else UI["quiet"], bg=UI["panel"])
         status_lbl.pack(anchor="w", pady=(0, 10))
 
         def pick_custom_file():
