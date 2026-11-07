@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.7.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -9239,8 +9239,14 @@ class GeodeSyncApp(tk.Tk):
                     self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION}).", parent=self))
                     self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
             except Exception as e:
-                self.after(0, lambda error=str(e): messagebox.showwarning("Update Notice", f"Could not check for updates:\n{error}\n\nPlease check your network or visit GitHub releases.", parent=self))
-                self.after(0, lambda error=str(e): self.log(f"Update check notice: {error}", "WARN"))
+                self.after(0, lambda: messagebox.showinfo(
+                    "Update Check",
+                    f"Unable to reach the update server right now.\n\n"
+                    f"You are running GeodeSync v{APP_VERSION}.\n\n"
+                    "Your current installation is functioning normally. Please check your internet connection or check back later.",
+                    parent=self,
+                ))
+                self.after(0, lambda error=str(e): self.log(f"Update check notice: {error}", "INFO"))
         threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
