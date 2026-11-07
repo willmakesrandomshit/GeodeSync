@@ -76,6 +76,83 @@ GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
 
+SW_HIDE = 0
+STARTF_USESHOWWINDOW = 1
+CREATE_NO_WINDOW = 0x08000000
+
+
+def get_silent_startupinfo():
+    """Return STARTUPINFO configured to hide console windows on Windows."""
+    if IS_WIN:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", STARTF_USESHOWWINDOW)
+        si.wShowWindow = getattr(subprocess, "SW_HIDE", SW_HIDE)
+        return si
+    return None
+
+
+def get_silent_creationflags(extra_flags=0):
+    """Ensure CREATE_NO_WINDOW is set on Windows subprocesses to eliminate cmd/conhost popups."""
+    flags = int(extra_flags or 0)
+    if IS_WIN:
+        flags |= getattr(subprocess, "CREATE_NO_WINDOW", CREATE_NO_WINDOW)
+    return flags
+
+
+def safe_run_command(cmd, timeout=None, check=False, cwd=None, env=None, input=None, text=True):
+    """Run a command with guaranteed windowless execution on Windows."""
+    si = get_silent_startupinfo()
+    flags = get_silent_creationflags()
+    return subprocess.run(
+        cmd,
+        startupinfo=si,
+        creationflags=flags,
+        timeout=timeout,
+        check=check,
+        cwd=cwd,
+        env=env,
+        input=input,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+    )
+
+
+def safe_check_output(cmd, timeout=None, cwd=None, env=None, text=True):
+    """Check command output with guaranteed windowless execution on Windows."""
+    si = get_silent_startupinfo()
+    flags = get_silent_creationflags()
+    res = subprocess.run(
+        cmd,
+        startupinfo=si,
+        creationflags=flags,
+        timeout=timeout,
+        check=True,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+    )
+    return res.stdout
+
+
+def safe_popen_command(cmd, cwd=None, env=None, stdout=None, stderr=None, stdin=None, extra_flags=0, close_fds=True):
+    """Launch a process asynchronously with guaranteed windowless execution on Windows."""
+    si = get_silent_startupinfo()
+    flags = get_silent_creationflags(extra_flags)
+    return subprocess.Popen(
+        cmd,
+        startupinfo=si,
+        creationflags=flags,
+        cwd=cwd,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        stdin=stdin,
+        close_fds=close_fds if not IS_WIN else False,
+    )
+
 
 def decode_geometry_dash_save(raw: bytes) -> bytes:
     """Decode Geometry Dash's save wrapper (XOR 0x0B, URL-safe Base64, zlib)."""
@@ -411,17 +488,10 @@ def _synthesize_release_for_tag(tag, published_at=None, html_url=None):
     }
 
 
-def fetch_latest_published_release(timeout=8, platform_name=None):
+def fetch_latest_published_release(timeout=10, platform_name=None):
     """Return the newest stable *published release*, never a source version manifest."""
     headers = {"User-Agent": "GeodeSync-Client"}
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if not token and shutil.which("gh"):
-        try:
-            res = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=2)
-            if res.returncode == 0 and res.stdout.strip():
-                token = res.stdout.strip()
-        except Exception:
-            pass
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -435,6 +505,18 @@ def fetch_latest_published_release(timeout=8, platform_name=None):
                 releases = data
     except Exception:
         pass
+
+    # 1b. Try official GitHub latest release endpoint
+    if not releases:
+        try:
+            latest_api = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            request = urllib.request.Request(latest_api, headers=headers)
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                if isinstance(data, dict) and data.get("tag_name"):
+                    releases = [data]
+        except Exception:
+            pass
 
     # 2. Resilient fallback: parse releases.atom feed (public, no rate limit)
     if not releases:
@@ -1045,7 +1127,7 @@ def _apply_staged_update(payload, target, backup, pid):
         else:
             if IS_WIN:
                 mark_windows_download(executable, "https://github.com/" + GITHUB_REPO + "/releases")
-            subprocess.Popen([executable], close_fds=True)
+            safe_popen_command([executable], close_fds=True)
     except Exception:
         if os.path.exists(target):
             shutil.rmtree(target, ignore_errors=True)
@@ -1065,27 +1147,39 @@ def _apply_staged_update(payload, target, backup, pid):
 
 
 def _schedule_windows_update_cleanup(work_dir, parent):
-    """Remove the temporary Windows helper after the OS releases its files."""
+    """Remove the temporary Windows helper after the OS releases its files without opening any console window."""
     name = os.path.basename(work_dir)
     if not re.fullmatch(r"\.GeodeSync-update-[A-Za-z0-9_-]+", name):
         raise ValueError("The temporary update folder name is invalid.")
-    script = os.path.join(parent, f".GeodeSync-cleanup-{name.rsplit('-', 1)[-1]}.cmd")
-    relative_target = name
-    command = (
-        "@echo off\r\n"
-        ":retry\r\n"
-        f'rmdir /s /q "%~dp0{relative_target}" >nul 2>&1\r\n'
-        f'if exist "%~dp0{relative_target}" (timeout /t 1 /nobreak >nul & goto retry)\r\n'
-        'del "%~f0" >nul 2>&1\r\n'
+    script = os.path.join(parent, f".GeodeSync-cleanup-{name.rsplit('-', 1)[-1]}.vbs")
+    target_path = os.path.join(parent, name).replace("\\", "\\\\")
+    vbs_content = (
+        'Set fso = CreateObject("Scripting.FileSystemObject")\r\n'
+        f'target = "{target_path}"\r\n'
+        'scriptFile = WScript.ScriptFullName\r\n'
+        'For i = 1 To 20\r\n'
+        '    WScript.Sleep 1000\r\n'
+        '    If fso.FolderExists(target) Then\r\n'
+        '        On Error Resume Next\r\n'
+        '        fso.DeleteFolder target, True\r\n'
+        '        On Error GoTo 0\r\n'
+        '    Else\r\n'
+        '        Exit For\r\n'
+        '    End If\r\n'
+        'Next\r\n'
+        'On Error Resume Next\r\n'
+        'fso.DeleteFile scriptFile, True\r\n'
     )
     with open(script, "w", encoding="utf-8", newline="") as stream:
-        stream.write(command)
-    subprocess.Popen(
-        ["cmd.exe", "/d", "/c", f'start "" /b "{script}"'],
-        cwd=parent,
-        close_fds=True,
-        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
-    )
+        stream.write(vbs_content)
+    try:
+        safe_popen_command(
+            ["wscript.exe", "//nologo", script],
+            cwd=parent,
+            extra_flags=getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
+        )
+    except Exception:
+        pass
 
 
 def _run_update_helper(encoded):
@@ -1320,17 +1414,10 @@ def ensure_local_onedrive_files(folder_path):
     if not IS_WIN or not folder_path or not os.path.isdir(folder_path):
         return True, "Path not applicable"
     try:
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         target_pattern = os.path.join(folder_path, "*")
-        cmd = f'attrib.exe -U -P /s /d "{target_pattern}"'
-        subprocess.run(
-            cmd,
-            shell=True,
-            startupinfo=si,
-            creationflags=0x08000000,
+        safe_run_command(
+            ["attrib.exe", "-U", "-P", "/s", "/d", target_pattern],
             timeout=10,
-            capture_output=True
         )
         return True, "OneDrive files pinned locally"
     except Exception as e:
@@ -2317,13 +2404,7 @@ class GDManager:
 
         if IS_WIN:
             try:
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                output = subprocess.check_output(
-                    ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
-                    startupinfo=si,
-                    creationflags=0x08000000
-                ).decode(errors="ignore")
+                output = safe_check_output(["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"])
                 return "steam.exe" in output.lower()
             except Exception:
                 return True
@@ -2764,13 +2845,7 @@ class GDManager:
 
         if IS_WIN:
             try:
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                output = subprocess.check_output(
-                    ["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"],
-                    startupinfo=si,
-                    creationflags=0x08000000
-                ).decode(errors="ignore")
+                output = safe_check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"])
                 return "geometrydash.exe" in output.lower()
             except Exception:
                 return False
@@ -2791,15 +2866,7 @@ class GDManager:
 
         if IS_WIN:
             try:
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "GeometryDash.exe"],
-                    startupinfo=si,
-                    creationflags=0x08000000,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                safe_run_command(["taskkill", "/F", "/IM", "GeometryDash.exe"])
                 time.sleep(1)
                 return True
             except Exception:
@@ -5426,10 +5493,8 @@ class GeodeSyncApp(tk.Tk):
         gd_running = False
         if IS_WIN:
             try:
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                out = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe"], startupinfo=si).decode(errors="ignore")
-                if "GeometryDash.exe" in out:
+                out = safe_check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe"])
+                if "geometrydash.exe" in out.lower():
                     gd_running = True
             except Exception:
                 pass
@@ -5548,9 +5613,7 @@ class GeodeSyncApp(tk.Tk):
         if gd_running:
             if IS_WIN:
                 try:
-                    si = subprocess.STARTUPINFO()
-                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    subprocess.run(["taskkill", "/F", "/IM", "GeometryDash.exe"], startupinfo=si, capture_output=True)
+                    safe_run_command(["taskkill", "/F", "/IM", "GeometryDash.exe"])
                     killed_count += 1
                 except Exception:
                     pass
@@ -9152,7 +9215,7 @@ class GeodeSyncApp(tk.Tk):
         def _check():
             try:
                 platform_target = "windows" if IS_WIN else "macos" if IS_MAC else "linux"
-                rel = fetch_latest_published_release(timeout=6, platform_name=platform_target)
+                rel = fetch_latest_published_release(timeout=10, platform_name=platform_target)
                 tag = str(rel.get("tag_name", "")).lstrip("v")
                 if is_newer_app_version(tag, APP_VERSION):
                     self.latest_release_url = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
@@ -9176,8 +9239,8 @@ class GeodeSyncApp(tk.Tk):
                     self.after(0, lambda: messagebox.showinfo("Up to Date", f"You are running the latest version of GeodeSync (v{APP_VERSION}).", parent=self))
                     self.after(0, lambda: self.log(f"GeodeSync v{APP_VERSION} is up to date.", "SUCCESS"))
             except Exception as e:
-                self.after(0, lambda error=str(e): messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{error}", parent=self))
-                self.after(0, lambda error=str(e): self.log(f"Update check failed: {error}", "ERROR"))
+                self.after(0, lambda error=str(e): messagebox.showwarning("Update Notice", f"Could not check for updates:\n{error}\n\nPlease check your network or visit GitHub releases.", parent=self))
+                self.after(0, lambda error=str(e): self.log(f"Update check notice: {error}", "WARN"))
         threading.Thread(target=_check, daemon=True).start()
 
     def open_update_link(self):
@@ -9842,7 +9905,7 @@ class GeodeSyncApp(tk.Tk):
                 vbs_path = os.path.join(tempfile.gettempdir(), "make_geodesync_shortcut.vbs")
                 with open(vbs_path, "w", encoding="utf-8") as f:
                     f.write(vbs_code)
-                subprocess.run(["cscript", "//nologo", vbs_path], check=True, creationflags=0x08000000)
+                safe_run_command(["wscript.exe", "//nologo", vbs_path], check=True)
                 try:
                     os.remove(vbs_path)
                 except Exception:
