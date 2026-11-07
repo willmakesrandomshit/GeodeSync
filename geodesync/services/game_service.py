@@ -20,12 +20,19 @@ class GameService:
 
     @classmethod
     def is_game_running(cls) -> bool:
-        """Check if GeometryDash.exe is actively running without popping windows."""
-        if sys.platform != "win32":
-            return False
+        """Check if Geometry Dash is actively running without popping windows."""
         try:
-            res = safe_run_command(["tasklist", "/fi", "imagename eq GeometryDash.exe", "/nh"])
-            return "GeometryDash.exe" in (res.stdout or "")
+            if sys.platform == "win32":
+                res = safe_run_command(["tasklist", "/fi", "imagename eq GeometryDash.exe", "/nh"])
+                return "GeometryDash.exe" in (res.stdout or "")
+            elif sys.platform == "darwin":
+                import subprocess
+                res = subprocess.run(["pgrep", "-f", "Geometry Dash"], stdout=subprocess.PIPE, text=True)
+                return bool(res.stdout and res.stdout.strip())
+            else:
+                import subprocess
+                res = subprocess.run(["pgrep", "-f", "GeometryDash"], stdout=subprocess.PIPE, text=True)
+                return bool(res.stdout and res.stdout.strip())
         except Exception:
             return False
 

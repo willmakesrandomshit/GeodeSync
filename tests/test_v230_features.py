@@ -67,7 +67,7 @@ class TestV230Features(unittest.TestCase):
     def test_gd_22081_binary_size_recognition(self):
         """Ensures both 10698752 and 10700288 byte executables are recognized as 2.2081."""
         exe_path = os.path.join(self.gd_path, "GeometryDash.exe")
-        with patch("main.IS_WIN", True):
+        with patch("main.IS_MAC", False), patch("main.IS_WIN", True):
             for valid_size in (10698752, 10700288):
                 with open(exe_path, "wb") as f:
                     f.truncate(valid_size)
@@ -97,7 +97,7 @@ class TestV230Features(unittest.TestCase):
         with open(os.path.join(depot_dir, "large_padding.dat"), "wb") as f:
             f.truncate(160 * 1024 * 1024)
 
-        with patch("main.IS_WIN", True), patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
+        with patch("main.IS_MAC", False), patch("main.IS_WIN", True), patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
             for valid_size in SIZES_22081:
                 with open(depot_exe, "wb") as f:
                     f.truncate(valid_size)

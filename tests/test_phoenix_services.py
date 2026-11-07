@@ -23,6 +23,7 @@ class TestPhoenixServices(unittest.TestCase):
         decoded = decode_gd_save(encoded)
         self.assertEqual(decoded, sample_xml)
 
+    @patch("sys.platform", "win32")
     @patch("geodesync.services.game_service.safe_run_command")
     def test_game_running_detection(self, mock_run):
         mock_proc = MagicMock()
