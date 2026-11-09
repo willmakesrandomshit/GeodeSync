@@ -11,11 +11,11 @@ from geodesync.services.mod_service import ModService
 class TestPhoenixServices(unittest.TestCase):
 
     def test_version_parsing(self):
-        self.assertEqual(parse_version_tuple("v2.7.0"), (2, 7, 0))
+        self.assertEqual(parse_version_tuple("v2.7.1"), (2, 7, 1))
         self.assertEqual(parse_version_tuple("2.6.0"), (2, 6, 0))
-        self.assertTrue(is_newer_version("2.7.1", "2.7.0"))
-        self.assertFalse(is_newer_version("2.7.0", "2.7.0"))
-        self.assertFalse(is_newer_version("2.6.0", "2.7.0"))
+        self.assertTrue(is_newer_version("2.7.2", "2.7.1"))
+        self.assertFalse(is_newer_version("2.7.1", "2.7.1"))
+        self.assertFalse(is_newer_version("2.7.0", "2.7.1"))
 
     def test_save_encode_decode_roundtrip(self):
         sample_xml = b"<plist version=\"1.0\"><dict><key>test</key><true/></dict></plist>"

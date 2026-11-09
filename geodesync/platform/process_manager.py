@@ -13,10 +13,17 @@ STARTF_USESHOWWINDOW = 1
 CREATE_NO_WINDOW = 0x08000000
 
 
+class _StartupInfoFallback:
+    def __init__(self):
+        self.dwFlags = 0
+        self.wShowWindow = 0
+
+
 def get_silent_startupinfo():
     """Return STARTUPINFO configured to hide console windows on Windows."""
     if IS_WIN:
-        si = subprocess.STARTUPINFO()
+        startupinfo_cls = getattr(subprocess, "STARTUPINFO", _StartupInfoFallback)
+        si = startupinfo_cls()
         si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", STARTF_USESHOWWINDOW)
         si.wShowWindow = getattr(subprocess, "SW_HIDE", SW_HIDE)
         return si

@@ -16,17 +16,23 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "discord_webhook.json")
 
 
 def get_webhook_url():
-    # 1. Environment variable
-    url = os.environ.get("GEODESYNC_DISCORD_WEBHOOK") or os.environ.get("DISCORD_WEBHOOK_URL")
+    # 1. Environment variable (e.g. from GitHub Actions secret DISCORD_RELEASE_WEBHOOK)
+    url = (
+        os.environ.get("GEODESYNC_DISCORD_WEBHOOK")
+        or os.environ.get("DISCORD_RELEASE_WEBHOOK")
+        or os.environ.get("DISCORD_WEBHOOK_URL")
+    )
     if url:
         return url.strip()
 
-    # 2. Local config file (gitignored)
+    # 2. Local config file (gitignored for local testing)
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("webhook_url", "").strip()
+                val = data.get("webhook_url", "").strip()
+                if val:
+                    return val
         except Exception:
             pass
 

@@ -39,7 +39,7 @@ class TestV240Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped_to_2_4_0(self):
-        self.assertEqual(APP_VERSION, "2.7.0")
+        self.assertEqual(APP_VERSION, "2.7.1")
 
     def test_practice_music_swap_and_restore(self):
         # Create a mock StayInsideMe.mp3
@@ -327,26 +327,29 @@ class TestV240Features(unittest.TestCase):
         self.assertTrue(all(not m["is_enabled"] for m in installed))
 
     def test_gui_dialogs_initialized(self):
-        app = GeodeSyncApp()
-        try:
-            self.assertTrue(hasattr(app, "open_mod_store_dialog"))
-            self.assertTrue(hasattr(app, "open_demonlist_browser"))
-            self.assertTrue(hasattr(app, "open_jukebox_dialog"))
-            self.assertTrue(hasattr(app, "open_bundle_manager_dialog"))
-            self.assertTrue(hasattr(app, "open_save_optimizer_dialog"))
-            self.assertTrue(hasattr(app, "open_save_slots_dialog"))
-            self.assertTrue(hasattr(app, "open_soundpack_hub"))
-            self.assertTrue(hasattr(app, "open_vault_helper"))
-            self.assertTrue(hasattr(app, "open_corrupt_save_resurrector"))
-            self.assertTrue(hasattr(app, "open_mod_presets_dialog"))
-            self.assertTrue(hasattr(app, "launch_boosted_game"))
-            self.assertTrue(hasattr(app, "opt_badge"))
-            self.assertTrue(hasattr(app, "slots_badge"))
-            self.assertTrue(hasattr(app, "sfx_badge"))
-            self.assertTrue(hasattr(app, "vault_badge"))
-            self.assertTrue(hasattr(app, "salvage_badge"))
-        finally:
-            app.destroy()
+        with patch.object(GeodeSyncApp, "_remote_update_monitor_thread", return_value=None), \
+             patch.object(GeodeSyncApp, "_auto_backup_monitor_thread", return_value=None), \
+             patch.object(GeodeSyncApp, "_start_auto_sync_loop", return_value=None):
+            app = GeodeSyncApp()
+            try:
+                self.assertTrue(hasattr(app, "open_mod_store_dialog"))
+                self.assertTrue(hasattr(app, "open_demonlist_browser"))
+                self.assertTrue(hasattr(app, "open_jukebox_dialog"))
+                self.assertTrue(hasattr(app, "open_bundle_manager_dialog"))
+                self.assertTrue(hasattr(app, "open_save_optimizer_dialog"))
+                self.assertTrue(hasattr(app, "open_save_slots_dialog"))
+                self.assertTrue(hasattr(app, "open_soundpack_hub"))
+                self.assertTrue(hasattr(app, "open_vault_helper"))
+                self.assertTrue(hasattr(app, "open_corrupt_save_resurrector"))
+                self.assertTrue(hasattr(app, "open_mod_presets_dialog"))
+                self.assertTrue(hasattr(app, "launch_boosted_game"))
+                self.assertTrue(hasattr(app, "opt_badge"))
+                self.assertTrue(hasattr(app, "slots_badge"))
+                self.assertTrue(hasattr(app, "sfx_badge"))
+                self.assertTrue(hasattr(app, "vault_badge"))
+                self.assertTrue(hasattr(app, "salvage_badge"))
+            finally:
+                app.destroy()
 
 
 if __name__ == "__main__":

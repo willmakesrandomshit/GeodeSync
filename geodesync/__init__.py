@@ -1,7 +1,5 @@
-"""GeodeSync — Project Phoenix
-The ultimate, ultra-reliable Geometry Dash companion.
-"""
+"""GeoDeSync - The Modern, Resilient Geometry Dash & Geode Companion."""
 
-__version__ = "2.7.0"
-__app_name__ = "GeodeSync"
+__version__ = "2.7.1"
 __author__ = "WilPlays"
+__all__ = ["core", "platform", "services", "ui"]

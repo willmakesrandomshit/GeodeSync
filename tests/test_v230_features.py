@@ -23,7 +23,7 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.7.0")
+        self.assertEqual(APP_VERSION, "2.7.1")
 
     def test_check_vc_redist_installed(self):
         ok, status, ver = check_vc_redist_installed()
@@ -48,7 +48,7 @@ class TestV230Features(unittest.TestCase):
         os.makedirs(portable_save, exist_ok=True)
         with open(os.path.join(portable_save, "CCGameManager.dat"), "wb") as f:
             f.write(b"MOCK_SAVE")
-        with patch("main.IS_MAC", False), patch("main.IS_WIN", True), patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(self.test_dir, "EmptyAppData")}):
+        with patch("main.IS_MAC", False), patch("main.IS_LINUX", False), patch("main.IS_WIN", True), patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(self.test_dir, "EmptyAppData")}):
             found = self.mgr.get_save_data_dir()
             self.assertEqual(found, portable_save)
 
@@ -59,7 +59,7 @@ class TestV230Features(unittest.TestCase):
         with open(os.path.join(alt_root, "GeometryDash.exe"), "wb") as f:
             f.truncate(10698752)
 
-        with patch("main.IS_WIN", True), patch.dict(os.environ, {"OneDrive": os.path.join(self.test_dir, "OneDrive")}):
+        with patch("main.IS_MAC", False), patch("main.IS_LINUX", False), patch("main.IS_WIN", True), patch.dict(os.environ, {"OneDrive": os.path.join(self.test_dir, "OneDrive")}):
             installs = self.mgr.find_all_gd_installations()
             paths = [i["path"].lower() for i in installs]
             self.assertTrue(any("gd" in p for p in paths))
@@ -98,10 +98,15 @@ class TestV230Features(unittest.TestCase):
             f.truncate(160 * 1024 * 1024)
 
         with patch("main.IS_MAC", False), patch("main.IS_WIN", True), patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
-            for valid_size in SIZES_22081:
-                with open(depot_exe, "wb") as f:
-                    f.truncate(valid_size)
-                self.assertTrue(self.mgr.has_downloaded_depot(), f"Depot with size {valid_size} should be valid")
+            old_manifest = self.mgr.target_manifest
+            self.mgr.target_manifest = "3816559102876907245"
+            try:
+                for valid_size in SIZES_22081:
+                    with open(depot_exe, "wb") as f:
+                        f.truncate(valid_size)
+                    self.assertTrue(self.mgr.has_downloaded_depot(), f"Depot with size {valid_size} should be valid")
+            finally:
+                self.mgr.target_manifest = old_manifest
 
     def test_check_outdated_mods(self):
         mods_dir = os.path.join(self.gd_path, "geode", "mods")

@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.7.1"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -81,10 +81,17 @@ STARTF_USESHOWWINDOW = 1
 CREATE_NO_WINDOW = 0x08000000
 
 
+class _StartupInfoFallback:
+    def __init__(self):
+        self.dwFlags = 0
+        self.wShowWindow = 0
+
+
 def get_silent_startupinfo():
     """Return STARTUPINFO configured to hide console windows on Windows."""
     if IS_WIN:
-        si = subprocess.STARTUPINFO()
+        startupinfo_cls = getattr(subprocess, "STARTUPINFO", _StartupInfoFallback)
+        si = startupinfo_cls()
         si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", STARTF_USESHOWWINDOW)
         si.wShowWindow = getattr(subprocess, "SW_HIDE", SW_HIDE)
         return si
@@ -6322,7 +6329,10 @@ class GeodeSyncApp(tk.Tk):
         p_link.pack(side="right")
 
         self.player_name_lbl = tk.Label(self.player_card, text="Reading save data...", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"])
-        self.player_name_lbl.pack(anchor="w", pady=(0, 6))
+        self.player_name_lbl.pack(anchor="w", pady=(0, 2))
+
+        self.save_health_lbl = tk.Label(self.player_card, text="Save Health: Verifying...", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["panel"])
+        self.save_health_lbl.pack(anchor="w", pady=(0, 6))
 
         self.stats_chips_frame = tk.Frame(self.player_card, bg=UI["panel"])
         self.stats_chips_frame.pack(anchor="w", pady=(0, 10))
@@ -8779,6 +8789,20 @@ class GeodeSyncApp(tk.Tk):
             orbs_str = f"{round(orbs / 1000, 1)}K" if orbs >= 10000 else f"{orbs:,}"
             if hasattr(self, "stat_orbs_lbl"):
                 self.stat_orbs_lbl.config(text=f"{orbs_str} Orbs")
+            if hasattr(self, "save_health_lbl"):
+                save_dir = self.mgr.get_save_data_dir()
+                if save_dir and os.path.isdir(save_dir):
+                    gm = os.path.join(save_dir, "CCGameManager.dat")
+                    ll = os.path.join(save_dir, "CCLocalLevels.dat")
+                    if os.path.exists(gm) and os.path.exists(ll):
+                        gm_sz = os.path.getsize(gm) / (1024 * 1024)
+                        ll_sz = os.path.getsize(ll) / (1024 * 1024)
+                        total_mb = round(gm_sz + ll_sz, 1)
+                        self.save_health_lbl.config(text=f"Save Health: Healthy ({total_mb} MB) • Protected", fg=UI["lime"])
+                    elif os.path.exists(gm):
+                        self.save_health_lbl.config(text="Save Health: Partial (CCGameManager only)", fg=UI["amber"])
+                    else:
+                        self.save_health_lbl.config(text="Save Health: No saves detected yet", fg=UI["muted"])
         except Exception:
             pass
 

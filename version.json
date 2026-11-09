@@ -1,9 +1,9 @@
 {
-  "app_version": "2.7.0",
+  "app_version": "2.7.1",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.7.0 — Project Phoenix: Zero-console windowless execution, rate-limit immune updates, and full modular companion architecture."
+  "announcement": "GeodeSync v2.7.1 — Quality & Performance Patch: Instant Discord webhook broadcast guarantee, save health monitoring, live mod search, and cross-platform reliability."
 }
