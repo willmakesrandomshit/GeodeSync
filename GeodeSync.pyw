@@ -4715,6 +4715,13 @@ class GeodeSyncApp(tk.Tk):
             if event is not None and event.widget != self:
                 return
             if getattr(self, "run_in_bg_enabled", True) and IS_WIN:
+                self.after(20, self._check_and_minimize_to_tray)
+        except Exception:
+            pass
+
+    def _check_and_minimize_to_tray(self):
+        try:
+            if getattr(self, "run_in_bg_enabled", True) and IS_WIN:
                 if self.state() == "iconic":
                     if self._start_system_tray():
                         self.withdraw()
@@ -5118,8 +5125,14 @@ class GeodeSyncApp(tk.Tk):
             from PIL import Image
 
             base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-            icon_path = os.path.join(base_dir, "icon.ico")
-            tray_image = Image.open(icon_path).convert("RGBA") if os.path.isfile(icon_path) else Image.new("RGBA", (64, 64), (80, 110, 255, 255))
+            candidate_paths = [
+                os.path.join(base_dir, "icon.ico"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico"),
+                os.path.join(os.path.dirname(sys.executable), "icon.ico"),
+                os.path.join(os.path.dirname(sys.executable), "_internal", "icon.ico"),
+            ]
+            icon_path = next((p for p in candidate_paths if os.path.isfile(p)), "")
+            tray_image = Image.open(icon_path).convert("RGBA") if icon_path else Image.new("RGBA", (64, 64), (80, 110, 255, 255))
             tray_icon = pystray.Icon(
                 "GeodeSync",
                 tray_image,
@@ -5180,8 +5193,10 @@ class GeodeSyncApp(tk.Tk):
             if IS_WIN:
                 try:
                     import ctypes
-                    ctypes.windll.user32.ShowWindow(self.winfo_id(), 9)
-                    ctypes.windll.user32.SetForegroundWindow(self.winfo_id())
+                    child_hwnd = self.winfo_id()
+                    top_hwnd = ctypes.windll.user32.GetParent(child_hwnd) or child_hwnd
+                    ctypes.windll.user32.ShowWindow(top_hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(top_hwnd)
                 except Exception:
                     pass
             self.refresh_status()
