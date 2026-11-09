@@ -1,19 +1,19 @@
 import tkinter as tk
 
-announcement = """@everyone
-# ⚡ GeodeSync v2.2.1 Update Released!
+announcement = """# 🚀 GeodeSync v2.7.1 Update Released!
 
-A critical update has just been deployed to fix the fatal **"GeometryDash.exe - Entry Point Not Found"** startup error that was crashing Geometry Dash!
+A high-reliability quality-of-life patch is now live for all Windows, macOS, and Linux players!
 
-### 🛠️ What Was Fixed:
-* **Entry Point Crash Auto-Repair:** ImagePlus (`prevter.imageplus v1.1.1`) introduced a call to `loadRootSubDictFromCompressedFile` which does not exist in GD 2.2081, crashing Geometry Dash before reaching the title screen. GeodeSync now automatically detects this and repairs it to the clean, tested `v1.1.0` build with 0 user effort.
-* **Pre-Launch Self-Healing:** Launching GD through GeodeSync automatically verifies all mod dependencies and heals incompatible files in the background.
-* **Proactive Crash Doctor:** Proactively detects Windows DLL loader errors before checking crash dumps.
+### 🌟 What's New in v2.7.1:
+* 🛡️ **Real-Time Save Health Monitoring:** The dashboard now continuously checks `CCGameManager.dat` and `CCLocalLevels.dat` file size, encryption, and protection status so you know your progress, demons, and stars are 100% safe.
+* 🌐 **Rate-Limit Immune Updates:** Completely revamped the update checking engine with 4 fallback tiers (including public RSS/Atom feeds and CDN manifests) to eliminate update check errors.
+* ⚡ **Cross-Platform Engine Stability:** Native process detection on Windows (`tasklist`) and Linux/macOS (`pgrep`) with zero console window popups.
+* 📦 **Verified Standalone Packages:** Built, verified, and signed with SHA-256 digests.
 
-### 📥 Download Update (Windows / Mac / Linux):
-👉 **https://github.com/willmakesrandomshit/GeodeSync/releases/latest**
+### 📥 Download Update (Windows / macOS / Linux):
+👉 **https://github.com/willmakesrandomshit/GeodeSync/releases/tag/v2.7.1**
 
-*(If you already have GeodeSync open, click the update banner at the top to download directly!)*
+*(If you have GeoDeSync open, click Check for Updates or download the new GeodeSync.exe directly from your Downloads folder!)*
 """
 
 try:
@@ -22,6 +22,7 @@ try:
     r.clipboard_clear()
     r.clipboard_append(announcement)
     r.update()
-    print("Announcement copied to clipboard successfully!")
+    r.destroy()
+    print("SUCCESS: v2.7.1 release announcement copied to clipboard!")
 except Exception as e:
     print(f"Clipboard error: {e}")

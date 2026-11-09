@@ -15,6 +15,14 @@ CHANNEL_ID = "1563643888537698314"
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "discord_webhook.json")
 
 
+def validate_webhook_url(url: str) -> bool:
+    """Ensure that only authentic Discord webhook endpoints can be targeted."""
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    return u.startswith("https://discord.com/api/webhooks/") or u.startswith("https://discordapp.com/api/webhooks/")
+
+
 def get_webhook_url():
     # 1. Environment variable (e.g. from GitHub Actions secret DISCORD_RELEASE_WEBHOOK)
     url = (
@@ -22,7 +30,7 @@ def get_webhook_url():
         or os.environ.get("DISCORD_RELEASE_WEBHOOK")
         or os.environ.get("DISCORD_WEBHOOK_URL")
     )
-    if url:
+    if url and validate_webhook_url(url):
         return url.strip()
 
     # 2. Local config file (gitignored for local testing)
@@ -31,7 +39,7 @@ def get_webhook_url():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 val = data.get("webhook_url", "").strip()
-                if val:
+                if val and validate_webhook_url(val):
                     return val
         except Exception:
             pass
@@ -94,9 +102,12 @@ def send_update(version=None, title=None, notes=None, ping=False, release_tag=No
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--set-webhook":
         wh_url = sys.argv[2].strip()
+        if not validate_webhook_url(wh_url):
+            print("[ERROR] Invalid webhook URL. Must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/")
+            sys.exit(1)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump({"channel_id": CHANNEL_ID, "webhook_url": wh_url}, f, indent=2)
-        print(f"Saved webhook for channel {CHANNEL_ID} to {CONFIG_FILE}!")
+        print(f"Saved verified webhook for channel {CHANNEL_ID} to {CONFIG_FILE}!")
         sys.exit(0)
 
     version = current_version()

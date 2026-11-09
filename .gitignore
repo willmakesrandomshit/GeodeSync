@@ -1,12 +1,48 @@
+# Build and distribution artifacts
 build/
 dist/
 .GeodeSync-pyinstaller/
 *.spec
-__pycache__/
-*.pyc
 *.exe
 *.zip
+*.tar.gz
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Editor and IDE configurations
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
+
+# Secrets, tokens, keys, and credentials (CRITICAL)
+.env*
+*.env
+*webhook*.json
 discord_webhook.json
-.env
+*secret*
+*token*
+*credential*
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
+
+# Temporary files and logs
+*.log
+*.tmp
+*.bak
+*.old
+crashlogs/
