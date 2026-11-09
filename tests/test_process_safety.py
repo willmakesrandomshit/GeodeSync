@@ -49,7 +49,7 @@ class ProcessSafetyTests(unittest.TestCase):
         atom_xml = b'''<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
-    <link href="https://github.com/willmakesrandomshit/GeodeSync/releases/tag/v2.7.1"/>
+    <link href="https://github.com/willmakesrandomshit/GeodeSync/releases/tag/v2.8.0"/>
     <updated>2026-11-08T12:00:00Z</updated>
   </entry>
 </feed>'''
@@ -74,7 +74,7 @@ class ProcessSafetyTests(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=mock_urlopen):
             rel = main.fetch_latest_published_release(timeout=1)
-            self.assertEqual(rel["tag_name"], "v2.7.1")
+            self.assertEqual(rel["tag_name"], "v2.8.0")
 
 
 if __name__ == "__main__":

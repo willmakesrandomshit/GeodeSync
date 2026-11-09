@@ -71,7 +71,7 @@ else:
     winreg = None
     winsound = None
 
-APP_VERSION = "2.7.1"
+APP_VERSION = "2.8.0"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
@@ -5071,7 +5071,31 @@ class GeodeSyncApp(tk.Tk):
 
     def _apply_silent_refresh(self):
         """Silently re-reads versions, locks, and progress without disrupting active operations."""
+        try:
+            currently_running = self.mgr.is_gd_process_running()
+            was_running = getattr(self, "_last_game_running_state", False)
+            self._last_game_running_state = currently_running
+
+            if was_running and not currently_running:
+                self._on_game_exited()
+        except Exception:
+            pass
+
         self.refresh_status()
+
+    def _on_game_exited(self):
+        """Automatically create a zero-data-loss save snapshot when Geometry Dash closes."""
+        def _silent_backup():
+            try:
+                import time
+                time.sleep(1.5)  # Allow Geometry Dash file write buffers to flush
+                ok, msg = self.mgr.backup_saves(tag="GameExit_AutoSave")
+                if ok:
+                    self.log(f"🛡️ Auto-saved Geometry Dash progress snapshot on game exit ({msg})", "SUCCESS")
+                    self.after(0, self.update_player_stats_ui)
+            except Exception as e:
+                self.log(f"Auto-save notice on game exit: {e}", "INFO")
+        threading.Thread(target=_silent_backup, daemon=True).start()
 
     def on_close(self):
         # Keep the RPC connection alive after the dashboard is closed.
@@ -6041,6 +6065,13 @@ class GeodeSyncApp(tk.Tk):
 
         self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg="#ffffff", activebackground=UI["lime_hover"], activeforeground="#ffffff", relief="flat", padx=12, pady=4, cursor="hand2")
         self.update_action_btn.pack(side="right")
+
+        # Cloud Announcement Banner (hidden by default)
+        self.announcement_banner = tk.Frame(self, bg=UI["panel_alt"], padx=18, pady=6, highlightbackground=UI["cyan"], highlightthickness=1)
+        self.announcement_label = tk.Label(self.announcement_banner, text="", font=("Segoe UI", 9), fg=UI["text"], bg=UI["panel_alt"], anchor="w")
+        self.announcement_label.pack(side="left", fill="x", expand=True)
+        self.announcement_close = tk.Button(self.announcement_banner, text="✕", command=lambda: self.announcement_banner.pack_forget(), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["panel"], relief="flat", cursor="hand2")
+        self.announcement_close.pack(side="right")
 
         # 1. HEADER BAR: Clean 52px top bar with brand, primary navigation, and discrete utilities
         self.header_frame = tk.Frame(self, bg=UI["header"], padx=20, pady=10)
@@ -8814,6 +8845,12 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showinfo("Already Running", "Geometry Dash is already running!")
             return
 
+        # Pre-launch zero-data-loss save snapshot
+        try:
+            self.mgr.backup_saves(tag="PreLaunch")
+        except Exception:
+            pass
+
         # Auto-heal known incompatible mods that cause Windows DLL Entry Point crashes
         incompat = self.mgr.check_incompatible_mods()
         if incompat:
@@ -9113,6 +9150,12 @@ class GeodeSyncApp(tk.Tk):
             messagebox.showinfo("Already Running", "Geometry Dash is already running!")
             return
 
+        # Pre-launch zero-data-loss save snapshot
+        try:
+            self.mgr.backup_saves(tag="PreLaunch")
+        except Exception:
+            pass
+
         if IS_WIN:
             image_problem = validate_windows_game_images(self.mgr.gd_path)
             if image_problem:
@@ -9198,6 +9241,9 @@ class GeodeSyncApp(tk.Tk):
                         self.mgr.target_manifest = data["target_manifest"]
                     if "geode_target_gd" in data and data["geode_target_gd"]:
                         self.mgr.target_gd_version = data["geode_target_gd"]
+                announcement = data.get("announcement")
+                if announcement:
+                    self.after(0, lambda msg=announcement: self.show_announcement_banner(msg))
         except Exception:
             pass
 
@@ -9229,6 +9275,18 @@ class GeodeSyncApp(tk.Tk):
         except Exception:
             self.update_banner.pack(fill="x", side="top")
         self.log(f"GeodeSync v{new_ver} is available. The app will download and verify the official update package.", "SUCCESS")
+
+    def show_announcement_banner(self, text: str):
+        if not text or not hasattr(self, "announcement_label"):
+            return
+        try:
+            self.announcement_label.config(text=f"📢 {text}")
+            if hasattr(self, "header_frame") and self.header_frame.winfo_exists():
+                self.announcement_banner.pack(fill="x", side="top", before=self.header_frame)
+            else:
+                self.announcement_banner.pack(fill="x", side="top")
+        except Exception:
+            pass
 
     def _start_auto_update_if_needed(self, release):
         if not self._app_update_in_progress and not self._staged_app_update:

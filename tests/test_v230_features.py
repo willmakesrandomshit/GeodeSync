@@ -23,7 +23,7 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.7.1")
+        self.assertEqual(APP_VERSION, "2.8.0")
 
     def test_check_vc_redist_installed(self):
         ok, status, ver = check_vc_redist_installed()

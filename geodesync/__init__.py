@@ -1,5 +1,5 @@
-"""GeoDeSync - The Modern, Resilient Geometry Dash & Geode Companion."""
+"""GeodeSync package root."""
 
-__version__ = "2.7.1"
+__version__ = "2.8.0"
 __author__ = "WilPlays"
-__all__ = ["core", "platform", "services", "ui"]
+__license__ = "MIT"
