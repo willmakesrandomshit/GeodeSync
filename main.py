@@ -144,6 +144,44 @@ def safe_check_output(cmd, timeout=None, cwd=None, env=None, text=True):
     return res.stdout
 
 
+def is_win_process_running(target_exe):
+    """High-speed native Windows process search using Toolhelp32 snapshot (zero subprocesses, <5ms)."""
+    if not IS_WIN:
+        return False
+    target = target_exe.lower()
+    try:
+        import ctypes
+        from ctypes import wintypes
+        TH32CS_SNAPPROCESS = 0x00000002
+
+        class PROCESSENTRY32(ctypes.Structure):
+            _fields_ = [
+                ('dwSize', wintypes.DWORD), ('cntUsage', wintypes.DWORD),
+                ('th32ProcessID', wintypes.DWORD), ('th32DefaultHeapID', ctypes.c_size_t),
+                ('th32ModuleID', wintypes.DWORD), ('cntThreads', wintypes.DWORD),
+                ('th32ParentProcessID', wintypes.DWORD), ('pcPriClassBase', wintypes.LONG),
+                ('dwFlags', wintypes.DWORD), ('szExeFile', ctypes.c_char * 260)
+            ]
+
+        hSnap = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if hSnap == -1:
+            return False
+        pe = PROCESSENTRY32()
+        pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        found = False
+        if ctypes.windll.kernel32.Process32First(hSnap, ctypes.byref(pe)):
+            while True:
+                if pe.szExeFile.decode('utf-8', errors='ignore').lower() == target:
+                    found = True
+                    break
+                if not ctypes.windll.kernel32.Process32Next(hSnap, ctypes.byref(pe)):
+                    break
+        ctypes.windll.kernel32.CloseHandle(hSnap)
+        return found
+    except Exception:
+        return False
+
+
 def safe_popen_command(cmd, cwd=None, env=None, stdout=None, stderr=None, stdin=None, extra_flags=0, close_fds=True):
     """Launch a process asynchronously with guaranteed windowless execution on Windows."""
     si = get_silent_startupinfo()
@@ -2840,6 +2878,70 @@ class GDManager:
                 return False
         return False
 
+    def is_steam_running(self):
+        if IS_WIN:
+            return is_win_process_running("steam.exe")
+        if IS_MAC:
+            try:
+                out = subprocess.check_output(["pgrep", "-f", "Steam"]).decode()
+                return bool(out.strip())
+            except Exception:
+                return False
+        try:
+            out = subprocess.check_output(["pgrep", "-x", "steam"]).decode()
+            return bool(out.strip())
+        except Exception:
+            return False
+
+    def get_steam_exe_path(self):
+        if not IS_WIN:
+            return None
+        try:
+            import winreg
+            for subkey, val_name in [
+                (r"Software\Valve\Steam", "SteamExe"),
+                (r"Software\Valve\Steam", "SteamPath"),
+            ]:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, subkey) as key:
+                        val, _ = winreg.QueryValueEx(key, val_name)
+                        if val:
+                            val = val.replace("/", "\\")
+                            if val.lower().endswith(".exe") and os.path.isfile(val):
+                                return val
+                            cand = os.path.join(val, "steam.exe")
+                            if os.path.isfile(cand):
+                                return cand
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        for cand in [r"C:\Program Files (x86)\Steam\steam.exe", r"C:\Program Files\Steam\steam.exe"]:
+            if os.path.isfile(cand):
+                return cand
+        return None
+
+    def ensure_steam_running(self, timeout=14):
+        """Ensure Steam is running before launching GD; starts Steam if closed and waits for initialization."""
+        if self.is_steam_running():
+            return True
+        steam_exe = self.get_steam_exe_path()
+        if steam_exe and os.path.isfile(steam_exe):
+            try:
+                subprocess.Popen([steam_exe, "-silent"])
+            except Exception:
+                open_url_or_path("steam://")
+        else:
+            open_url_or_path("steam://")
+
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            time.sleep(0.4)
+            if self.is_steam_running():
+                time.sleep(1.2)  # Allow Steam IPC pipes to spin up
+                return True
+        return False
+
     def is_gd_process_running(self):
         if IS_MAC:
             try:
@@ -2852,10 +2954,13 @@ class GDManager:
 
         if IS_WIN:
             try:
-                output = safe_check_output(["tasklist", "/FI", "IMAGENAME eq GeometryDash.exe", "/NH"])
-                return "geometrydash.exe" in output.lower()
+                import ctypes
+                hwnd = ctypes.windll.user32.FindWindowW(None, "Geometry Dash")
+                if hwnd:
+                    return True
             except Exception:
-                return False
+                pass
+            return is_win_process_running("geometrydash.exe")
 
         try:
             return bool(find_linux_geometry_dash_pids())
@@ -3193,6 +3298,11 @@ class GDManager:
         if not os.path.exists(gm_path):
             return None
         try:
+            mtime = os.path.getmtime(gm_path)
+            size = os.path.getsize(gm_path)
+            if getattr(self, "_cached_player_stats", None) is not None and getattr(self, "_cached_stats_mtime", 0) == mtime and getattr(self, "_cached_stats_size", 0) == size:
+                return self._cached_player_stats
+
             with open(gm_path, "rb") as f:
                 raw = f.read()
             dec = decode_geometry_dash_save(raw).decode("utf-8", errors="ignore")
@@ -3207,7 +3317,7 @@ class GDManager:
                 for m in re.finditer(r"<k>([0-9]+)</k><s>([0-9]+)</s>", chunk):
                     stats[int(m.group(1))] = int(m.group(2))
 
-            return {
+            result = {
                 "name": player_name,
                 "jumps": stats.get(1, 0),
                 "attempts": stats.get(2, 0),
@@ -3219,6 +3329,10 @@ class GDManager:
                 "orbs": stats.get(14, 0),
                 "moons": stats.get(28, 0),
             }
+            self._cached_player_stats = result
+            self._cached_stats_mtime = mtime
+            self._cached_stats_size = size
+            return result
         except Exception:
             return None
 
@@ -4715,13 +4829,6 @@ class GeodeSyncApp(tk.Tk):
             if event is not None and event.widget != self:
                 return
             if getattr(self, "run_in_bg_enabled", True) and IS_WIN:
-                self.after(20, self._check_and_minimize_to_tray)
-        except Exception:
-            pass
-
-    def _check_and_minimize_to_tray(self):
-        try:
-            if getattr(self, "run_in_bg_enabled", True) and IS_WIN:
                 if self.state() == "iconic":
                     if self._start_system_tray():
                         self.withdraw()
@@ -6095,7 +6202,7 @@ class GeodeSyncApp(tk.Tk):
         title_box = tk.Frame(self.header_frame, bg=UI["header"])
         title_box.pack(side="left")
 
-        title = tk.Label(title_box, text="⚡ GeodeSync", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["header"])
+        title = tk.Label(title_box, text="GeodeSync", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["header"])
         title.pack(side="left")
 
         ver_pill = tk.Label(title_box, text=f"v{APP_VERSION}", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=2)
@@ -6107,7 +6214,7 @@ class GeodeSyncApp(tk.Tk):
 
         settings_btn = tk.Button(
             utility_box,
-            text="⚙️ Settings",
+            text="Settings",
             command=self.open_preferences_dialog,
             font=("Segoe UI", 8, "bold"),
             bg=UI["panel_alt"],
@@ -6123,7 +6230,7 @@ class GeodeSyncApp(tk.Tk):
 
         help_btn = tk.Button(
             utility_box,
-            text="🩺 Diagnostics",
+            text="Diagnostics",
             command=self.open_get_help_center,
             font=("Segoe UI", 8, "bold"),
             bg=UI["panel_alt"],
@@ -6158,10 +6265,10 @@ class GeodeSyncApp(tk.Tk):
         self.nav_frame.pack(side="left", padx=(30, 0))
 
         self.nav_tabs = [
-            ("home", "🏠 Home"),
-            ("mods", "🧩 Mods"),
-            ("library", "📚 Library"),
-            ("tools", "🛠️ Tools"),
+            ("home", "Home"),
+            ("mods", "Mods"),
+            ("library", "Library"),
+            ("tools", "Tools"),
         ]
         self.tab_buttons = {}
         for tab_id, tab_label in self.nav_tabs:
@@ -6284,10 +6391,10 @@ class GeodeSyncApp(tk.Tk):
             b.pack(side="left", padx=(0, 6))
             return b
 
-        _add_preset_chip("⚡ Boosted (Default)", "boosted", UI["lime"])
-        _add_preset_chip("🎮 Vanilla (No Mods)", "vanilla", UI["amber"])
-        _add_preset_chip("🏆 Tournament (Legal)", "tournament", UI["lilac"])
-        _add_preset_chip("🌐 Globed (Multiplayer)", "globed", UI["cyan"])
+        _add_preset_chip("Boosted (Default)", "boosted", UI["lime"])
+        _add_preset_chip("Vanilla (No Mods)", "vanilla", UI["amber"])
+        _add_preset_chip("Tournament (Legal)", "tournament", UI["lilac"])
+        _add_preset_chip("Globed (Multiplayer)", "globed", UI["cyan"])
 
         # Big, Prominent Primary Action Button
         self.primary_btn = ModernButton(
@@ -7701,8 +7808,9 @@ class GeodeSyncApp(tk.Tk):
             self.guide_desc.config(
                 text="Geode mods are active and ready to play. (Tip: You can lock Steam updates in Toolbox to prevent unexpected updates.)"
             )
+        launch_label = "Launch Steam & Geometry Dash" if (IS_WIN and not self.mgr.is_steam_running()) else "Play Geometry Dash (Boosted)"
         self.primary_btn.set_config(
-            text="▶️ Play Geometry Dash (Boosted)",
+            text=launch_label,
             bg=UI["lime"],
             hover_bg=UI["lime_hover"],
             fg=UI["background"],
@@ -8853,41 +8961,7 @@ class GeodeSyncApp(tk.Tk):
             pass
 
     def launch_boosted_game(self):
-        if not self.mgr.gd_path:
-            messagebox.showerror("Error", "Could not locate Geometry Dash folder.")
-            return
-        if self.mgr.is_gd_process_running():
-            messagebox.showinfo("Already Running", "Geometry Dash is already running!")
-            return
-
-        # Pre-launch zero-data-loss save snapshot
-        try:
-            self.mgr.backup_saves(tag="PreLaunch")
-        except Exception:
-            pass
-
-        # Auto-heal known incompatible mods that cause Windows DLL Entry Point crashes
-        incompat = self.mgr.check_incompatible_mods()
-        if incompat:
-            for item in incompat:
-                self.log(f"Auto-repairing incompatible mod {item['name']} ({item['version']})...", "INFO")
-                ok, msg = self.mgr.fix_incompatible_mod(item)
-                if ok:
-                    self.log(f"Auto-repaired {item['name']}: {msg}", "SUCCESS")
-                else:
-                    self.log(f"Auto-repair error: {msg}", "WARN")
-        exe_path = os.path.join(self.mgr.gd_path, "GeometryDash.exe") if IS_WIN else None
-        if IS_WIN and exe_path and os.path.exists(exe_path):
-            try:
-                flags = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080)
-                subprocess.Popen([exe_path], cwd=self.mgr.gd_path, creationflags=flags)
-                self.log("🚀 Launched Geometry Dash with HIGH CPU Priority (Ultra-Low Latency)!", "SUCCESS")
-                threading.Thread(target=self._monitor_windows_launch, daemon=True).start()
-                return
-            except Exception as e:
-                self.log(f"Direct launch error ({e}), falling back to steam://", "WARN")
-        open_url_or_path("steam://rungameid/322170")
-        self.log("Launched Geometry Dash via Steam.", "SUCCESS")
+        return self.launch_gd()
 
     def open_mod_manager(self):
         if not self.mgr.gd_path:
@@ -9189,17 +9263,42 @@ class GeodeSyncApp(tk.Tk):
                 else:
                     self.log(f"Auto-repair error: {msg}", "WARN")
 
+        # EXTREMELY SMART STEAM AUTO-LAUNCH
+        if IS_WIN and not self.mgr.is_steam_running():
+            self.log("Steam is not running. Starting Steam and preparing Geometry Dash...", "INFO")
+            self.primary_btn.set_config(text="Starting Steam & Geometry Dash...")
+            self.primary_btn.set_enabled(False)
+
+            def _smart_steam_launcher():
+                try:
+                    steam_started = self.mgr.ensure_steam_running(timeout=14)
+                    if steam_started:
+                        self.log("Steam initialized successfully. Launching Geometry Dash...", "SUCCESS")
+                    else:
+                        self.log("Steam startup timed out; proceeding with game launch...", "WARN")
+                except Exception as exc:
+                    self.log(f"Steam launch notice: {exc}", "WARN")
+                self.after(0, self._finish_game_launch)
+
+            threading.Thread(target=_smart_steam_launcher, daemon=True).start()
+            return
+
+        self._finish_game_launch()
+
+    def _finish_game_launch(self):
+        self.primary_btn.set_enabled(True)
+        self.refresh_status()
         self.log("Launching Geometry Dash (High Priority Boost)...", "INFO")
         if hasattr(self, "discord_rpc"):
             ver_text, _ = self.mgr.get_gd_version_info()
-            self.discord_rpc.update_presence(DiscordRPC.PLAYING_DETAILS, f"GD {ver_text} · Mods Protected 🛡️", reset_timer=True)
+            self.discord_rpc.update_presence(DiscordRPC.PLAYING_DETAILS, f"GD {ver_text} · Ready", reset_timer=True)
 
         exe_path = os.path.join(self.mgr.gd_path, "GeometryDash.exe") if IS_WIN else None
         if IS_WIN and exe_path and os.path.exists(exe_path):
             try:
                 flags = getattr(subprocess, "HIGH_PRIORITY_CLASS", 0x00000080)
                 subprocess.Popen([exe_path], cwd=self.mgr.gd_path, creationflags=flags)
-                self.log("🚀 Launched Geometry Dash with HIGH CPU Priority (Ultra-Low Latency)!", "SUCCESS")
+                self.log("Launched Geometry Dash with HIGH CPU Priority (Ultra-Low Latency)!", "SUCCESS")
                 return
             except Exception as e:
                 self.log(f"Direct launch error ({e}), falling back to steam://", "WARN")
