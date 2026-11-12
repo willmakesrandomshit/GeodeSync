@@ -4,17 +4,19 @@ import sys
 import subprocess
 from unittest.mock import patch, MagicMock
 
+import geodesync.platform.process_manager as process_manager
+
 import main
 
 
 class ProcessSafetyTests(unittest.TestCase):
     def test_silent_creationflags_includes_create_no_window_on_windows(self):
-        with patch.object(main, "IS_WIN", True):
+        with patch.object(process_manager, "IS_WIN", True):
             flags = main.get_silent_creationflags()
             self.assertTrue(flags & 0x08000000, "CREATE_NO_WINDOW (0x08000000) must be set on Windows")
 
     def test_silent_startupinfo_sets_sw_hide(self):
-        with patch.object(main, "IS_WIN", True):
+        with patch.object(process_manager, "IS_WIN", True):
             si = main.get_silent_startupinfo()
             self.assertIsNotNone(si)
             self.assertEqual(si.wShowWindow, 0)
@@ -23,7 +25,7 @@ class ProcessSafetyTests(unittest.TestCase):
     @patch("subprocess.run")
     def test_safe_run_command_passes_silent_flags_on_windows(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        with patch.object(main, "IS_WIN", True):
+        with patch.object(process_manager, "IS_WIN", True):
             main.safe_run_command(["attrib.exe", "-U", "-P", "/s", "/d", "*"])
             self.assertTrue(mock_run.called)
             _args, kwargs = mock_run.call_args
@@ -32,7 +34,7 @@ class ProcessSafetyTests(unittest.TestCase):
 
     @patch("subprocess.Popen")
     def test_safe_popen_command_passes_silent_flags_on_windows(self, mock_popen):
-        with patch.object(main, "IS_WIN", True):
+        with patch.object(process_manager, "IS_WIN", True):
             main.safe_popen_command(["wscript.exe", "//nologo", "test.vbs"])
             self.assertTrue(mock_popen.called)
             _args, kwargs = mock_popen.call_args

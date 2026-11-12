@@ -91,3 +91,41 @@ def safe_popen_command(cmd, cwd=None, env=None, stdout=None, stderr=None, stdin=
         stdin=stdin,
         close_fds=close_fds if not IS_WIN else False,
     )
+
+
+def is_win_process_running(target_exe):
+    """High-speed native Windows process search using Toolhelp32 snapshot (zero subprocesses, <5ms)."""
+    if not IS_WIN:
+        return False
+    target = target_exe.lower()
+    try:
+        import ctypes
+        from ctypes import wintypes
+        TH32CS_SNAPPROCESS = 0x00000002
+
+        class PROCESSENTRY32(ctypes.Structure):
+            _fields_ = [
+                ('dwSize', wintypes.DWORD), ('cntUsage', wintypes.DWORD),
+                ('th32ProcessID', wintypes.DWORD), ('th32DefaultHeapID', ctypes.c_size_t),
+                ('th32ModuleID', wintypes.DWORD), ('cntThreads', wintypes.DWORD),
+                ('th32ParentProcessID', wintypes.DWORD), ('pcPriClassBase', wintypes.LONG),
+                ('dwFlags', wintypes.DWORD), ('szExeFile', ctypes.c_char * 260)
+            ]
+
+        hSnap = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if hSnap == -1:
+            return False
+        pe = PROCESSENTRY32()
+        pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        found = False
+        if ctypes.windll.kernel32.Process32First(hSnap, ctypes.byref(pe)):
+            while True:
+                if pe.szExeFile.decode('utf-8', errors='ignore').lower() == target:
+                    found = True
+                    break
+                if not ctypes.windll.kernel32.Process32Next(hSnap, ctypes.byref(pe)):
+                    break
+        ctypes.windll.kernel32.CloseHandle(hSnap)
+        return found
+    except Exception:
+        return False

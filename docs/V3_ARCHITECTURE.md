@@ -65,5 +65,10 @@ tests/         one test module per service + parity tests while v2 code still ex
 
 ## 6. Status of this branch (`v3-rewrite`)
 
-Done: step 1 (four core modules, 8 new tests, all 161 existing tests still pass).
-Not done: steps 2-7. No release, tag or push has been made.
+Done:
+- Step 1: four core modules (`versioning`, `save_codec`, `integrity`, `archive_safety`) with parity tests.
+- Step 2: the self-update engine (22 functions + size caps) moved verbatim to `geodesync/services/app_update.py`; the silent-process helpers now come from `geodesync/platform/process_manager.py` (which gained `is_win_process_running`). `main.py` re-exports both, so it shrank from 11,937 to ~11,290 lines with no behaviour change. `tests/test_v3_update_engine.py` pins one implementation (identity checks), constant parity with `geodesync.core.config`, and that the engine imports with Tk blocked.
+- Step 7 (partial): `GeodeSync.pyw` is now a 14-line launcher that runs `main.py`, ending the hand-synced byte-identical copy.
+- Verified: 175 tests pass; a PyInstaller arm64 macOS build bundles `geodesync.services.app_update` and launches.
+
+Not done: steps 3-6 (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.

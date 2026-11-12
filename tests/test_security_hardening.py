@@ -68,6 +68,8 @@ class SecurityHardeningTests(unittest.TestCase):
         sources = [
             ROOT / "main.py",
             ROOT / "GeodeSync.pyw",
+            ROOT / "geodesync/services/app_update.py",
+            ROOT / "geodesync/platform/process_manager.py",
             ROOT / "package_windows.ps1",
             ROOT / "build_macos.py",
         ]
@@ -110,10 +112,11 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertNotIn("GeodeSync.exe]", source)
 
     def test_python_gui_entry_points_stay_in_sync(self):
-        self.assertEqual(
-            (ROOT / "main.py").read_bytes(),
-            (ROOT / "GeodeSync.pyw").read_bytes(),
-        )
+        # v3: the .pyw is a launcher for main.py instead of a hand-synced copy.
+        launcher = (ROOT / "GeodeSync.pyw").read_text(encoding="utf-8")
+        self.assertIn('runpy.run_path(os.path.join(_HERE, "main.py"), run_name="__main__")', launcher)
+        self.assertLess(len(launcher.splitlines()), 30)
+        self.assertNotIn("class GeodeSyncApp", launcher)
 
     def test_release_download_instructions_use_the_release_page_and_versioned_assets(self):
         workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
@@ -299,7 +302,7 @@ class SecurityHardeningTests(unittest.TestCase):
             (target / "GeodeSync.exe").write_bytes(b"old")
             (payload / "_internal").mkdir(parents=True)
             (payload / "GeodeSync.exe").write_bytes(b"new")
-            with patch("main._wait_for_process_exit"), patch("main.subprocess.Popen"), patch("main.IS_WIN", True), patch("main.IS_MAC", False):
+            with patch("geodesync.services.app_update._wait_for_process_exit"), patch("main.subprocess.Popen"), patch("geodesync.services.app_update.IS_WIN", True), patch("geodesync.services.app_update.IS_MAC", False):
                 _apply_staged_update(str(payload), str(target), str(backup), 123)
             self.assertEqual((target / "GeodeSync.exe").read_bytes(), b"new")
             self.assertFalse(backup.exists())
@@ -307,7 +310,7 @@ class SecurityHardeningTests(unittest.TestCase):
             failed_payload = work / "failed-payload"
             (failed_payload / "_internal").mkdir(parents=True)
             (failed_payload / "GeodeSync.exe").write_bytes(b"broken")
-            with patch("main._wait_for_process_exit"), patch("main.subprocess.Popen", side_effect=OSError("launch failed")), patch("main.IS_WIN", True), patch("main.IS_MAC", False):
+            with patch("geodesync.services.app_update._wait_for_process_exit"), patch("main.subprocess.Popen", side_effect=OSError("launch failed")), patch("geodesync.services.app_update.IS_WIN", True), patch("geodesync.services.app_update.IS_MAC", False):
                 with self.assertRaises(OSError):
                     _apply_staged_update(str(failed_payload), str(target), str(backup), 123)
             self.assertEqual((target / "GeodeSync.exe").read_bytes(), b"new")
