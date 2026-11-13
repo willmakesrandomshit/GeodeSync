@@ -2171,6 +2171,7 @@ class GeodeSyncApp(tk.Tk):
 
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
             row_bg = groups[row][2]
+            print('ADD_TOOL', ascii(label), flush=True)
             button = tk.Button(
                 tool_grid, text=label, command=command,
                 font=("Segoe UI", 9, "bold" if bold else "normal"),
