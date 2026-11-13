@@ -5,11 +5,23 @@ import zipfile
 import shutil
 import tempfile
 import unittest
+import struct
+import zlib
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from platform_patch import patch_flag  # noqa: E402
 from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_images, check_vc_redist_installed, check_folder_writable_and_space
+
+
+def _tiny_png():
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data +
+                struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) +
+            chunk(b"IEND", b""))
 
 
 class TestV230Features(unittest.TestCase):
@@ -190,8 +202,9 @@ class TestV230Features(unittest.TestCase):
 
         # Vanilla textures
         vanilla_sheet = os.path.join(res_dir, "GJ_GameSheet.png")
+        vanilla_data = _tiny_png()
         with open(vanilla_sheet, "wb") as f:
-            f.write(b"VANILLA_TEXTURE_DATA")
+            f.write(vanilla_data)
 
         # 1. Install custom texture pack from zip
         pack_zip = os.path.join(self.test_dir, "CustomPack.zip")
@@ -210,7 +223,7 @@ class TestV230Features(unittest.TestCase):
         bak_sheet = os.path.join(self.gd_path, "Resources_Vanilla_Backup", "GJ_GameSheet.png")
         self.assertTrue(os.path.exists(bak_sheet))
         with open(bak_sheet, "rb") as f:
-            self.assertEqual(f.read(), b"VANILLA_TEXTURE_DATA")
+            self.assertEqual(f.read(), vanilla_data)
 
         # Check active status
         status = self.mgr.get_texture_pack_status()
@@ -222,7 +235,7 @@ class TestV230Features(unittest.TestCase):
         self.assertTrue(ok_res)
 
         with open(vanilla_sheet, "rb") as f:
-            self.assertEqual(f.read(), b"VANILLA_TEXTURE_DATA")
+            self.assertEqual(f.read(), vanilla_data)
 
         status_after = self.mgr.get_texture_pack_status()
         self.assertEqual(status_after["active_pack"], "Vanilla (Default)")

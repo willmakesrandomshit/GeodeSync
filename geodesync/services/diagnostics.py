@@ -5,6 +5,8 @@ import sys
 import shutil
 import platform
 import struct
+import zlib
+import json
 from geodesync.platform.process_manager import IS_LINUX, IS_MAC, IS_WIN, safe_run_command
 from geodesync.platform.steam import find_macos_game_app, is_steam_library_game_path, validate_macos_game_app
 
@@ -337,6 +339,114 @@ def explain_error_text(error_text, platform_name=None):
     )
 
 
+def inspect_png_resource(path):
+    """Return a concise structural error for a truncated or CRC-damaged PNG."""
+    signature = b"\x89PNG\r\n\x1a\n"
+    try:
+        file_size = os.path.getsize(path)
+        if file_size < 45:
+            return "file is too small to contain a complete PNG"
+        with open(path, "rb") as stream:
+            if stream.read(8) != signature:
+                return "PNG signature is missing"
+            saw_header = saw_image_data = saw_end = False
+            while stream.tell() < file_size:
+                chunk_header = stream.read(8)
+                if len(chunk_header) != 8:
+                    return "truncated PNG chunk header"
+                length, chunk_type = struct.unpack(">I4s", chunk_header)
+                if length > file_size - stream.tell() - 4:
+                    return "PNG chunk extends beyond end of file"
+                if not saw_header:
+                    if chunk_type != b"IHDR" or length != 13:
+                        return "PNG header chunk is missing or malformed"
+                    saw_header = True
+                crc = zlib.crc32(chunk_type)
+                remaining = length
+                while remaining:
+                    block = stream.read(min(64 * 1024, remaining))
+                    if not block:
+                        return "truncated PNG image data"
+                    crc = zlib.crc32(block, crc)
+                    remaining -= len(block)
+                stored_crc = stream.read(4)
+                if len(stored_crc) != 4 or (crc & 0xFFFFFFFF) != struct.unpack(">I", stored_crc)[0]:
+                    return f"{chunk_type.decode('ascii', errors='replace')} chunk checksum failed"
+                if chunk_type == b"IDAT":
+                    saw_image_data = True
+                if chunk_type == b"IEND":
+                    if length != 0 or not saw_image_data:
+                        return "PNG ended before complete image data"
+                    saw_end = True
+                    if stream.tell() != file_size:
+                        return "unexpected data follows the PNG end chunk"
+                    break
+            if not saw_header or not saw_image_data or not saw_end:
+                return "PNG is incomplete"
+    except OSError:
+        return "file could not be read (permission or I/O error)"
+    return None
+
+
+def scan_texture_resources(game_path):
+    """Read-only checks for missing Resources and structurally damaged PNGs."""
+    if not game_path or not os.path.isdir(game_path):
+        return []
+    resources = os.path.join(game_path, "Resources")
+    backup = os.path.join(game_path, "Resources_Vanilla_Backup")
+    if not os.path.isdir(resources):
+        return [{
+            "title": "Geometry Dash Resources folder is missing",
+            "detail": "The game’s Resources folder is not present, so texture files cannot load.",
+            "steps": "Close the game, then use Steam → Geometry Dash → Properties → Installed Files → Verify integrity of game files. Run Check Setup again after Steam finishes.",
+        }]
+    try:
+        current_pngs = {entry.name for entry in os.scandir(resources)
+                        if entry.is_file() and entry.name.casefold().endswith(".png")}
+        if not current_pngs:
+            return [{"title": "Geometry Dash has no PNG texture resources",
+                     "detail": "The Resources folder exists but contains no top-level PNG textures.",
+                     "steps": "Close the game and verify Geometry Dash through Steam. Don’t delete the folder or save files manually."}]
+        invalid = []
+        for filename in sorted(current_pngs):
+            problem = inspect_png_resource(os.path.join(resources, filename))
+            if problem:
+                invalid.append((filename, problem))
+                if len(invalid) >= 5:
+                    break
+        vanilla_pngs = set()
+        if os.path.isdir(backup):
+            vanilla_pngs = {entry.name for entry in os.scandir(backup)
+                            if entry.is_file() and entry.name.casefold().endswith(".png")}
+        missing = sorted(vanilla_pngs - current_pngs)[:8]
+        pack_name = ""
+        try:
+            with open(os.path.join(game_path, "geode", "active_texture_pack.json"), "r", encoding="utf-8") as stream:
+                pack_name = str(json.load(stream).get("name", "Custom texture pack"))[:100]
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+    except OSError:
+        return [{"title": "Geometry Dash textures could not be checked",
+                 "detail": "The Resources folder could not be read because of a permission or I/O error.",
+                 "steps": "Close Geometry Dash and Steam, check that the selected game folder is correct, then retry Check Setup."}]
+    if invalid or missing:
+        detail = []
+        if invalid:
+            detail.append("PNG integrity check failed for " + "; ".join(f"{name}: {reason}" for name, reason in invalid))
+        if missing:
+            detail.append("Missing compared with GeodeSync’s vanilla backup: " + ", ".join(missing))
+        return [{"title": "Geometry Dash texture files are damaged or missing",
+                 "detail": ". ".join(detail) + ".",
+                 "steps": "Disable any active Geode texture pack first. If GeodeSync has a vanilla backup, use Texture Pack Tools → Restore Vanilla Textures. Otherwise close the game and verify its files in Steam, then run Check Setup again."}]
+    if pack_name:
+        return [{"title": "A custom Geometry Dash texture pack is active",
+                 "detail": f"GeodeSync found the recorded pack “{pack_name}” and checked {len(current_pngs)} top-level PNG files for structural damage. An integrity check cannot tell whether intact textures look wrong in-game.",
+                 "steps": "If textures appear pink/black, disable the pack in Geode’s texture loader and relaunch. If it was installed by GeodeSync, Texture Pack Tools → Restore Vanilla Textures can restore the saved vanilla copy."}]
+    return [{"title": "Geometry Dash texture files passed the basic integrity check",
+             "detail": f"GeodeSync checked {len(current_pngs)} top-level PNG files and found no truncation or PNG checksum errors. This cannot detect every valid-but-wrong texture pack or rendering/GPU issue.",
+             "steps": "If textures still appear pink/black, disable any Geode texture pack. If that does not help, verify Geometry Dash through Steam and export a support report."}]
+
+
 def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_error=None, is_linux=None):
     """Read-only checks for common setup problems; never modifies game or Steam files."""
     is_windows = IS_WIN if is_windows is None else bool(is_windows)
@@ -434,6 +544,8 @@ def scan_installation_issues(manager, is_windows=None, is_macos=None, recovery_e
                 "detail": "The selected folder does not contain `GeometryDash.exe`.",
                 "steps": "In Steam, open Geometry Dash → Properties → Installed Files → Verify integrity of game files. Wait for Steam to finish, then select the folder containing `GeometryDash.exe` again.",
             })
+
+    findings.extend(scan_texture_resources(game_path))
 
     # Check OneDrive game path
     if game_path and "onedrive" in game_path.casefold():

@@ -45,6 +45,8 @@ from geodesync.services.diagnostics import (  # noqa: E402
     read_windows_pe_machine,
     validate_windows_game_images,
     explain_error_text,
+    inspect_png_resource,
+    scan_texture_resources,
     scan_installation_issues,
 )
 

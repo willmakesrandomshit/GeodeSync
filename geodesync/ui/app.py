@@ -1434,6 +1434,7 @@ class GeodeSyncApp(tk.Tk):
                 autofix_action_btn.pack(side="left", padx=(0, 6), before=copy_btn)
 
         def scan():
+            texture_action_btn.pack_forget()
             result.config(state="normal")
             result.delete("1.0", "end")
             result.insert("end", "Checking Steam and game files…\nThis read-only check can take a few seconds.")
@@ -1453,6 +1454,8 @@ class GeodeSyncApp(tk.Tk):
                         show_result("Setup check", "\n\n──────────────\n\n".join(blocks), "Use Export Report if you still need help.")
                         if findings:
                             autofix_action_btn.pack(side="left", padx=(0, 6), before=copy_btn)
+                        if any("texture" in finding["title"].casefold() for finding in findings):
+                            texture_action_btn.pack(side="left", padx=(0, 6), before=copy_btn)
                 except Exception as error:
                     error_text = str(error)
                     def fail():
@@ -1471,6 +1474,12 @@ class GeodeSyncApp(tk.Tk):
 
         copy_btn = tk.Button(actions, text="Copy Steps", command=copy_steps, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2")
         copy_btn.pack(side="right")
+
+        texture_action_btn = tk.Button(
+            actions, text="🎨 Open Texture Tools", command=self.open_texture_pack_hub,
+            font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"],
+            relief="flat", padx=10, pady=5, cursor="hand2",
+        )
 
         tk.Button(actions, text="Check Setup", command=scan, font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg=UI["background"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
         tk.Button(actions, text="Explain Error", command=explain, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", padx=(0, 6))
@@ -1517,7 +1526,7 @@ class GeodeSyncApp(tk.Tk):
         self.update_label = tk.Label(self.update_banner, text="Update available", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["lime_dark"])
         self.update_label.pack(side="left")
 
-        self.update_action_btn = tk.Button(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), font=("Segoe UI", 8, "bold"), bg=UI["lime"], fg="#ffffff", activebackground=UI["lime_hover"], activeforeground="#ffffff", relief="flat", padx=12, pady=4, cursor="hand2")
+        self.update_action_btn = ModernButton(self.update_banner, text="Update now", command=lambda: self.start_self_update(auto_install=True), bg=UI["lime"], hover_bg=UI["lime_hover"], fg="#ffffff", height=32, width=106, font=("Segoe UI", 9, "bold"))
         self.update_action_btn.pack(side="right")
 
         # Cloud Announcement Banner (hidden by default)
@@ -1527,99 +1536,122 @@ class GeodeSyncApp(tk.Tk):
         self.announcement_close = tk.Button(self.announcement_banner, text="✕", command=lambda: self.announcement_banner.pack_forget(), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], activebackground=UI["panel"], relief="flat", cursor="hand2")
         self.announcement_close.pack(side="right")
 
-        # 1. HEADER BAR: Clean 52px top bar with brand, primary navigation, and discrete utilities
-        self.header_frame = tk.Frame(self, bg=UI["header"], padx=20, pady=10)
+        # V3 workspace shell: persistent navigation and a focused content area.
+        self.app_shell = tk.Frame(self, bg=UI["background"])
+        self.app_shell.pack(fill="both", expand=True)
+
+        self.sidebar = tk.Frame(self.app_shell, bg=UI["header"], width=184,
+                                highlightbackground=UI["border"], highlightthickness=1)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+
+        brand = tk.Frame(self.sidebar, bg=UI["header"], padx=16, pady=18)
+        brand.pack(fill="x")
+        brand_mark = tk.Label(brand, text="G", font=("Segoe UI", 14, "bold"),
+                              fg=UI["background"], bg=UI["lime"], width=2, pady=3)
+        brand_mark.pack(side="left", padx=(0, 9))
+        brand_wordmark = tk.Frame(brand, bg=UI["header"])
+        brand_wordmark.pack(side="left", anchor="center")
+        tk.Label(brand_wordmark, text="GEODESYNC", font=("Segoe UI", 12, "bold"),
+                 fg=UI["text"], bg=UI["header"]).pack(anchor="w")
+        tk.Label(brand_wordmark, text=f"DESKTOP  ·  V{APP_VERSION}", font=("Segoe UI", 7, "bold"),
+                 fg=UI["quiet"], bg=UI["header"]).pack(anchor="w", pady=(2, 0))
+
+        tk.Frame(self.sidebar, bg=UI["border"], height=1).pack(fill="x", padx=14, pady=(0, 16))
+        tk.Label(self.sidebar, text="WORKSPACE", font=("Segoe UI", 7, "bold"),
+                 fg=UI["quiet"], bg=UI["header"]).pack(anchor="w", padx=17, pady=(0, 7))
+
+        self.nav_tabs = [
+            ("home", "⌂   Overview"),
+            ("mods", "▦   Mods"),
+            ("library", "▣   Library"),
+            ("tools", "⌘   Tools & repair"),
+        ]
+        self.tab_buttons = {}
+        self.nav_frame = tk.Frame(self.sidebar, bg=UI["header"], padx=10)
+        self.nav_frame.pack(fill="x")
+        for tab_id, tab_label in self.nav_tabs:
+            btn = ModernButton(
+                self.nav_frame,
+                text=tab_label,
+                font=("Segoe UI", 9, "bold"),
+                bg=UI["cyan_dark"] if tab_id == "home" else UI["header"],
+                hover_bg=UI["border"],
+                fg=UI["text"] if tab_id == "home" else UI["muted"],
+                height=40, width=160,
+                command=lambda tid=tab_id: self.switch_main_tab(tid),
+            )
+            btn.pack(fill="x", pady=3)
+            self.tab_buttons[tab_id] = btn
+
+        sidebar_spacer = tk.Frame(self.sidebar, bg=UI["header"])
+        sidebar_spacer.pack(fill="both", expand=True)
+        sidebar_help = tk.Frame(self.sidebar, bg=UI["panel"], padx=12, pady=12,
+                                highlightbackground=UI["border"], highlightthickness=1)
+        sidebar_help.pack(fill="x", padx=10, pady=12)
+        tk.Label(sidebar_help, text="NEED A HAND?", font=("Segoe UI", 7, "bold"),
+                 fg=UI["amber"], bg=UI["panel"]).pack(anchor="w")
+        tk.Label(sidebar_help, text="Run a safe setup check or get help from the community.",
+                 font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"],
+                 wraplength=138, justify="left").pack(anchor="w", pady=(4, 9))
+        ModernButton(sidebar_help, text="Open diagnostics", command=self.open_get_help_center,
+                     font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"],
+                     hover_bg=UI["border"], fg=UI["cyan"], height=32, width=136).pack(fill="x")
+
+        self.main_column = tk.Frame(self.app_shell, bg=UI["background"])
+        self.main_column.pack(side="left", fill="both", expand=True)
+
+        # 1. HEADER BAR: focused page context and discrete utilities
+        self.header_frame = tk.Frame(self.main_column, bg=UI["header"], padx=22, pady=10,
+                                     highlightbackground=UI["border"], highlightthickness=1)
         self.header_frame.pack(fill="x")
 
         title_box = tk.Frame(self.header_frame, bg=UI["header"])
         title_box.pack(side="left")
 
-        title = tk.Label(title_box, text="GeodeSync", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["header"])
-        title.pack(side="left")
-
-        ver_pill = tk.Label(title_box, text=f"v{APP_VERSION}", font=("Segoe UI", 8, "bold"), fg=UI["muted"], bg=UI["panel_alt"], padx=6, pady=2)
-        ver_pill.pack(side="left", padx=(8, 0))
+        self.section_heading = tk.Label(title_box, text="Overview", font=("Segoe UI", 14, "bold"),
+                                        fg=UI["text"], bg=UI["header"])
+        self.section_heading.pack(anchor="w")
+        self.section_caption = tk.Label(title_box, text="Your game, mods, and saves at a glance.",
+                                        font=("Segoe UI", 8), fg=UI["muted"], bg=UI["header"])
+        self.section_caption.pack(anchor="w", pady=(1, 0))
 
         # Right: discrete utilities
         utility_box = tk.Frame(self.header_frame, bg=UI["header"])
         utility_box.pack(side="right")
 
-        settings_btn = tk.Button(
+        settings_btn = ModernButton(
             utility_box,
             text="Settings",
             command=self.open_preferences_dialog,
-            font=("Segoe UI", 8, "bold"),
-            bg=UI["panel_alt"],
+            font=("Segoe UI", 9, "bold"),
+            bg=UI["panel_alt"], hover_bg=UI["border"],
             fg=UI["muted"],
-            activebackground=UI["border"],
-            activeforeground=UI["text"],
-            relief="flat",
-            padx=10,
-            pady=5,
-            cursor="hand2",
+            height=34, width=82,
         )
         settings_btn.pack(side="right", padx=(6, 0))
 
-        help_btn = tk.Button(
+        help_btn = ModernButton(
             utility_box,
             text="Diagnostics",
             command=self.open_get_help_center,
-            font=("Segoe UI", 8, "bold"),
-            bg=UI["panel_alt"],
+            font=("Segoe UI", 9, "bold"),
+            bg=UI["panel_alt"], hover_bg=UI["border"],
             fg=UI["cyan"],
-            activebackground=UI["border"],
-            activeforeground=UI["text"],
-            relief="flat",
-            padx=10,
-            pady=5,
-            cursor="hand2",
+            height=34, width=108,
         )
         help_btn.pack(side="right", padx=(6, 0))
 
-        discord_link = tk.Button(
+        discord_link = ModernButton(
             utility_box,
             text="Discord",
             command=lambda: webbrowser.open("https://discord.gg/tyQG5xNGCx"),
-            font=("Segoe UI", 8),
-            bg=UI["header"],
+            font=("Segoe UI", 9),
+            bg=UI["header"], hover_bg=UI["panel_alt"],
             fg=UI["quiet"],
-            activebackground=UI["header"],
-            activeforeground=UI["text"],
-            relief="flat",
-            padx=6,
-            pady=5,
-            cursor="hand2",
+            height=34, width=70,
         )
         discord_link.pack(side="right", padx=(4, 0))
-
-        # Center Primary Navigation Bar
-        self.nav_frame = tk.Frame(self.header_frame, bg=UI["header"])
-        self.nav_frame.pack(side="left", padx=(30, 0))
-
-        self.nav_tabs = [
-            ("home", "Home"),
-            ("mods", "Mods"),
-            ("library", "Library"),
-            ("tools", "Tools"),
-        ]
-        self.tab_buttons = {}
-        for tab_id, tab_label in self.nav_tabs:
-            btn = tk.Button(
-                self.nav_frame,
-                text=tab_label,
-                font=("Segoe UI", 9, "bold"),
-                bg=UI["panel_alt"] if tab_id == "home" else UI["header"],
-                fg=UI["cyan"] if tab_id == "home" else UI["muted"],
-                activebackground=UI["panel_alt"],
-                activeforeground=UI["text"],
-                relief="flat",
-                padx=14,
-                pady=5,
-                cursor="hand2",
-                command=lambda tid=tab_id: self.switch_main_tab(tid),
-            )
-            btn.pack(side="left", padx=(0, 4))
-            self.tab_buttons[tab_id] = btn
 
         # Backward compatibility aliases for existing tests
         self.tab_buttons["dashboard"] = self.tab_buttons["home"]
@@ -1630,7 +1662,7 @@ class GeodeSyncApp(tk.Tk):
         self.tab_buttons["toolbox"] = self.tab_buttons["tools"]
 
         # Main Body Container
-        body = tk.Frame(self, bg=UI["background"], padx=20, pady=12)
+        body = tk.Frame(self.main_column, bg=UI["background"], padx=22, pady=16)
         body.pack(fill="both", expand=True)
 
         self.tab_container = tk.Frame(body, bg=UI["background"])
@@ -1658,14 +1690,14 @@ class GeodeSyncApp(tk.Tk):
         home_f = self.tab_frames["home"]
 
         # 1A. HERO LAUNCH CARD
-        self.guide_card = tk.Frame(home_f, bg=UI["panel"], padx=22, pady=16, highlightbackground=UI["border"], highlightthickness=1)
+        self.guide_card = tk.Frame(home_f, bg=UI["panel"], padx=24, pady=20, highlightbackground=UI["border"], highlightthickness=1)
         self.guide_card.pack(fill="x", pady=(0, 12))
 
         # Top status strip inside hero
         hero_status_row = tk.Frame(self.guide_card, bg=UI["panel"])
         hero_status_row.pack(fill="x", pady=(0, 8))
 
-        self.guide_badge = tk.Label(hero_status_row, text="CHECKING", font=("Segoe UI", 7, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=8, pady=2)
+        self.guide_badge = tk.Label(hero_status_row, text="CHECKING", font=("Segoe UI", 8, "bold"), fg=UI["lime"], bg=UI["lime_dark"], padx=9, pady=4)
         self.guide_badge.pack(side="left")
 
         # Setup badges packed next to status
@@ -1684,10 +1716,10 @@ class GeodeSyncApp(tk.Tk):
         self.lock_badge.pack(side="left", padx=2)
         self.lock_badge.bind("<Button-1>", lambda e: self.toggle_steam_lock())
 
-        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 15, "bold"), fg=UI["text"], bg=UI["panel"])
+        self.guide_title = tk.Label(self.guide_card, text="Checking your setup...", font=("Segoe UI", 18, "bold"), fg=UI["text"], bg=UI["panel"])
         self.guide_title.pack(anchor="w", pady=(0, 2))
 
-        self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is ready.", font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=780, justify="left")
+        self.guide_desc = tk.Label(self.guide_card, text="GeodeSync is ready.", font=("Segoe UI", 9), fg=UI["muted"], bg=UI["panel"], wraplength=880, justify="left")
         self.guide_desc.pack(anchor="w", pady=(0, 10))
 
         # Progress bar (for updates / depot downloads)
@@ -1706,19 +1738,16 @@ class GeodeSyncApp(tk.Tk):
         tk.Label(launch_presets_row, text="LAUNCH MODE:", font=("Segoe UI", 7, "bold"), fg=UI["quiet"], bg=UI["panel"]).pack(side="left", padx=(0, 8))
 
         def _add_preset_chip(lbl_text, mode_id, color):
-            b = tk.Button(
+            b = ModernButton(
                 launch_presets_row,
                 text=lbl_text,
                 command=lambda: self.apply_and_notify_preset(mode_id),
                 font=("Segoe UI", 8, "bold"),
                 bg=UI["panel_alt"],
+                hover_bg=UI["border"],
                 fg=color,
-                activebackground=UI["border"],
-                activeforeground=UI["text"],
-                relief="flat",
-                padx=8,
-                pady=2,
-                cursor="hand2"
+                height=30,
+                width=126 if mode_id == "tournament" else (132 if mode_id == "globed" else 118),
             )
             b.pack(side="left", padx=(0, 6))
             return b
@@ -1736,18 +1765,17 @@ class GeodeSyncApp(tk.Tk):
             bg=UI["lime"],
             hover_bg=UI["lime_hover"],
             fg="#ffffff",
-            height=46,
-            font=("Segoe UI", 11, "bold")
+            height=52,
+            font=("Segoe UI", 12, "bold")
         )
         self.primary_btn.pack(fill="x")
         self.launch_btn = self.primary_btn
 
         # 1B. TWO SIDE-BY-SIDE SUMMARY CARDS
         overview_grid = tk.Frame(home_f, bg=UI["background"])
-        overview_grid.pack(fill="both", expand=True)
+        overview_grid.pack(fill="x")
         overview_grid.columnconfigure(0, weight=1)
         overview_grid.columnconfigure(1, weight=1)
-        overview_grid.rowconfigure(0, weight=1)
 
         # Left Card: Mods Summary
         mods_summary_card = tk.Frame(overview_grid, bg=UI["panel"], padx=18, pady=14, highlightbackground=UI["border"], highlightthickness=1)
@@ -1757,24 +1785,21 @@ class GeodeSyncApp(tk.Tk):
         m_head.pack(fill="x", pady=(0, 8))
         tk.Label(m_head, text="🧩  Installed Mods & Loader", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
 
-        m_link = tk.Button(
+        m_link = ModernButton(
             m_head,
             text="Manage Mods →",
             command=lambda: self.switch_main_tab("mods"),
             font=("Segoe UI", 8, "bold"),
-            bg=UI["panel"],
+            bg=UI["panel_alt"], hover_bg=UI["border"],
             fg=UI["cyan"],
-            activebackground=UI["panel"],
-            activeforeground=UI["cyan_hover"],
-            relief="flat",
-            cursor="hand2",
+            height=30, width=126,
         )
         m_link.pack(side="right")
 
         self.mods_summary_lbl = tk.Label(
             mods_summary_card,
             text="Geode mod loader active.",
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9),
             fg=UI["muted"],
             bg=UI["panel"],
             justify="left",
@@ -1785,10 +1810,10 @@ class GeodeSyncApp(tk.Tk):
         m_btn_row = tk.Frame(mods_summary_card, bg=UI["panel"])
         m_btn_row.pack(anchor="w", pady=(6, 0))
 
-        b1 = tk.Button(m_btn_row, text="🛍️ Browse Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=4, cursor="hand2")
+        b1 = ModernButton(m_btn_row, text="🛍️ Browse Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["lime"], height=34, width=134)
         b1.pack(side="left", padx=(0, 6))
 
-        b2 = tk.Button(m_btn_row, text="🔄 Update Mods", command=self.open_mod_updater_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
+        b2 = ModernButton(m_btn_row, text="🔄 Update Mods", command=self.open_mod_updater_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=34, width=128)
         b2.pack(side="left")
 
         # Right Card: Player & Saves Overview (self.player_card)
@@ -1799,21 +1824,18 @@ class GeodeSyncApp(tk.Tk):
         p_head.pack(fill="x", pady=(0, 8))
         tk.Label(p_head, text="👤  Player Profile & Saves", font=("Segoe UI", 10, "bold"), fg=UI["text"], bg=UI["panel"]).pack(side="left")
 
-        p_link = tk.Button(
+        p_link = ModernButton(
             p_head,
             text="Save Hub →",
             command=lambda: self.switch_main_tab("library"),
             font=("Segoe UI", 8, "bold"),
-            bg=UI["panel"],
+            bg=UI["panel_alt"], hover_bg=UI["border"],
             fg=UI["lilac"],
-            activebackground=UI["panel"],
-            activeforeground=UI["lilac_hover"],
-            relief="flat",
-            cursor="hand2",
+            height=30, width=112,
         )
         p_link.pack(side="right")
 
-        self.player_name_lbl = tk.Label(self.player_card, text="Reading save data...", font=("Segoe UI", 9, "bold"), fg=UI["lime"], bg=UI["panel"])
+        self.player_name_lbl = tk.Label(self.player_card, text="Reading save data...", font=("Segoe UI", 10, "bold"), fg=UI["lime"], bg=UI["panel"])
         self.player_name_lbl.pack(anchor="w", pady=(0, 2))
 
         self.save_health_lbl = tk.Label(self.player_card, text="Save Health: Verifying...", font=("Segoe UI", 7), fg=UI["quiet"], bg=UI["panel"])
@@ -1840,11 +1862,31 @@ class GeodeSyncApp(tk.Tk):
         p_btn_row = tk.Frame(self.player_card, bg=UI["panel"])
         p_btn_row.pack(anchor="w", pady=(6, 0))
 
-        pb1 = tk.Button(p_btn_row, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=4, cursor="hand2")
+        pb1 = ModernButton(p_btn_row, text="💾 Backup Saves", command=self.backup_saves, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["lime"], height=34, width=134)
         pb1.pack(side="left", padx=(0, 6))
 
-        pb2 = tk.Button(p_btn_row, text="🧹 Optimize Save", command=self.open_save_optimizer_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=4, cursor="hand2")
+        pb2 = ModernButton(p_btn_row, text="🧹 Optimize Save", command=self.open_save_optimizer_dialog, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=34, width=134)
         pb2.pack(side="left")
+
+        # The first-run dashboard puts the three most common next steps below
+        # the live status cards, so new players are not left with a blank panel.
+        quick_start = tk.Frame(home_f, bg=UI["background"])
+        quick_start.pack(fill="x", pady=(12, 0))
+        for column in range(3):
+            quick_start.columnconfigure(column, weight=1, uniform="quick-start")
+        quick_actions = (
+            ("DISCOVER", "Browse community mods and add-ons.", "Open Mod Store", lambda: self.switch_main_tab("store"), UI["lime"]),
+            ("PROTECT", "Make a restore point for your progress.", "Back up saves", self.backup_saves, UI["cyan"]),
+            ("GET HELP", "Run a safe check if something is broken.", "Diagnose a problem", self.open_get_help_center, UI["amber"]),
+        )
+        for column, (eyebrow, description, label, action, accent) in enumerate(quick_actions):
+            card = tk.Frame(quick_start, bg=UI["panel"], padx=14, pady=12,
+                            highlightbackground=UI["border"], highlightthickness=1)
+            card.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 5, 5 if column < 2 else 0))
+            tk.Label(card, text=eyebrow, font=("Segoe UI", 8, "bold"), fg=accent, bg=UI["panel"]).pack(anchor="w")
+            tk.Label(card, text=description, font=("Segoe UI", 8), fg=UI["muted"], bg=UI["panel"], wraplength=260, justify="left").pack(anchor="w", pady=(3, 8))
+            ModernButton(card, text=label, command=action, bg=UI["panel_alt"], hover_bg=UI["border"],
+                         fg=accent, height=34, font=("Segoe UI", 8, "bold")).pack(fill="x")
 
         # Hidden frame for backward-compatible badge references
         compat_f = tk.Frame(self, bg=UI["background"])
@@ -1871,7 +1913,7 @@ class GeodeSyncApp(tk.Tk):
         # =========================================================================
         # 3. MINIMAL 28px FOOTER
         # =========================================================================
-        footer = tk.Frame(self, bg=UI["header"], padx=20, pady=6)
+        footer = tk.Frame(self.main_column, bg=UI["header"], padx=20, pady=6)
         footer.pack(fill="x", side="bottom")
 
         footer_actions = tk.Frame(footer, bg=UI["header"])
@@ -1889,16 +1931,16 @@ class GeodeSyncApp(tk.Tk):
         )
         self.status_ticker_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        choose_path_btn = tk.Button(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        choose_path_btn = ModernButton(footer_actions, text="📁 Game Folder", command=self.browse_gd_path, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=30, width=116)
         choose_path_btn.pack(side="right", padx=(4, 0))
 
-        choose_save_btn = tk.Button(footer_actions, text="💾 Save Folder", command=self.browse_save_path, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        choose_save_btn = ModernButton(footer_actions, text="💾 Save Folder", command=self.browse_save_path, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=30, width=116)
         choose_save_btn.pack(side="right", padx=(4, 0))
 
-        view_log_btn = tk.Button(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=8, pady=2, cursor="hand2")
+        view_log_btn = ModernButton(footer_actions, text="📋 Activity Log", command=self.open_log_viewer, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=30, width=120)
         view_log_btn.pack(side="right", padx=(4, 0))
 
-        fix_problem_btn = tk.Button(footer_actions, text="🛠 Fix a problem", command=self.open_get_help_center, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["amber"], relief="flat", padx=8, pady=2, cursor="hand2")
+        fix_problem_btn = ModernButton(footer_actions, text="🛠 Fix a problem", command=self.open_get_help_center, font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["amber"], height=30, width=126)
         fix_problem_btn.pack(side="right", padx=(4, 0))
 
         self.path_lbl = tk.Label(
@@ -1925,13 +1967,30 @@ class GeodeSyncApp(tk.Tk):
         elif tab_id in ("toolbox", "jukebox", "tools"):
             target = "tools"
 
-        for tid, btn in getattr(self, "tab_buttons", {}).items():
-            if tid in (target, tab_id):
-                btn.config(bg=UI["panel_alt"], fg=UI["cyan"])
-            else:
-                btn.config(bg=UI["header"], fg=UI["muted"])
+        page_copy = {
+            "home": ("Overview", "Your Geometry Dash setup, mods, and saves at a glance."),
+            "mods": ("Mods", "Browse, update, and manage your Geode mods."),
+            "library": ("Library", "Protect your saves and explore your Geometry Dash profile."),
+            "tools": ("Tools & repair", "Find the right utility or diagnose a setup issue."),
+        }
+        if hasattr(self, "section_heading"):
+            heading, caption = page_copy.get(target, page_copy["home"])
+            self.section_heading.config(text=heading)
+            self.section_caption.config(text=caption)
 
-        for tid, frame in getattr(self, "tab_frames", {}).items():
+        for tid in ("home", "mods", "library", "tools"):
+            btn = self.tab_buttons.get(tid)
+            if btn is None:
+                continue
+            if tid == target:
+                btn.config(bg=UI["cyan_dark"], fg=UI["text"], activebackground=UI["cyan_dark"])
+            else:
+                btn.config(bg=UI["header"], fg=UI["muted"], activebackground=UI["border"])
+
+        for tid in ("home", "mods", "library", "tools"):
+            frame = getattr(self, "tab_frames", {}).get(tid)
+            if frame is None:
+                continue
             if tid == target:
                 frame.pack(fill="both", expand=True)
                 if tab_id == "store":
@@ -1954,7 +2013,7 @@ class GeodeSyncApp(tk.Tk):
                         self._refresh_installed_mods_list()
                 elif tab_id == "jukebox":
                     self._refresh_embedded_jukebox()
-            elif tid in ("home", "mods", "library", "tools"):
+            else:
                 frame.pack_forget()
 
     def _build_mods_tab(self, parent):
@@ -1984,14 +2043,14 @@ class GeodeSyncApp(tk.Tk):
 
         self.show_mods_subview = show_mods_subview
 
-        btn_inst = tk.Button(subnav, text="🧩 Installed Mods", command=lambda: show_mods_subview("installed"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["cyan"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_inst = ModernButton(subnav, text="🧩 Installed Mods", command=lambda: show_mods_subview("installed"), font=("Segoe UI", 8, "bold"), bg=UI["cyan_dark"], hover_bg=UI["border"], fg=UI["text"], height=34, width=142)
         btn_inst.pack(side="left", padx=(0, 4))
 
-        btn_store = tk.Button(subnav, text="🛍️ Mod Store & Index", command=lambda: show_mods_subview("store"), font=("Segoe UI", 8, "bold"), bg=UI["header"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_store = ModernButton(subnav, text="🛍️ Mod Store & Index", command=lambda: show_mods_subview("store"), font=("Segoe UI", 8, "bold"), bg=UI["header"], hover_bg=UI["border"], fg=UI["muted"], height=34, width=154)
         btn_store.pack(side="left")
 
-        tk.Button(subnav, text="📁 Open Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["muted"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right")
-        tk.Button(subnav, text="🔄 Check Updates", command=self.open_mod_updater_dialog, font=("Segoe UI", 8), bg=UI["panel_alt"], fg=UI["lime"], relief="flat", padx=10, pady=5, cursor="hand2").pack(side="right", padx=(0, 6))
+        ModernButton(subnav, text="📁 Open Mods Folder", command=self.open_mods_folder, font=("Segoe UI", 8), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["muted"], height=34, width=150).pack(side="right")
+        ModernButton(subnav, text="🔄 Check Updates", command=self.open_mod_updater_dialog, font=("Segoe UI", 8), bg=UI["panel_alt"], hover_bg=UI["border"], fg=UI["lime"], height=34, width=132).pack(side="right", padx=(0, 6))
 
         self._build_installed_mods_view(self.mods_installed_frame)
         self._build_store_tab(self.mods_store_frame)
@@ -2030,7 +2089,7 @@ class GeodeSyncApp(tk.Tk):
             empty.pack(fill="x")
             tk.Label(empty, text="No Geode mods installed yet.", font=("Segoe UI", 11, "bold"), fg=UI["muted"], bg=UI["panel"]).pack()
             tk.Label(empty, text="Browse the official Mod Store to install popular mods like Globed, CBF, and Megahack.", font=("Segoe UI", 8), fg=UI["quiet"], bg=UI["panel"]).pack(pady=(4, 10))
-            tk.Button(empty, text="🛍️ Open Mod Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 9, "bold"), bg=UI["lime"], fg="#ffffff", relief="flat", padx=12, pady=5, cursor="hand2").pack()
+            ModernButton(empty, text="🛍️ Open Mod Store", command=lambda: self.switch_main_tab("store"), font=("Segoe UI", 9, "bold"), bg=UI["lime"], hover_bg=UI["lime_hover"], fg=UI["background"], height=38, width=170).pack()
             return
 
         for mod in mods:
@@ -2115,10 +2174,10 @@ class GeodeSyncApp(tk.Tk):
 
         self.show_library_subview = show_library_subview
 
-        btn_saves = tk.Button(subnav, text="💾 Save Vault & Slots", command=lambda: show_library_subview("saves"), font=("Segoe UI", 8, "bold"), bg=UI["panel_alt"], fg=UI["lilac"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_saves = ModernButton(subnav, text="💾 Save Vault & Slots", command=lambda: show_library_subview("saves"), font=("Segoe UI", 8, "bold"), bg=UI["lilac_dark"], hover_bg=UI["border"], fg=UI["text"], height=34, width=160)
         btn_saves.pack(side="left", padx=(0, 4))
 
-        btn_demon = tk.Button(subnav, text="🏆 Top 150 Demonlist", command=lambda: show_library_subview("demonlist"), font=("Segoe UI", 8, "bold"), bg=UI["header"], fg=UI["muted"], relief="flat", padx=12, pady=5, cursor="hand2")
+        btn_demon = ModernButton(subnav, text="🏆 Top 150 Demonlist", command=lambda: show_library_subview("demonlist"), font=("Segoe UI", 8, "bold"), bg=UI["header"], hover_bg=UI["border"], fg=UI["muted"], height=34, width=164)
         btn_demon.pack(side="left")
 
         self._build_saves_tab(self.library_saves_frame)
@@ -2165,23 +2224,24 @@ class GeodeSyncApp(tk.Tk):
             ("POWER", "#f59e0b", "#262015"),
             ("EXTRAS", "#8b5cf6", "#211c2a"),
         )
+        self.tool_group_labels = []
         for row, (name, accent, row_bg) in enumerate(groups):
-            tk.Label(
+            group_label = tk.Label(
                 tool_grid, text=name, font=("Segoe UI", 8, "bold"),
                 fg=accent, bg=UI["panel"], anchor="w", padx=5,
-            ).grid(row=row, column=0, sticky="ew", padx=(2, 5), pady=4)
+            )
+            group_label.grid(row=row, column=0, sticky="ew", padx=(2, 5), pady=4)
+            self.tool_group_labels.append((row, name, group_label))
 
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
             row_bg = groups[row][2]
-            button = tk.Button(
+            button = ModernButton(
                 tool_grid, text=label, command=command,
                 font=("Segoe UI", 9, "bold" if bold else "normal"),
-                bg=row_bg, fg=color, activebackground=UI["border"],
-                activeforeground=UI["text"], relief="flat", padx=8, pady=8,
-                cursor="hand2",
+                bg=row_bg, hover_bg=UI["border"], fg=color, height=44,
             )
             button.grid(row=row, column=column + 1, sticky="nsew", padx=3, pady=3)
-            self.tool_buttons.append((button, label, color, row_bg))
+            self.tool_buttons.append((button, label, color, row_bg, row, column + 1))
             return button
 
         # Row 0: MODS
@@ -2888,11 +2948,27 @@ class GeodeSyncApp(tk.Tk):
 
     def _filter_tools(self):
         query = self.tool_search_var.get().strip().lower()
-        for btn, label, orig_fg, row_bg in getattr(self, "tool_buttons", []):
-            if not query or query in label.lower():
-                btn.config(bg=UI["lime_dark"] if query else row_bg, fg=UI["lime"] if query else orig_fg)
+        matching_rows = set()
+        by_row = {}
+        for record in getattr(self, "tool_buttons", []):
+            btn, label, orig_fg, row_bg, row, column = record
+            by_row.setdefault(row, []).append(record)
+        group_by_row = {row: name.lower() for row, name, _ in getattr(self, "tool_group_labels", [])}
+        for row, records in by_row.items():
+            category_matches = bool(query and query in group_by_row.get(row, ""))
+            for btn, label, orig_fg, row_bg, _, column in records:
+                visible = not query or category_matches or query in label.lower()
+                if visible:
+                    btn.grid(row=row, column=column, sticky="nsew", padx=3, pady=3)
+                    btn.config(bg=UI["lime_dark"] if query else row_bg, fg=UI["lime"] if query else orig_fg)
+                    matching_rows.add(row)
+                else:
+                    btn.grid_remove()
+        for row, name, label_widget in getattr(self, "tool_group_labels", []):
+            if not query or row in matching_rows or query in name.lower():
+                label_widget.grid()
             else:
-                btn.config(bg=UI["panel"], fg=UI["quiet"])
+                label_widget.grid_remove()
 
     def open_log_viewer(self):
         dialog = tk.Toplevel(self)
@@ -4714,8 +4790,8 @@ class GeodeSyncApp(tk.Tk):
     def show_update_banner(self, new_ver: str, prompt=False):
         self.update_label.config(text=f"🎉 Update available: v{new_ver}! (Current: v{APP_VERSION})")
         try:
-            if hasattr(self, "header_frame") and self.header_frame.winfo_exists():
-                self.update_banner.pack(fill="x", side="top", before=self.header_frame)
+            if hasattr(self, "app_shell") and self.app_shell.winfo_exists():
+                self.update_banner.pack(fill="x", side="top", before=self.app_shell)
             else:
                 self.update_banner.pack(fill="x", side="top")
         except Exception:
@@ -4727,8 +4803,8 @@ class GeodeSyncApp(tk.Tk):
             return
         try:
             self.announcement_label.config(text=f"📢 {text}")
-            if hasattr(self, "header_frame") and self.header_frame.winfo_exists():
-                self.announcement_banner.pack(fill="x", side="top", before=self.header_frame)
+            if hasattr(self, "app_shell") and self.app_shell.winfo_exists():
+                self.announcement_banner.pack(fill="x", side="top", before=self.app_shell)
             else:
                 self.announcement_banner.pack(fill="x", side="top")
         except Exception:

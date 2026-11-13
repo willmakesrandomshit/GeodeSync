@@ -6,6 +6,8 @@ import shutil
 import time
 import zipfile
 
+from geodesync.services.diagnostics import inspect_png_resource
+
 
 
 class AssetsMixin:
@@ -143,13 +145,27 @@ class AssetsMixin:
         """
         if not self.gd_path:
             return False, "Geometry Dash path not set."
+        process_check = getattr(self, "is_gd_process_running", None)
+        if callable(process_check) and process_check():
+            return False, "Close Geometry Dash before restoring textures. No files were changed."
         bak_dir = os.path.join(self.gd_path, "Resources_Vanilla_Backup")
         if not os.path.isdir(bak_dir) or not os.listdir(bak_dir):
             return False, "Vanilla backup does not exist yet. Launch with vanilla textures to create one."
         res_dir = os.path.join(self.gd_path, "Resources")
 
         try:
-            files = [f for f in os.listdir(bak_dir) if os.path.isfile(os.path.join(bak_dir, f))]
+            files = [f for f in os.listdir(bak_dir)
+                     if os.path.isfile(os.path.join(bak_dir, f)) and not os.path.islink(os.path.join(bak_dir, f))]
+            if not files:
+                return False, "Vanilla backup contains no usable files. No files were changed."
+            # Validate the entire image backup before writing any of it so a bad backup
+            # cannot leave the live Resources directory half-restored.
+            for filename in files:
+                if filename.casefold().endswith(".png"):
+                    problem = inspect_png_resource(os.path.join(bak_dir, filename))
+                    if problem:
+                        return False, f"Vanilla backup texture {filename!r} failed its integrity check ({problem}). No files were changed."
+            os.makedirs(res_dir, exist_ok=True)
             total = len(files)
             for i, f in enumerate(files):
                 shutil.copy2(os.path.join(bak_dir, f), os.path.join(res_dir, f))

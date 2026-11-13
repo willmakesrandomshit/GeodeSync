@@ -8,7 +8,8 @@ from geodesync.ui.theme import UI
 
 class ModernButton(tk.Canvas):
     def __init__(self, parent, text, command, bg=UI["lilac"], hover_bg=UI["lilac_dark"], fg=UI["text"], height=46, width=None, font=("Segoe UI", 11, "bold")):
-        super().__init__(parent, height=height, bg=parent["bg"], highlightthickness=0)
+        super().__init__(parent, height=height, width=width or 200, bg=parent["bg"], highlightthickness=2,
+                         highlightbackground=parent["bg"], highlightcolor=UI["cyan"], takefocus=True)
         self.command = command
         self.normal_bg = bg
         self.hover_bg = hover_bg
@@ -18,17 +19,24 @@ class ModernButton(tk.Canvas):
         self.font = font
         self.height = height
         self.btn_width = width
+        self.wraplength = max(90, (width - 20) if width else 180)
         self.enabled = True
 
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
         self.bind("<Button-1>", self.on_click)
+        self.bind("<Return>", self.on_click)
+        self.bind("<space>", self.on_click)
+        self.bind("<FocusIn>", self.draw)
+        self.bind("<FocusOut>", self.draw)
         self.bind("<Configure>", self.draw)
 
     def draw(self, event=None):
         self.delete("all")
         w = self.winfo_width() if not self.btn_width else self.btn_width
         h = self.height
+        if not self.btn_width:
+            self.wraplength = max(90, w - 20)
         r = 10
 
         if not self.enabled:
@@ -45,7 +53,10 @@ class ModernButton(tk.Canvas):
         self.create_rectangle((r, 0, w - r, h), fill=fill, outline="")
         self.create_rectangle((0, r, w, h - r), fill=fill, outline="")
 
-        self.create_text(w / 2, h / 2, text=self.text, fill=text_color, font=self.font)
+        self.create_text(w / 2, h / 2, text=self.text, fill=text_color, font=self.font,
+                         width=self.wraplength, justify="center")
+        if self.focus_get() == self:
+            self.create_rectangle(2, 2, max(2, w - 2), max(2, h - 2), outline=UI["cyan"], width=1)
 
     def on_enter(self, event):
         if self.enabled:
@@ -60,10 +71,68 @@ class ModernButton(tk.Canvas):
     def on_click(self, event):
         if self.enabled and self.command:
             self.command()
+            return "break"
+
+    def invoke(self):
+        if self.enabled and self.command:
+            return self.command()
+        return None
 
     def set_enabled(self, enabled: bool):
         self.enabled = enabled
         self.draw()
+
+    def configure(self, cnf=None, **kwargs):
+        """Support the small, familiar subset of Tk Button options used by the app."""
+        options = {}
+        if isinstance(cnf, dict):
+            options.update(cnf)
+        elif isinstance(cnf, str):
+            mapped = {"text": self.text, "fg": self.fg, "bg": self.normal_bg,
+                      "activebackground": self.hover_bg, "command": self.command,
+                      "state": "normal" if self.enabled else "disabled"}
+            if cnf in mapped:
+                return mapped[cnf]
+            return super().configure(cnf)
+        elif cnf is not None:
+            return super().configure(cnf)
+        options.update(kwargs)
+        redraw = False
+        for key in ("text", "fg", "bg", "activebackground", "hover_bg", "command", "font", "height", "state"):
+            if key not in options:
+                continue
+            value = options.pop(key)
+            if key == "text":
+                self.text = value
+            elif key == "fg":
+                self.fg = value
+            elif key == "bg":
+                self.normal_bg = value
+                self.current_bg = value
+            elif key in ("activebackground", "hover_bg"):
+                self.hover_bg = value
+            elif key == "command":
+                self.command = value
+            elif key == "font":
+                self.font = value
+            elif key == "height":
+                self.height = int(value)
+                options["height"] = self.height
+            elif key == "state":
+                self.enabled = value not in ("disabled", tk.DISABLED)
+            redraw = True
+        result = super().configure(**options) if options else None
+        if redraw and hasattr(self, "text"):
+            self.draw()
+        return result
+
+    config = configure
+
+    def cget(self, key):
+        values = {"text": self.text, "fg": self.fg, "bg": self.normal_bg,
+                  "activebackground": self.hover_bg, "command": self.command,
+                  "state": "normal" if self.enabled else "disabled"}
+        return values[key] if key in values else super().cget(key)
 
     def set_config(self, text: str, bg: str, hover_bg: str, command=None, fg=None):
         self.text = text
