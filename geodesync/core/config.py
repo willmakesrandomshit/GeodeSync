@@ -5,7 +5,7 @@ import sys
 
 from geodesync.platform.process_manager import IS_WIN, IS_MAC, IS_LINUX
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.0.1"
 APP_NAME = "GeodeSync"
 GITHUB_REPO = "willmakesrandomshit/GeodeSync"
 CONFIG_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"

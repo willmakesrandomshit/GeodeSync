@@ -1,9 +1,9 @@
 {
-  "app_version": "2.8.0",
+  "app_version": "3.0.1",
   "geode_target_gd": "2.2081",
   "target_manifest": "3816559102876907245",
   "target_manifest_win": "3816559102876907245",
   "target_manifest_mac": "8780295549609362522",
   "latest_gd_version": "2.209",
-  "announcement": "GeodeSync v2.8.0 — The 100x Upgrade: Zero-Loss Game Exit Auto-Save, Pre-Launch Protection, Live Cloud Announcements & Security Guardian."
+  "announcement": "GeodeSync v3.0.1 — Workspace redesign, texture diagnostics, and safer recovery."
 }
