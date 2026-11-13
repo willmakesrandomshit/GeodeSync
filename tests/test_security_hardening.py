@@ -7,6 +7,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
+from platform_patch import patch_flag  # noqa: E402
 import main
 
 from main import (
@@ -39,13 +40,13 @@ def tempfile_zip():
 
 class SecurityHardeningTests(unittest.TestCase):
     def test_windows_path_opener_rejects_missing_and_bare_unc_paths(self):
-        with patch("main.IS_WIN", True), patch("main.os.startfile", create=True) as startfile, patch("main.os.path.exists", return_value=False):
+        with patch_flag("IS_WIN", True), patch("main.os.startfile", create=True) as startfile, patch("main.os.path.exists", return_value=False):
             self.assertFalse(main.open_url_or_path("\\\\"))
             self.assertFalse(main.open_url_or_path(r"C:\missing\folder"))
         startfile.assert_not_called()
 
     def test_windows_path_opener_still_delegates_protocol_urls(self):
-        with patch("main.IS_WIN", True), patch("main.os.startfile", create=True) as startfile:
+        with patch_flag("IS_WIN", True), patch("main.os.startfile", create=True) as startfile:
             self.assertTrue(main.open_url_or_path("steam://rungameid/322170"))
         startfile.assert_called_once_with("steam://rungameid/322170")
 
@@ -80,7 +81,7 @@ class SecurityHardeningTests(unittest.TestCase):
                 self.assertNotIn("xattr -cr", text)
 
     def test_update_action_downloads_verified_official_package(self):
-        source = (ROOT / "main.py").read_text(encoding="utf-8")
+        source = (ROOT / "geodesync" / "ui" / "app.py").read_text(encoding="utf-8")
         start = source.index("    def start_self_update(self, auto_install=False, release=None):")
         end = source.index("    def _finish_staged_app_update", start)
         update_action = source[start:end]
@@ -242,7 +243,7 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertIn("spctl --assess --type execute", workflow)
         self.assertIn("RELEASE_ASSETS: ${{ steps.assets.outputs.asset_names }}", workflow)
         self.assertIn("macOS packages are temporarily withheld", workflow)
-        self.assertIn("release_has_app_update(rel)", (ROOT / "main.py").read_text(encoding="utf-8"))
+        self.assertIn("release_has_app_update(rel)", (ROOT / "geodesync" / "ui" / "app.py").read_text(encoding="utf-8"))
 
     def test_verified_update_download_checks_digest_and_extracts(self):
         import hashlib

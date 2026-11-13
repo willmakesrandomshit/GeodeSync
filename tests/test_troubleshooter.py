@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from platform_patch import patch_flag  # noqa: E402
 from main import (
     explain_error_text,
     inspect_macos_app_security,
@@ -64,7 +65,7 @@ class TroubleshooterTests(unittest.TestCase):
                 SimpleNamespace(returncode=3, stdout="", stderr="rejected"),
                 SimpleNamespace(returncode=0, stdout="", stderr="secret-quarantine-value"),
             ]
-            with patch("main.IS_MAC", True):
+            with patch_flag("IS_MAC", True):
                 result = inspect_macos_app_security(
                     app,
                     runner=lambda *args, **kwargs: responses.pop(0),

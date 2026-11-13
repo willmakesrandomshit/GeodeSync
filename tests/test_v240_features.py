@@ -39,7 +39,7 @@ class TestV240Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped_to_2_4_0(self):
-        self.assertEqual(APP_VERSION, "2.8.0")
+        self.assertEqual(APP_VERSION, "3.0.0")
 
     def test_practice_music_swap_and_restore(self):
         # Create a mock StayInsideMe.mp3

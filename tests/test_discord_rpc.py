@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import struct
 import json
 from types import SimpleNamespace
+from platform_patch import patch_flag  # noqa: E402
 import main
 
 class TestDiscordRPC(unittest.TestCase):
@@ -41,7 +42,7 @@ class TestDiscordRPC(unittest.TestCase):
         self.assertEqual(rpc._current_state, "Protected")
         rpc.close()
 
-    @patch.object(main, "IS_WIN", False)
+    @patch_flag("IS_WIN", False)
     def test_window_close_keeps_process_alive_when_background_mode_is_enabled(self):
         app = SimpleNamespace(
             run_in_bg_enabled=True,
@@ -55,7 +56,7 @@ class TestDiscordRPC(unittest.TestCase):
         app.iconify.assert_called_once_with()
         app.quit_app.assert_not_called()
 
-    @patch.object(main, "IS_WIN", True)
+    @patch_flag("IS_WIN", True)
     def test_window_close_with_tray_enabled_withdraws_window(self):
         app = SimpleNamespace(
             run_in_bg_enabled=True,
@@ -73,7 +74,7 @@ class TestDiscordRPC(unittest.TestCase):
         app.iconify.assert_not_called()
         app.quit_app.assert_not_called()
 
-    @patch.object(main, "IS_WIN", True)
+    @patch_flag("IS_WIN", True)
     def test_window_unmap_minimizes_to_tray(self):
         app = SimpleNamespace(
             run_in_bg_enabled=True,
@@ -86,7 +87,7 @@ class TestDiscordRPC(unittest.TestCase):
         app._start_system_tray.assert_called_once_with()
         app.withdraw.assert_called_once_with()
 
-    @patch.object(main, "IS_WIN", True)
+    @patch_flag("IS_WIN", True)
     def test_window_close_falls_back_to_taskbar_when_tray_unavailable(self):
         app = SimpleNamespace(
             run_in_bg_enabled=True,

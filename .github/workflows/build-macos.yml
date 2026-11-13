@@ -231,7 +231,7 @@ jobs:
         run: |
           APP_VERSION=$(python3 - <<'PY'
           import re
-          match = re.search(r'^APP_VERSION = "([^"]+)"', open("main.py").read(), re.MULTILINE)
+          match = re.search(r'^APP_VERSION = "([^"]+)"', open("geodesync/core/config.py").read(), re.MULTILINE)
           if not match:
               raise SystemExit("APP_VERSION is missing")
           print(match.group(1))

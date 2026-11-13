@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from platform_patch import patch_flag  # noqa: E402
 from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_images, check_vc_redist_installed, check_folder_writable_and_space
 
 
@@ -23,7 +24,7 @@ class TestV230Features(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_version_bumped(self):
-        self.assertEqual(APP_VERSION, "2.8.0")
+        self.assertEqual(APP_VERSION, "3.0.0")
 
     def test_check_vc_redist_installed(self):
         ok, status, ver = check_vc_redist_installed()
@@ -48,7 +49,7 @@ class TestV230Features(unittest.TestCase):
         os.makedirs(portable_save, exist_ok=True)
         with open(os.path.join(portable_save, "CCGameManager.dat"), "wb") as f:
             f.write(b"MOCK_SAVE")
-        with patch("main.IS_MAC", False), patch("main.IS_LINUX", False), patch("main.IS_WIN", True), patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(self.test_dir, "EmptyAppData")}):
+        with patch_flag("IS_MAC", False), patch_flag("IS_LINUX", False), patch_flag("IS_WIN", True), patch.dict(os.environ, {"LOCALAPPDATA": os.path.join(self.test_dir, "EmptyAppData")}):
             found = self.mgr.get_save_data_dir()
             self.assertEqual(found, portable_save)
 
@@ -59,7 +60,7 @@ class TestV230Features(unittest.TestCase):
         with open(os.path.join(alt_root, "GeometryDash.exe"), "wb") as f:
             f.truncate(10698752)
 
-        with patch("main.IS_MAC", False), patch("main.IS_LINUX", False), patch("main.IS_WIN", True), patch.dict(os.environ, {"OneDrive": os.path.join(self.test_dir, "OneDrive")}):
+        with patch_flag("IS_MAC", False), patch_flag("IS_LINUX", False), patch_flag("IS_WIN", True), patch.dict(os.environ, {"OneDrive": os.path.join(self.test_dir, "OneDrive")}):
             installs = self.mgr.find_all_gd_installations()
             paths = [i["path"].lower() for i in installs]
             self.assertTrue(any("gd" in p for p in paths))
@@ -67,7 +68,7 @@ class TestV230Features(unittest.TestCase):
     def test_gd_22081_binary_size_recognition(self):
         """Ensures both 10698752 and 10700288 byte executables are recognized as 2.2081."""
         exe_path = os.path.join(self.gd_path, "GeometryDash.exe")
-        with patch("main.IS_MAC", False), patch("main.IS_WIN", True):
+        with patch_flag("IS_MAC", False), patch_flag("IS_WIN", True):
             for valid_size in (10698752, 10700288):
                 with open(exe_path, "wb") as f:
                     f.truncate(valid_size)
@@ -97,7 +98,7 @@ class TestV230Features(unittest.TestCase):
         with open(os.path.join(depot_dir, "large_padding.dat"), "wb") as f:
             f.truncate(160 * 1024 * 1024)
 
-        with patch("main.IS_MAC", False), patch("main.IS_WIN", True), patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
+        with patch_flag("IS_MAC", False), patch_flag("IS_WIN", True), patch.object(self.mgr, "get_depot_path", return_value=depot_dir):
             old_manifest = self.mgr.target_manifest
             self.mgr.target_manifest = "3816559102876907245"
             try:

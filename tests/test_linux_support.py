@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from platform_patch import patch_flag  # noqa: E402
 from main import (
     discover_linux_steam_roots,
     discover_steam_game_folders,
@@ -56,7 +57,7 @@ class LinuxSupportTests(unittest.TestCase):
 
     def test_app_data_obeys_xdg_config_home(self):
         with tempfile.TemporaryDirectory() as temp:
-            with patch("main.IS_WIN", False), patch("main.IS_MAC", False), patch("main.IS_LINUX", True), patch.dict(os.environ, {"XDG_CONFIG_HOME": temp}):
+            with patch_flag("IS_WIN", False), patch_flag("IS_MAC", False), patch_flag("IS_LINUX", True), patch.dict(os.environ, {"XDG_CONFIG_HOME": temp}):
                 self.assertEqual(get_app_data_dir(), os.path.join(temp, "geodesync"))
 
     def test_linux_setup_check_explains_missing_proton_executable(self):

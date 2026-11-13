@@ -91,11 +91,11 @@ def main() -> None:
         metadata = plistlib.load(stream)
     version_match = re.search(
         r'^APP_VERSION\s*=\s*[\"\']([^\"\']+)',
-        (ROOT / "main.py").read_text(),
+        (ROOT / "geodesync" / "core" / "config.py").read_text(),
         re.MULTILINE,
     )
     if not version_match:
-        raise SystemExit("Could not read APP_VERSION from main.py")
+        raise SystemExit("Could not read APP_VERSION from geodesync/core/config.py")
     app_version = version_match.group(1)
     release_ref = os.environ.get("GITHUB_REF_NAME", "")
     if release_ref.startswith("v") and release_ref[1:] != app_version:

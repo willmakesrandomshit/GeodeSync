@@ -8,7 +8,7 @@ from main import GeodeSyncApp, APP_VERSION
 
 class TestV241TabbedUI(unittest.TestCase):
     def test_version_bumped_to_2_4_2(self):
-        self.assertEqual(APP_VERSION, "2.8.0")
+        self.assertEqual(APP_VERSION, "3.0.0")
 
     def test_embedded_store_safe_unpacking(self):
         app = GeodeSyncApp()

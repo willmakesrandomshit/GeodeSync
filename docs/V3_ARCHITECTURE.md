@@ -65,14 +65,19 @@ tests/         one test module per service + parity tests while v2 code still ex
 
 ## 6. Status of this branch (`v3-rewrite`)
 
-Done:
-- Step 1: four core modules (`versioning`, `save_codec`, `integrity`, `archive_safety`) with parity tests.
-- Step 2: the self-update engine (22 functions + size caps) moved verbatim to `geodesync/services/app_update.py`; the silent-process helpers now come from `geodesync/platform/process_manager.py` (which gained `is_win_process_running`). `main.py` re-exports both, so it shrank from 11,937 to ~11,290 lines with no behaviour change. `tests/test_v3_update_engine.py` pins one implementation (identity checks), constant parity with `geodesync.core.config`, and that the engine imports with Tk blocked.
-- Step 7 (partial): `GeodeSync.pyw` is now a 14-line launcher that runs `main.py`, ending the hand-synced byte-identical copy.
-- Verified: 175 tests pass; a PyInstaller arm64 macOS build bundles `geodesync.services.app_update` and launches.
+Done (v3.0.0 candidate):
+- Step 1: pure core modules with parity tests (`versioning`, `save_codec`, `integrity`, `archive_safety`).
+- Step 2: self-update engine in `geodesync/services/app_update.py`.
+- Step 3: Steam/macOS helpers in `geodesync/platform/steam.py`; transactional installer (journal, rollback, crash recovery) in `geodesync/services/install_transaction.py`; OS helpers in `geodesync/platform/system.py`; Geode install in `geodesync/services/geode_install.py`.
+- Step 4: `GDManager` split into six mixins under `geodesync/services/gd/` (`steam`, `game`, `mods`, `assets`, `saves`, `demonlist`) plus a `manager.py` facade, moved verbatim.
+- Step 5: diagnostics in `geodesync/services/diagnostics.py`.
+- Step 6: the Tk window moved verbatim to `geodesync/ui/app.py` (widgets in `ui/components.py`, colours in `core/theme.py`, aliased from `ui/theme.py`). A redesign is intentionally not part of 3.0.
+- Step 7: `main.py` is a launcher (about 200 lines, mostly re-exports for v2.8.0 imports); `geodesync.app.run()` is the entry point; `GeodeSync.pyw` just runs `main.py`. Version is 3.0.0 (`geodesync/core/config.py`); build scripts and the macOS workflow read it from there.
+- Enforced by tests: services/core/platform never import Tk or the UI; every logic module imports with tkinter blocked.
+- Verified: 190 tests pass; the Tk app opens and closes cleanly from source; a PyInstaller arm64 macOS build (version 3.0.0) passes `codesign --verify --deep --strict` and stays running when launched.
 
-- Step 3 (partial): Steam/macOS app helpers moved to `geodesync/platform/steam.py` and the transactional installer (journal, rollback, crash recovery) to `geodesync/services/install_transaction.py`; main re-exports both; 181 tests pass.
+Not verified here (no hardware): Windows and Linux builds, and a real Steam depot switch on a machine with Geometry Dash. Run the real-machine smoke checklist before releasing.
 
-- Step 5: diagnostics (`explain_error_text`, `scan_installation_issues`, PE/image checks, disk/VC++/OneDrive checks) moved to `geodesync/services/diagnostics.py`; no Tk imports; 185 tests pass.
+Release steps (not done, need the owner): merge `v3-rewrite`, bump `version.json` (`app_version` is still 2.8.0 on purpose, because installed apps read it from `main` and would be offered an update), tag `v3.0.0`, let CI build and sign, publish `release_notes_v300.md`.
 
-Not done: the GDManager split into game/Geode/mod/save services (step 4) and the UI shell (step 6) (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.
+Remaining cleanup (optional): `geodesync/services/update_service.py` is an older duplicate of `app_update.py`; the re-export list in `main.py` can shrink as the v2.8.0 tests are rewritten to import from the package.

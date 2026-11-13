@@ -9,6 +9,7 @@ import zipfile
 from types import SimpleNamespace
 from unittest import mock
 
+from platform_patch import patch_flag  # noqa: E402
 from main import (
     GDManager,
     GeodeSyncApp,
@@ -177,7 +178,7 @@ class MacGameLaunchTests(unittest.TestCase):
             app = self.make_app(depot)
             manager = GDManager()
             manager.steam_path = root
-            with mock.patch("main.IS_MAC", True), mock.patch.object(manager, "get_depot_path", return_value=depot):
+            with patch_flag("IS_MAC", True), mock.patch.object(manager, "get_depot_path", return_value=depot):
                 self.assertTrue(manager.has_downloaded_depot())
                 with open(os.path.join(app, "Contents", "Info.plist"), "ab") as stream:
                     stream.write(b"<plist><dict/></plist>")
@@ -200,7 +201,7 @@ class MacGameLaunchTests(unittest.TestCase):
                     return path.replace("~/Library/Application Support/Steam", root, 1)
                 return real_expanduser(path)
 
-            with mock.patch("main.IS_MAC", True), mock.patch("main.os.path.expanduser", side_effect=expand_steam_root):
+            with patch_flag("IS_MAC", True), mock.patch("main.os.path.expanduser", side_effect=expand_steam_root):
                 self.assertEqual(manager.get_depot_path(), canonical)
                 self.make_app(canonical)
                 self.assertEqual(manager.get_depot_path(), canonical)
@@ -321,7 +322,7 @@ class SteamManifestRecoveryTests(unittest.TestCase):
                 stream.write("manifest")
             manager = self.make_manager(manifest)
 
-            with mock.patch("main.IS_MAC", True), mock.patch("main.subprocess.run") as run:
+            with patch_flag("IS_MAC", True), mock.patch("main.subprocess.run") as run:
                 manager.set_manifest_locked(True)
                 self.assertTrue(manager.is_manifest_locked())
                 manager.set_manifest_locked(False)
@@ -338,7 +339,7 @@ class SteamManifestRecoveryTests(unittest.TestCase):
                 stream.write("manifest")
             manager = self.make_manager(manifest)
 
-            with mock.patch("main.IS_MAC", True), \
+            with patch_flag("IS_MAC", True), \
                  mock.patch("main.subprocess.run", side_effect=subprocess.CalledProcessError(1, "chflags")), \
                  mock.patch("main.time.sleep"):
                 with self.assertRaises(subprocess.CalledProcessError):
