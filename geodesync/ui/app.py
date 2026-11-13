@@ -57,6 +57,8 @@ class GeodeSyncApp(tk.Tk):
             pass
 
     def __init__(self):
+        from geodesync.ui.linux_text import install as _install_linux_text_guard
+        _install_linux_text_guard()
         super().__init__()
         self.title(f"GeodeSync v{APP_VERSION} • Geometry Dash companion")
         screen_w = self.winfo_screenwidth()
@@ -2171,7 +2173,6 @@ class GeodeSyncApp(tk.Tk):
 
         def add_tool(label, command, *, color=UI["muted"], row, column, bold=False):
             row_bg = groups[row][2]
-            print('ADD_TOOL', ascii(label), flush=True)
             button = tk.Button(
                 tool_grid, text=label, command=command,
                 font=("Segoe UI", 9, "bold" if bold else "normal"),
