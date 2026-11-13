@@ -3,6 +3,7 @@ import unittest
 import tkinter as tk
 from main import GeodeSyncApp
 from geodesync.ui.linux_text import sanitize_text
+from geodesync.ui.components import ModernButton
 
 
 def _shown(names):
@@ -44,7 +45,7 @@ class TestAppInit(unittest.TestCase):
         try:
             widgets = list(self._all_widgets(app))
             labels = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Label)}
-            buttons = {widget.cget("text") for widget in widgets if isinstance(widget, tk.Button)}
+            buttons = {widget.cget("text") for widget in widgets if isinstance(widget, (tk.Button, ModernButton))}
 
             self.assertTrue({"TOOLBOX", "Choose what you want to do", "MODS", "PLAY", "REPAIR", "PREFERENCES", "APP"}.issubset(labels))
             self.assertTrue(_shown({"🧩 Mod Manager", "💾 Backup Saves", "🩹 Crash Doctor"}).issubset(buttons))
