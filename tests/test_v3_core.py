@@ -67,7 +67,10 @@ def make_zip(entries, symlink=None):
 class ArchiveSafety(unittest.TestCase):
     def test_rejects_unsafe_members(self):
         with tempfile.TemporaryDirectory() as d:
-            for name in ("../evil.dll", "/abs.dll", "a/../../b", "CON.txt", "bad:name", "trail.", "x\\y"):
+            names = ["../evil.dll", "/abs.dll", "a/../../b", "CON.txt", "bad:name", "trail."]
+            if os.sep == "/":
+                names.append("x\\y")  # on Windows zipfile turns a backslash into a folder separator, so it is a normal path there
+            for name in names:
                 with self.assertRaises(ValueError, msg=name):
                     archive_safety.validate_package(make_zip({name: b"x"}), d)
             with self.assertRaises(ValueError):
