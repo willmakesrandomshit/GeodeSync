@@ -73,7 +73,6 @@ class TestAppInit(unittest.TestCase):
             self.assertEqual(app.sidebar.winfo_manager(), "pack")
 
             app.switch_main_tab("tools")
-            app.update_idletasks()
 
             self.assertEqual(app.section_heading.cget("text"), "Tools & repair")
             self.assertIn("diagnose", app.section_caption.cget("text").lower())
