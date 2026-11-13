@@ -171,7 +171,7 @@ class TroubleshooterTests(unittest.TestCase):
     def test_windows_scan_reports_damaged_game_dll_with_safe_fix(self):
         with tempfile.TemporaryDirectory() as temp:
             manager = SimpleNamespace(steam_path=temp, gd_path=temp)
-            with patch("main.validate_windows_game_images", return_value="DLL 'libcrypto-3-x64.dll' is damaged"):
+            with patch("geodesync.services.diagnostics.validate_windows_game_images", return_value="DLL 'libcrypto-3-x64.dll' is damaged"):
                 findings = scan_installation_issues(manager, is_windows=True, is_macos=False)
         finding = next(item for item in findings if "Windows game file" in item["title"])
         self.assertIn("libcrypto-3-x64.dll", finding["detail"])

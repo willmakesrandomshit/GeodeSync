@@ -73,4 +73,6 @@ Done:
 
 - Step 3 (partial): Steam/macOS app helpers moved to `geodesync/platform/steam.py` and the transactional installer (journal, rollback, crash recovery) to `geodesync/services/install_transaction.py`; main re-exports both; 181 tests pass.
 
-Not done: GDManager services, diagnostics and the UI shell (steps 4-6) (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.
+- Step 5: diagnostics (`explain_error_text`, `scan_installation_issues`, PE/image checks, disk/VC++/OneDrive checks) moved to `geodesync/services/diagnostics.py`; no Tk imports; 185 tests pass.
+
+Not done: the GDManager split into game/Geode/mod/save services (step 4) and the UI shell (step 6) (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.
