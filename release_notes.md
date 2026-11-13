@@ -1,30 +1,19 @@
-# GeodeSync v2.8.0 — The 100x Ultimate Companion Upgrade
+# GeodeSync v3.0.0 — Rebuilt foundation
 
-GeodeSync v2.8.0 is a milestone release delivering game-changing reliability, zero-data-loss protection, real-time cloud announcements, and comprehensive security hardening for all Geometry Dash and Geode players.
+v3.0.0 is the same GeodeSync you know, rebuilt on a cleaner foundation so it breaks less and is easier to fix. There are no new buttons in this release: the goal was to keep every v2.8.0 behaviour while making the code testable and safe to change.
 
-## What's New in v2.8.0
+## What changed under the hood
+- `main.py` is now a small launcher. The 11,000-line single file is split into a `geodesync` package: `core` (pure logic), `platform` (OS and Steam adapters), `services` (game, Geode, mods, saves, assets, updates, diagnostics) and `ui` (the Tk window).
+- The self-update engine, the transactional depot installer (journal and rollback), Steam discovery and the installation diagnostics are separate modules with their own tests, and none of them import the UI.
+- `GDManager` is a thin facade over six domain services (Steam, game, mods, assets, saves, demon list).
+- `GeodeSync.pyw` no longer keeps a hand-synced copy of the code; it just runs `main.py`.
+- 185 automated tests pass, including parity tests against the v2.8.0 behaviour.
 
-### 🛡️ 1. Zero-Loss Game Exit Auto-Save Snapshot
-- **Automatic Game Exit Detection**: GeodeSync continuously monitors Geometry Dash in the background without spawning any console windows.
-- **Instant Save Preservation**: The exact moment you close Geometry Dash, GeodeSync waits for file write buffers to settle and silently creates an atomic, timestamped backup snapshot of both `CCGameManager.dat` and `CCLocalLevels.dat`.
-- **Pre-Launch Guard**: Automatically takes a pre-launch snapshot before launching the game, guaranteeing that even if a crash occurs during a session, your previous stars, demons, coins, and custom levels are 100% safeguarded.
+## What did not change
+- Same trust model: official GitHub Releases only, digest-checked downloads, no OS-warning bypasses.
+- Same Steam depot switching, Geode install, mod, save and texture features.
+- macOS builds stay withheld until they are signed and notarised.
 
-### 📢 2. Live In-App Cloud Announcement System
-- **No Webhook Required**: Directly connects players to official announcements via GitHub's distributed raw CDN.
-- **Dismissible Announcement Banner**: Instant notification banner right under the dashboard header for breaking news, Geometry Dash updates, and Geode compatibility alerts.
-- **Zero Rate Limits**: 100% resilient across all network conditions.
-
-### ⚡ 3. Ultra-Low Latency Game Booster
-- Launches Geometry Dash with `HIGH_PRIORITY_CLASS` on Windows to minimize micro-stuttering, frame drops, and input latency.
-- Auto-quarantines known incompatible mods (such as `ImagePlus 1.1.1` on GD 2.2081) to eliminate Windows DLL Entry Point startup crashes.
-
-### 🔒 4. Forensic Security Guardian & Secret Hardening
-- **Automated Security Guardian**: Integrates pre-flight secret scanner that strictly prevents tokens, webhooks, or private keys from ever being exposed.
-- **Strict Endpoint Verification**: Only verified Discord endpoints (`https://discord.com/api/webhooks/`) are permitted for outbound webhooks.
-- **Universal Mention Blocker**: Outbound payloads enforce strict mention suppression (`"allowed_mentions": {"parse": []}`) to prevent unauthorized pings.
-
-### 📦 Verified Release Packages
-- **Windows**: `GeodeSync-v2.8.0-Windows.zip` & `GeodeSync-Windows.zip` (standalone `GeodeSync.exe`)
-- **Linux**: `GeodeSync-v2.8.0-Linux.tar.gz` & `GeodeSync-Linux.tar.gz`
-- **macOS**: `GeodeSync-macOS-arm64.zip` & `GeodeSync-macOS-x86_64.zip`
-- **Integrity**: SHA-256 digests in `SHA256SUMS.txt`.
+## Known limits
+- The UI is still the v2.8.0 Tk window, moved as-is into `geodesync/ui/app.py`. A redesign is future work.
+- The single-file build scripts and CI workflows still target `main.py` as the entry point.
