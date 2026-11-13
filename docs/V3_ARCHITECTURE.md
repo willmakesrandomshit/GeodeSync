@@ -71,4 +71,6 @@ Done:
 - Step 7 (partial): `GeodeSync.pyw` is now a 14-line launcher that runs `main.py`, ending the hand-synced byte-identical copy.
 - Verified: 175 tests pass; a PyInstaller arm64 macOS build bundles `geodesync.services.app_update` and launches.
 
-Not done: steps 3-6 (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.
+- Step 3 (partial): Steam/macOS app helpers moved to `geodesync/platform/steam.py` and the transactional installer (journal, rollback, crash recovery) to `geodesync/services/install_transaction.py`; main re-exports both; 181 tests pass.
+
+Not done: GDManager services, diagnostics and the UI shell (steps 4-6) (Steam/depot platform layer, GDManager services, diagnostics, UI shell) and the remaining half of step 7. `geodesync/services/update_service.py` is an older parallel rewrite still used by `test_phoenix_services.py`; it should become a thin wrapper over `app_update` or be deleted. No release, tag or push has been made.
